@@ -115,8 +115,8 @@ fn life_needs_summary_matches_the_market_snapshot() {
             }
             let s = report.life_needs;
             assert_eq!((s.people, s.deprived, s.weighted_raw), (people, deprived, weighted), "seed {seed} day {day}");
-            // Militancy only changes at month end (skipped above), so the post-tick
-            // column equals what the market saw.
+            // Non-month-end day: militancy didn't change, so the end-of-day summary
+            // equals the column.
             let mil: i128 = sizes
                 .iter()
                 .zip(&world.pops.militancy)

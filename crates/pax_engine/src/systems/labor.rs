@@ -78,3 +78,15 @@ pub fn assign_employment(world: &mut World, pools: &Groups) -> Vec<LabourReport>
     }
     report
 }
+
+/// Unemployment among *worker professions* (D18): `(unemployed, workforce)`
+/// summed over the labour pools of professions some producer type employs.
+/// Owner-only professions are outside the labour force. The single definition,
+/// used by reports and tests.
+pub fn unemployment(defs: &crate::defs::Defs, labour: &[LabourReport]) -> (u64, u64) {
+    let worker = defs.worker_professions();
+    labour
+        .iter()
+        .filter(|p| worker[p.profession as usize])
+        .fold((0, 0), |(u, w), p| (u + p.unemployed(), w + p.workforce))
+}
