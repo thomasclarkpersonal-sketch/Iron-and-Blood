@@ -13,8 +13,13 @@
 //!   professions that some producer type employs; owner professions are
 //!   outside the labour force.
 //! * **Wage share:** wages ÷ (wages + dividends) paid during the period.
-//! * **Life needs:** population-weighted mean `life_needs`, and the share of
-//!   people whose subsistence was not fully met, at period end.
+//! * **Life needs:** mean `life_needs` from the period's last market day, weighted
+//!   by POP sizes *at that market* (before any month-end demographics that day),
+//!   and the share of those people whose subsistence was not fully met.
+//!   `population` is the end-of-period population, after demographics.
+//!
+//! If day 1 traded nothing, there is no base basket and the price index and real
+//! GDP print as `n/a` rather than a made-up 100.
 
 use std::process::ExitCode;
 
@@ -40,7 +45,9 @@ pub fn run(mut world: World, days: u64, every: u64) -> Result<ExitCode, String> 
 
     let mut base: Option<(Vec<f64>, f64)> = None; // (basket q0, Σ p0 q0)
     let (mut spending, mut wages, mut dividends, mut n) = (0.0, 0.0, 0.0, 0u64);
-    for _ in 0..days {
+    for day0 in 0..days {
+        // Sizes as the market saw them: month-end demographics run after the market.
+        let market_sizes = crate::is_report_day(day0, every, days).then(|| world.pops.size.clone());
         let report: DayReport = step(&mut world);
         if base.is_none() {
             let basket: Vec<f64> = report.goods.iter().map(|g| f(g.traded)).collect();
@@ -52,16 +59,17 @@ pub fn run(mut world: World, days: u64, every: u64) -> Result<ExitCode, String> 
         dividends += f(report.payouts.dividends);
         n += 1;
 
+        let Some(market_sizes) = market_sizes else { continue };
         let day = report.day + 1;
-        if !day.is_multiple_of(every) && day != days {
-            continue;
-        }
 
         let (basket, base_value) = base.as_ref().expect("set on day 1");
-        let index =
-            if *base_value > 0.0 { basket_value(&world.markets.price, basket) / base_value * 100.0 } else { 100.0 };
         let gdp = spending / n as f64;
-        let real_gdp = if index > 0.0 { gdp / index * 100.0 } else { 0.0 };
+        let (index, real_gdp) = if *base_value > 0.0 {
+            let index = basket_value(&world.markets.price, basket) / base_value * 100.0;
+            (format!("{index:.1}"), format!("{:.2}", gdp / index * 100.0))
+        } else {
+            ("n/a".to_string(), "n/a".to_string())
+        };
 
         let (mut workforce, mut unemployed) = (0u64, 0u64);
         for pool in report.labour.iter().filter(|p| worker_professions[p.profession as usize]) {
@@ -72,21 +80,22 @@ pub fn run(mut world: World, days: u64, every: u64) -> Result<ExitCode, String> 
         let wage_share = if wages + dividends > 0.0 { wages / (wages + dividends) * 100.0 } else { 0.0 };
 
         let population = world.population();
-        let (mut weighted_life, mut deprived) = (0.0, 0u64);
-        for (&size, &life) in world.pops.size.iter().zip(&world.pops.life_needs) {
+        let (mut weighted_life, mut deprived, mut consumers) = (0.0, 0u64, 0u64);
+        for (&size, &life) in market_sizes.iter().zip(&world.pops.life_needs) {
             weighted_life += size as f64 * f(life);
+            consumers += size as u64;
             if life < Fixed::ONE {
                 deprived += size as u64;
             }
         }
-        let (life_mean, deprived_pct) = if population > 0 {
-            (weighted_life / population as f64, deprived as f64 / population as f64 * 100.0)
+        let (life_mean, deprived_pct) = if consumers > 0 {
+            (weighted_life / consumers as f64, deprived as f64 / consumers as f64 * 100.0)
         } else {
             (0.0, 0.0)
         };
 
         println!(
-            "{day:>5} {population:>10} {gdp:>12.2} {index:>9.1} {real_gdp:>12.2} {unemployment:>8.1} {wage_share:>8.1} {life_mean:>10.3} {deprived_pct:>9.1}"
+            "{day:>5} {population:>10} {gdp:>12.2} {index:>9} {real_gdp:>12} {unemployment:>8.1} {wage_share:>8.1} {life_mean:>10.3} {deprived_pct:>9.1}"
         );
         (spending, wages, dividends, n) = (0.0, 0.0, 0.0, 0);
     }
@@ -102,6 +111,13 @@ mod tests {
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/mini_valley");
         let world = pax_data::load_scenario(&dir).expect("scenario loads").world;
         assert_eq!(run(world, 40, 20).unwrap(), ExitCode::SUCCESS);
+    }
+
+    #[test]
+    fn report_days() {
+        assert!(crate::is_report_day(29, 30, 100));
+        assert!(!crate::is_report_day(30, 30, 100));
+        assert!(crate::is_report_day(99, 30, 100), "the last day always reports");
     }
 
     #[test]

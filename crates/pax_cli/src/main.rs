@@ -114,7 +114,7 @@ fn run(mut world: World, days: u64, every: u64) -> Result<ExitCode, String> {
     println!();
     for _ in 0..days {
         let report = step(&mut world);
-        if !(report.day + 1).is_multiple_of(every) && report.day + 1 != days {
+        if !is_report_day(report.day, every, days) {
             continue;
         }
         print!("{:>5} {:>10} {:>14}", report.day + 1, world.population(), short(report.total_money, 2));
@@ -164,6 +164,12 @@ fn bench(mut world: World, days: u64, scale: u32) -> Result<ExitCode, String> {
         rayon::current_num_threads()
     );
     Ok(ExitCode::SUCCESS)
+}
+
+/// True if 0-based `day` ends a reporting period of `every` days, or is the last
+/// of `days`. Shared by `run` and `report` so their rows line up.
+pub(crate) fn is_report_day(day: u64, every: u64, days: u64) -> bool {
+    (day + 1).is_multiple_of(every) || day + 1 == days
 }
 
 /// Formats a Fixed with `decimals` places (display only).

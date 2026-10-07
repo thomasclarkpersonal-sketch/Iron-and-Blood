@@ -64,7 +64,7 @@ pub fn step(world: &mut World) -> DayReport {
     world.day += 1;
     DayReport {
         day,
-        input_spending: outcome.input_cost.iter().copied().sum(),
+        input_spending: outcome.input_spending,
         household_spending: outcome.household_spending,
         goods: outcome.goods,
         iterations: outcome.iterations,
