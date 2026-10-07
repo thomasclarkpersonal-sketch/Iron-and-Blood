@@ -70,7 +70,7 @@ These need no further design decisions:
 | ID | Task | Notes |
 |---|---|---|
 | N1 | Make `pax_cli bench --scale` create distinct identities (e.g. extra provinces), so month-end compaction doesn't merge the copies back | Today `--scale` rows collapse after day 29; use `--regions` meanwhile |
-| N2 | `DayReport` militancy summary (like `LifeNeedsSummary`) so the CLI stops reading raw columns | Critic suggestion on #22 |
+| N2 | ✅ `DayReport` militancy summary so the CLI stops reading raw columns | Done: `MilitancySummary`, tallied in the settlement pass at no extra cost |
 | N3 | Profile and optimise `firms` at large producer counts (per-market subsistence cost is recomputed every day) | ~2.3 ms at 36k producers |
 | N4 | Content: a third state and more consumer goods, with a 20-year stability check | Data only |
 | N5 | ✅ Pin `two_states` 20-year aggregates as a regression test, not just stability | Done: `pax_data/tests/economic_bands.rs` checks GDP, unemployment, tax take, life needs, militancy and population bands |

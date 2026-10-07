@@ -65,9 +65,7 @@ fn two_states_year_20_aggregates_stay_in_band() {
 
     // Militancy: population-weighted mean 0.10..0.15 (tax-driven equilibrium ≈ 0.12).
     let population = world.population();
-    let weighted: i128 =
-        world.pops.size.iter().zip(&world.pops.militancy).map(|(&n, &m)| n as i128 * m.raw() as i128).sum();
-    let militancy = Fixed::from_raw((weighted / population as i128) as i64);
+    let militancy = last.militancy.mean().expect("people at market");
     assert!(
         militancy >= Fixed::ratio(10, 100) && militancy <= Fixed::ratio(15, 100),
         "militancy {militancy} outside [0.10, 0.15]"
