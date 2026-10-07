@@ -61,6 +61,7 @@ Start with **[Design Decisions](docs/DECISIONS.md)**: it is binding and wins ove
 * [Macroeconomics](docs/MACROECONOMICS.md): money, banking, stability.
 * [Politics & State](docs/POLITICS_SYSTEM.md): fiscal policy, taxation, interest groups, and reforms.
 * [Map & Logistics](docs/MAP_AND_LOGISTICS.md): geography, iceberg transport costs, and migration.
+* [Investment and capacity growth (proposal)](docs/INVESTMENT.md): the M2 design for producer expansion, awaiting review.
 * [Military & Supply](docs/MILITARY_SYSTEM.md): mobilization shocks and war debt.
 * Research notes: [Victoria 2 economy redesign](docs/research/victoria_2_economy_redesign.md), [reference textbook summaries](docs/research/economic_textbooks_summary.md).
 * [Contributing](CONTRIBUTING.md) and [AGENTS.md](AGENTS.md): rules for humans and AI agents.
