@@ -127,7 +127,7 @@ rate = 2
     let all = pax_data::parse_commands(&world, text).expect_err("must fail").messages.join("\n");
     assert!(all.contains("unknown nation 'atlantis'"), "{all}");
     assert!(all.contains("unknown type 'declare_war'"), "{all}");
-    assert!(all.contains("rate must be in [0, 1]"), "{all}");
+    assert!(all.contains("outside [0, 1]"), "{all}");
 }
 
 #[test]
@@ -137,5 +137,5 @@ fn consumption_commands_need_a_basket_at_load() {
     world.nations.basket.fill(pax_engine::Fixed::ZERO);
     let text = "[[command]]\nday = 1\ntype = \"set_consumption_rate\"\nnation = \"lowland_kingdom\"\nrate = 0.1\n";
     let err = pax_data::parse_commands(&world, text).expect_err("must fail");
-    assert!(err.messages[0].contains("no consumption basket"), "{err}");
+    assert!(err.messages[0].contains("has no consumption basket"), "{err}");
 }

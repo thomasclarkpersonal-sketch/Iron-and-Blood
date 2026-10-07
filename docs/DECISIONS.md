@@ -199,7 +199,8 @@ All parsing lives in `pax_data`, so the format can change without touching the e
 ## D11. Determinism harness and golden files
 
 - `tick::run` returns a stable FNV-1a hash of all state after each day (`World::state_hash`). It does not use `DefaultHasher`, which is not stable across Rust versions.
-- `scenarios/*/golden.hashes` pins one year of hashes. CI runs `pax_cli verify` at 1 and 4 threads on Linux, and on Windows and macOS.
+- `scenarios/*/golden.hashes` pins **at least one year** of hashes, and for scenarios with a command log (D21) **at least past the last logged command**. A test enforces this. `two_states` pins 730 days.
+- `pax_cli record` keeps an existing golden file's length unless `--days` is given, so re-recording never silently drops coverage. CI runs `pax_cli verify` at 1 and 4 threads on Linux, and on Windows and macOS.
 - Tests also check: same input gives same hashes; results are identical at 1/2/3/8 threads; resuming from a snapshot matches a continuous run.
 - **Any change that alters simulation results must re-record the golden file in the same PR**, and say so in the description. Unexpected golden diffs are bugs.
 

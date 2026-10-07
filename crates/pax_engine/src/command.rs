@@ -45,8 +45,10 @@ impl fmt::Display for CommandError {
 impl std::error::Error for CommandError {}
 
 impl World {
-    /// Validates and applies one command. On error nothing changes.
-    pub fn apply(&mut self, command: Command) -> Result<(), CommandError> {
+    /// Checks a command against the current state without applying it: the
+    /// single definition of command validity, used by [`World::apply`] and by
+    /// loaders validating command logs.
+    pub fn validate(&self, command: Command) -> Result<(), CommandError> {
         let (nation, rate) = match command {
             Command::SetIncomeTax { nation, rate }
             | Command::SetTransferRate { nation, rate }
@@ -58,18 +60,24 @@ impl World {
         if rate < Fixed::ZERO || rate > Fixed::ONE {
             return Err(CommandError::RateOutOfRange(rate));
         }
+        if let Command::SetConsumptionRate { .. } = command {
+            let goods = self.defs.good_count();
+            let basket = &self.nations.basket[nation * goods..(nation + 1) * goods];
+            if rate.is_positive() && !basket.iter().any(|w| w.is_positive()) {
+                return Err(CommandError::NoBasket(nation));
+            }
+        }
+        Ok(())
+    }
+
+    /// Validates and applies one command. On error nothing changes.
+    pub fn apply(&mut self, command: Command) -> Result<(), CommandError> {
+        self.validate(command)?;
         let n = &mut self.nations;
         match command {
-            Command::SetIncomeTax { .. } => n.income_tax_rate[nation] = rate,
-            Command::SetTransferRate { .. } => n.transfer_rate[nation] = rate,
-            Command::SetConsumptionRate { .. } => {
-                let goods = self.defs.good_count();
-                if rate.is_positive() && !n.basket[nation * goods..(nation + 1) * goods].iter().any(|w| w.is_positive())
-                {
-                    return Err(CommandError::NoBasket(nation));
-                }
-                n.consumption_rate[nation] = rate;
-            }
+            Command::SetIncomeTax { nation, rate } => n.income_tax_rate[nation] = rate,
+            Command::SetTransferRate { nation, rate } => n.transfer_rate[nation] = rate,
+            Command::SetConsumptionRate { nation, rate } => n.consumption_rate[nation] = rate,
         }
         Ok(())
     }

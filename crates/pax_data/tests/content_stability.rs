@@ -30,8 +30,8 @@ fn two_states_is_stable() {
     let mut traded_recently = vec![false; world.geography.market_count() * goods];
     let mut last = None;
     for day in 0..days {
-        let (report, outcome) = pax_data::step_logged(&mut world, &commands);
-        outcome.unwrap_or_else(|e| panic!("{e}"));
+        let (report, rejected) = pax_data::step_logged(&mut world, &commands);
+        assert!(rejected.is_empty(), "day {day}: logged commands rejected: {rejected:?}");
         if day + 30 >= days {
             for (seen, g) in traded_recently.iter_mut().zip(&report.goods) {
                 *seen |= g.traded.is_positive();

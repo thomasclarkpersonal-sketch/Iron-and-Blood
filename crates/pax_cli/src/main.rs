@@ -236,9 +236,10 @@ fn replicate(base: &World, scale: u32, regions: u32) -> World {
 /// Advances one day through the shared replay step (`pax_data::step_logged`).
 /// A rejected logged command is reported on stderr; the day has still run.
 pub(crate) fn tick(world: &mut World, log: &CommandLog) -> DayReport {
-    let (report, outcome) = pax_data::step_logged(world, log);
-    if let Err(e) = outcome {
-        eprintln!("warning: {e}");
+    let day = world.day;
+    let (report, rejected) = pax_data::step_logged(world, log);
+    for (command, error) in rejected {
+        eprintln!("warning: command {command:?} on day {day} rejected: {error}");
     }
     report
 }
