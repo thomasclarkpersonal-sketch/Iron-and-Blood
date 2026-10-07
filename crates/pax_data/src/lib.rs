@@ -127,7 +127,15 @@ pub fn parse_commands(world: &World, text: &str) -> Result<CommandLog, LoadError
         let command = match c.kind.as_str() {
             "set_income_tax" => Command::SetIncomeTax { nation, rate },
             "set_transfer_rate" => Command::SetTransferRate { nation, rate },
-            "set_consumption_rate" => Command::SetConsumptionRate { nation, rate },
+            "set_consumption_rate" => {
+                let goods = world.defs.good_count();
+                let has_basket =
+                    world.nations.basket[nation * goods..(nation + 1) * goods].iter().any(|w| w.is_positive());
+                errors.check(rate.is_zero() || has_basket, || {
+                    format!("{ctx}: nation '{}' has no consumption basket", c.nation)
+                });
+                Command::SetConsumptionRate { nation, rate }
+            }
             other => {
                 errors.0.push(format!(
                     "{ctx}: unknown type '{other}' (expected set_income_tax, set_transfer_rate or set_consumption_rate)"
@@ -489,23 +497,30 @@ fn build_world(defs: Arc<Defs>, s: &ScenarioFile) -> Result<World, LoadError> {
     Ok(world)
 }
 
-/// Runs `days` ticks applying `log`'s commands, returning the state hash after
-/// each day: the determinism harness for scenarios with command logs (D11, D21).
+/// Advances one day, applying `log`'s commands for that day: the single
+/// replay step used by `pax_cli` and by tests (D21).
 ///
-/// # Panics
-/// If a logged command is rejected. A logged command is part of the game, so a
-/// rejection means the log and the scenario disagree.
-pub fn run_logged(world: &mut World, log: &CommandLog, days: u64) -> Vec<u64> {
+/// Returns the day's report and whether every command was accepted. Logs are
+/// validated when loaded, so a rejection means the log and the world disagree.
+/// The day runs either way, so callers decide whether that is fatal.
+pub fn step_logged(world: &mut World, log: &CommandLog) -> (pax_engine::DayReport, Result<(), String>) {
+    let day = world.day;
+    let (report, results) = pax_engine::tick::step_with(world, log.for_day(day));
+    let outcome = match results.into_iter().find_map(Result::err) {
+        Some(e) => Err(format!("command on day {day} rejected: {e}")),
+        None => Ok(()),
+    };
+    (report, outcome)
+}
+
+/// Runs `days` ticks with [`step_logged`], returning the state hash after each
+/// day: the determinism harness for scenarios with command logs (D11, D21).
+/// Stops at the first rejected command.
+pub fn run_logged(world: &mut World, log: &CommandLog, days: u64) -> Result<Vec<u64>, String> {
     (0..days)
         .map(|_| {
-            let day = world.day;
-            let (_, results) = pax_engine::tick::step_with(world, log.for_day(day));
-            for r in results {
-                if let Err(e) = r {
-                    panic!("command on day {day} rejected: {e}");
-                }
-            }
-            world.state_hash()
+            step_logged(world, log).1?;
+            Ok(world.state_hash())
         })
         .collect()
 }

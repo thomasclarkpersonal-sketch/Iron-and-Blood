@@ -2,7 +2,7 @@
 //!
 //! ```text
 //! pax_cli run    <scenario-dir> [--days N] [--every K] [--market KEY]
-//! pax_cli record <scenario-dir> [--days N]      # write <scenario-dir>/golden.hashes
+//! pax_cli record <scenario-dir> [--days N]      # write <scenario-dir>/golden.hashes (keeps the existing length)
 //! pax_cli verify <scenario-dir> [--threads T]   # replay and compare with golden.hashes
 //! pax_cli bench  <scenario-dir> [--days N] [--scale K] [--regions R] [--threads T]
 //!     (--scale copies POP rows with identical identities, which month-end
@@ -92,9 +92,12 @@ fn dispatch(args: &Args) -> Result<ExitCode, String> {
     match args.command.as_str() {
         "run" => run(scenario.world, &scenario.commands, args.days.unwrap_or(365), args.every, args.market.as_deref()),
         "record" => {
-            let days = args.days.unwrap_or(golden::DEFAULT_DAYS);
+            // Re-recording keeps the existing file's length (e.g. two_states pins
+            // 730 days so its whole command log is covered) unless --days says otherwise.
+            let existing = golden::read(&golden_path(&args.scenario)).map(|h| h.len() as u64).ok();
+            let days = args.days.or(existing).unwrap_or(golden::DEFAULT_DAYS);
             let mut world = scenario.world;
-            let hashes = pax_data::run_logged(&mut world, &scenario.commands, days);
+            let hashes = pax_data::run_logged(&mut world, &scenario.commands, days)?;
             let path = golden_path(&args.scenario);
             golden::write(&path, &scenario.name, &hashes).map_err(|e| format!("{}: {e}", path.display()))?;
             println!("recorded {days} day hashes to {}", path.display());
@@ -230,13 +233,12 @@ fn replicate(base: &World, scale: u32, regions: u32) -> World {
     world
 }
 
-/// Advances one day, applying the command log's commands for that day (D21).
-/// A rejected command is reported on stderr, and the day still runs.
+/// Advances one day through the shared replay step (`pax_data::step_logged`).
+/// A rejected logged command is reported on stderr; the day has still run.
 pub(crate) fn tick(world: &mut World, log: &CommandLog) -> DayReport {
-    let day = world.day;
-    let (report, results) = pax_engine::tick::step_with(world, log.for_day(day));
-    for e in results.into_iter().filter_map(Result::err) {
-        eprintln!("warning: command on day {day} rejected: {e}");
+    let (report, outcome) = pax_data::step_logged(world, log);
+    if let Err(e) = outcome {
+        eprintln!("warning: {e}");
     }
     report
 }

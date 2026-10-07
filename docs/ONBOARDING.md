@@ -108,7 +108,7 @@ The compiler walks you through it. `Pops` is destructured exhaustively in `World
 
 ## 6. Determinism and golden hashes
 
-Every scenario pins a year of state hashes in `golden.hashes`, verified in CI on Linux, Windows and macOS at 1 and 4 threads.
+Every scenario pins state hashes in `golden.hashes` (a year for `mini_valley`; 730 days for `two_states`, which covers its whole command log). They're verified in CI on Linux, Windows and macOS at 1 and 4 threads. `record` keeps a file's existing length.
 - **If you meant to change results,** re-record both scenarios and say so in the PR:
 
   ```bash
