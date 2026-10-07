@@ -115,6 +115,19 @@ fn life_needs_summary_matches_the_market_snapshot() {
             }
             let s = report.life_needs;
             assert_eq!((s.people, s.deprived, s.weighted_raw), (people, deprived, weighted), "seed {seed} day {day}");
+            // Militancy only changes at month end (skipped above), so the post-tick
+            // column equals what the market saw.
+            let mil: i128 = sizes
+                .iter()
+                .zip(&world.pops.militancy)
+                .filter(|(n, _)| **n > 0)
+                .map(|(&n, m)| n as i128 * m.raw() as i128)
+                .sum();
+            assert_eq!(
+                (report.militancy.people, report.militancy.weighted_raw),
+                (people, mil),
+                "seed {seed} day {day}"
+            );
         }
     }
 }

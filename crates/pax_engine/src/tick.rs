@@ -22,7 +22,7 @@ use crate::command::{Command, CommandError};
 use crate::fixed::Fixed;
 use crate::systems::firms::Payouts;
 use crate::systems::labor::LabourReport;
-use crate::systems::market::{GoodReport, LifeNeedsSummary};
+use crate::systems::market::{GoodReport, LifeNeedsSummary, MilitancySummary};
 use crate::systems::{demographics, firms, government, labor, market, mobility, politics, production};
 use crate::world::World;
 
@@ -45,6 +45,8 @@ pub struct DayReport {
     pub payouts: Payouts,
     /// Life-needs coverage at today's market.
     pub life_needs: LifeNeedsSummary,
+    /// Militancy as today's market saw it (before any month-end update).
+    pub militancy: MilitancySummary,
     /// Paid from treasuries to POPs today (D15).
     pub transfers: Fixed,
     /// Paid from treasuries for government consumption today (D16).
@@ -107,6 +109,7 @@ fn step_systems(world: &mut World) -> DayReport {
         input_spending: outcome.input_spending,
         household_spending: outcome.household_spending,
         life_needs: outcome.life_needs,
+        militancy: outcome.militancy,
         transfers,
         government_spending: outcome.government_spending,
         moved,

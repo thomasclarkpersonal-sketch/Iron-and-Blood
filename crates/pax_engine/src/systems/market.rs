@@ -69,8 +69,33 @@ pub struct MarketOutcome {
     pub input_spending: Fixed,
     /// Life-needs coverage at this market, weighted by the sizes the market saw.
     pub life_needs: LifeNeedsSummary,
+    /// Militancy as the market saw it.
+    pub militancy: MilitancySummary,
     /// Paid from treasuries for government consumption (D16).
     pub government_spending: Fixed,
+}
+
+/// Population-weighted militancy as the market saw it: before any month-end
+/// politics update that day (diagnostics, D19).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct MilitancySummary {
+    /// People in POPs that took part in the market.
+    pub people: u64,
+    /// `Σ size × militancy`, in raw `Fixed` units.
+    pub weighted_raw: i128,
+}
+
+impl MilitancySummary {
+    /// Population-weighted mean militancy; `None` if nobody took part.
+    pub fn mean(&self) -> Option<Fixed> {
+        (self.people > 0).then(|| Fixed::from_raw((self.weighted_raw / self.people as i128) as i64))
+    }
+
+    fn add(mut self, other: MilitancySummary) -> MilitancySummary {
+        self.people += other.people;
+        self.weighted_raw += other.weighted_raw;
+        self
+    }
 }
 
 /// Life-needs coverage across all POPs at today's market (diagnostics).
@@ -455,8 +480,9 @@ fn market_demand(
     consumers: &[ConsumerAggregate],
     orders: &[BuyOrder],
     scratch: &mut [Fixed],
-) -> Vec<Fixed> {
-    let mut demand = vec![Fixed::ZERO; prices.len()];
+    demand: &mut [Fixed],
+) {
+    demand.fill(Fixed::ZERO);
     for (prof, agg) in defs.professions.iter().zip(consumers) {
         let cost = prof.subsistence_cost(prices);
         for (comfortable, size, budget) in
@@ -474,7 +500,6 @@ fn market_demand(
     for o in orders {
         demand[o.good] += o.demand(prices[o.good]);
     }
-    demand
 }
 
 /// Normalised excess demand `(D − S) / (D + S)`, defined as 0 when both are 0.
@@ -484,12 +509,11 @@ fn excess(demand: Fixed, supply: Fixed) -> Fixed {
 }
 
 /// Total quantity offered per good at `prices`.
-fn market_supply(prices: &[Fixed], offers: &[SellOffer]) -> Vec<Fixed> {
-    let mut supply = vec![Fixed::ZERO; prices.len()];
+fn market_supply(prices: &[Fixed], offers: &[SellOffer], supply: &mut [Fixed]) {
+    supply.fill(Fixed::ZERO);
     for o in offers {
         supply[o.good] += o.supply(prices[o.good]);
     }
-    supply
 }
 
 /// Bounded tâtonnement for one market. Returns the executed prices and the
@@ -512,6 +536,8 @@ fn discover_prices(
     let rules: &MarketRules = &defs.rules.market;
     let mut prices = opening.to_vec();
     let mut scratch = vec![Fixed::ZERO; prices.len()];
+    let (mut demand, mut supply, mut z) =
+        (vec![Fixed::ZERO; prices.len()], vec![Fixed::ZERO; prices.len()], vec![Fixed::ZERO; prices.len()]);
     let mut stock = vec![Fixed::ZERO; prices.len()];
     for o in offers {
         stock[o.good] += o.stock;
@@ -533,9 +559,13 @@ fn discover_prices(
     let decay = Fixed::from_int(rules.step_decay_iterations.max(1) as i64);
     let mut used = 0;
     for k in 0..rules.max_iterations {
-        let demand = market_demand(defs, &prices, consumers, orders, &mut scratch);
-        let supply = market_supply(&prices, offers);
-        let z: Vec<Fixed> = demand.iter().zip(&supply).map(|(&d, &s)| excess(d, s)).collect();
+        // Buffers are reused across iterations: discovery runs up to
+        // max_iterations × markets times per tick.
+        market_demand(defs, &prices, consumers, orders, &mut scratch, &mut demand);
+        market_supply(&prices, offers, &mut supply);
+        for ((zg, &d), &s) in z.iter_mut().zip(&demand).zip(&supply) {
+            *zg = excess(d, s);
+        }
         // Settled: within tolerance, or pinned at a band edge with excess demand
         // pushing outward (its clearing price lies beyond today's reach). Without
         // the second case such goods kept every market iterating to the cap.
@@ -610,7 +640,8 @@ fn settle(
         demand.iter().zip(&supply).map(|(&d, &s)| if d <= s { Fixed::ONE } else { s.div(d) }).collect();
 
     // Pass B: POPs buy, pay, and record life-needs satisfaction.
-    let crate::world::Pops { size, cash, profession, life_needs, .. } = &mut world.pops;
+    let crate::world::Pops { size, cash, profession, life_needs, militancy, .. } = &mut world.pops;
+    let militancy = &*militancy;
     let (size, profession) = (&*size, &*profession);
     // Per-market runs of width 2 × goods: [bought per good | paid per good].
     let bought_paid = cash
@@ -619,8 +650,15 @@ fn settle(
         .enumerate()
         .with_min_len(4096)
         .fold(
-            || (MarketRuns::<Fixed>::new(2 * goods), vec![Fixed::ZERO; goods], LifeNeedsSummary::default()),
-            |(mut runs, mut x, mut tally), (i, (cash, life))| {
+            || {
+                (
+                    MarketRuns::<Fixed>::new(2 * goods),
+                    vec![Fixed::ZERO; goods],
+                    LifeNeedsSummary::default(),
+                    MilitancySummary::default(),
+                )
+            },
+            |(mut runs, mut x, mut tally, mut mil), (i, (cash, life))| {
                 let (m, c) = (pop_market[i] as usize, profession[i] as usize);
                 let prof = &defs.professions[c];
                 let row = m * goods..(m + 1) * goods;
@@ -651,16 +689,19 @@ fn settle(
                     if satisfaction < Fixed::ONE {
                         tally.deprived += size[i] as u64;
                     }
+                    mil.people += size[i] as u64;
+                    mil.weighted_raw += size[i] as i128 * militancy[i].raw() as i128;
                 }
-                (runs, x, tally)
+                (runs, x, tally, mil)
             },
         )
-        .map(|(runs, _, tally)| (runs, tally))
+        .map(|(runs, _, tally, mil)| (runs, tally, mil))
         .reduce(
-            || (MarketRuns::new(2 * goods), LifeNeedsSummary::default()),
-            |(r1, t1), (r2, t2)| (r1.append(r2), t1.add(t2)),
+            || (MarketRuns::new(2 * goods), LifeNeedsSummary::default(), MilitancySummary::default()),
+            |(r1, t1, m1), (r2, t2, m2)| (r1.append(r2), t1.add(t2), m1.add(m2)),
         );
-    let (bought_paid, life_needs) = (bought_paid.0.into_dense(markets, |a, b| *a += *b), bought_paid.1);
+    let (bought_paid, life_needs, militancy_summary) =
+        (bought_paid.0.into_dense(markets, |a, b| *a += *b), bought_paid.1, bought_paid.2);
     let (mut bought, mut paid) = (vec![Fixed::ZERO; markets * goods], vec![Fixed::ZERO; markets * goods]);
     for m in 0..markets {
         let row = &bought_paid[m * 2 * goods..(m + 1) * 2 * goods];
@@ -735,6 +776,7 @@ fn settle(
         household_spending,
         input_spending,
         life_needs,
+        militancy: militancy_summary,
         government_spending,
         goods: reports,
         iterations,

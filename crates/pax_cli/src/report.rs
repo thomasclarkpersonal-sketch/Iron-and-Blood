@@ -20,7 +20,8 @@
 //!   people whose subsistence was not fully met.
 //!   `population` is the end-of-period population, after demographics.
 //!
-//! * **Militancy:** population-weighted mean at period end (D19).
+//! * **Militancy:** `DayReport::militancy`, the population-weighted mean as the
+//!   period's last market saw it (D19).
 //!
 //! If day 1 traded nothing, there is no base basket and the price index and real
 //! GDP print as `n/a` rather than a made-up 100.
@@ -99,13 +100,8 @@ pub fn run(mut world: World, log: &CommandLog, days: u64, every: u64) -> Result<
         // The engine weights life needs by the sizes the market saw (DayReport).
         let life = &report.life_needs;
         let life_mean = life.mean().map_or(0.0, f);
-        // Population-weighted mean militancy at period end (D19).
-        let militancy = if population > 0 {
-            world.pops.size.iter().zip(&world.pops.militancy).map(|(&n, &m)| n as f64 * f(m)).sum::<f64>()
-                / population as f64
-        } else {
-            0.0
-        };
+        // Population-weighted militancy as the period's last market saw it (D19).
+        let militancy = report.militancy.mean().map_or(0.0, f);
         let deprived_pct = if life.people > 0 { life.deprived as f64 / life.people as f64 * 100.0 } else { 0.0 };
 
         println!(

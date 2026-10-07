@@ -1,6 +1,6 @@
 # Backend Architecture & Schema
 
-This document describes the concrete Rust implementation. The code is authoritative for exact field names; this page explains structure and intent. Decisions are cited as D1–D14 ([DECISIONS.md](DECISIONS.md)).
+This document describes the concrete Rust implementation. The code is authoritative for exact field names; this page explains structure and intent. Decisions are cited as D1, D2, … ([DECISIONS.md](DECISIONS.md)).
 
 ## 🦀 Workspace Structure
 
@@ -127,6 +127,7 @@ All systems are plain functions over `&mut World`, called by `tick::step` in the
 | `migrated` | People who moved to another province of their market that day (D20) |
 | `compacted` | POP rows removed by month-end compaction (D7) |
 | `life_needs` | Life-needs coverage at the market: people, deprived, weighted mean (`LifeNeedsSummary`) |
+| `militancy` | Population-weighted militancy as the market saw it (`MilitancySummary`, D19) |
 | `total_money` | Outside money after the day (asserted unchanged) |
 
 ## 🔌 API Boundary (M3)

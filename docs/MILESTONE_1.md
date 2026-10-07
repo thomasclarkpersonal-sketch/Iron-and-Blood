@@ -31,7 +31,7 @@
 | A6 | One-year golden replay pinned and verified in CI | ✅ | `scenarios/mini_valley/golden.hashes`, `.github/workflows/ci.yml` |
 | A7 | Loader rejects bad data and reports every error at once | ✅ | `pax_data/tests/validation.rs` |
 | A8 | Reference scenario runs 5 years without collapse, with all goods traded | ✅ | `pax_cli run scenarios/mini_valley --days 1800` |
-| A9 | 1M POP rows ≤ 100 ms/day on 8 threads | ✅ 45 ms | `pax_cli bench scenarios/mini_valley --scale 170000 --threads 8` |
+| A9 | 1M POP rows ≤ 100 ms/day on 8 threads | ✅ 45 ms (≈36 ms after T4) | `pax_cli bench scenarios/mini_valley --scale 170000 --threads 8` |
 | A10 | CI fails on > 20% benchmark regression | ✅ | `Benchmark regression` job in `ci.yml` (`scripts/bench-compare.sh`) |
 | A11 | Larger reference content (≥ 10 goods, ≥ 6 professions, ≥ 2 markets) runs 20 years stably | ✅ | `scenarios/two_states` (12 goods, 6 professions, 2 markets); `pax_data/tests/content_stability.rs` |
 | A12 | Economy health report (GDP, unemployment, price index, wage share) in `pax_cli` | ✅ | `pax_cli report scenarios/mini_valley --days 1800` |

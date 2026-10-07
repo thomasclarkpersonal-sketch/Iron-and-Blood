@@ -2,7 +2,7 @@
 
 Welcome, AI Developer. When contributing to **Iron and Blood**, strictly follow these architectural and stylistic rules. They protect the performance and integrity of this socioeconomic simulation engine, and they apply to human contributors too.
 
-Binding design decisions live in [docs/DECISIONS.md](docs/DECISIONS.md) (cited as D1–D14). If anything here or in another document conflicts with it, DECISIONS.md wins.
+Binding design decisions live in [docs/DECISIONS.md](docs/DECISIONS.md) (cited as D1, D2, …). If anything here or in another document conflicts with it, DECISIONS.md wins.
 
 ## 1. Core Architecture (Rust & Data-Oriented Design)
 - **Language:** Rust (toolchain pinned in `rust-toolchain.toml`).

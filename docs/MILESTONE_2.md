@@ -69,8 +69,8 @@ These need no further design decisions:
 
 | ID | Task | Notes |
 |---|---|---|
-| N1 | Make `pax_cli bench --scale` create distinct identities (e.g. extra provinces), so month-end compaction doesn't merge the copies back | Today `--scale` rows collapse after day 29; use `--regions` meanwhile |
-| N2 | `DayReport` militancy summary (like `LifeNeedsSummary`) so the CLI stops reading raw columns | Critic suggestion on #22 |
-| N3 | Profile and optimise `firms` at large producer counts (per-market subsistence cost is recomputed every day) | ~2.3 ms at 36k producers |
+| N1 | ~~Make `bench --scale` create distinct identities~~ **Decided against (for now):** the CI benchmark gate runs the *base* binary with the same flags, so changing `--scale`'s meaning would produce a spurious regression. The pitfall is documented in `pax_cli`'s help; use `--regions` for runs past day 29. A new flag would be the way to add it | Revisit with a new flag if needed |
+| N2 | ✅ `DayReport` militancy summary so the CLI stops reading raw columns | Done: `MilitancySummary`, tallied in the settlement pass at no extra cost |
+| N3 | Profile the market phase at scale | Measured at 3,000 markets / 36k producers: `clear_markets` 21 ms, `firms` 2.3 ms, everything else < 1 ms. Reusing discovery buffers saved ~4% (allocation isn't the bottleneck; iteration count is, see the adaptive-step review PR) |
 | N4 | Content: a third state and more consumer goods, with a 20-year stability check | Data only |
-| N5 | Pin `two_states` 20-year aggregates (GDP band, unemployment band) as a regression test, not just stability | Guards against silent economic drift |
+| N5 | ✅ Pin `two_states` 20-year aggregates as a regression test, not just stability | Done: `pax_data/tests/economic_bands.rs` checks GDP, unemployment, tax take, life needs, militancy and population bands |

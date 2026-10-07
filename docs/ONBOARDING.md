@@ -101,10 +101,11 @@ The compiler walks you through it. `Pops` is destructured exhaustively in `World
 
 ### Add a command
 
-1. Add a variant to `Command` in `command.rs`, with validation in `World::apply`.
-2. Parse it in `pax_data::parse_commands`.
-3. Document it in DATA_FORMAT.md and D21.
-4. Test that invalid input changes nothing.
+1. Add a variant to `Command` in `command.rs`.
+2. **Put every check in `World::validate`** (D21). `World::apply` calls `validate` and then only assigns, so load-time and replay-time validity can never differ.
+3. Parse it in `pax_data::parse_commands`. That already calls `World::validate`, so it needs no checks of its own.
+4. Document it in DATA_FORMAT.md and D21.
+5. Test both paths: `parse_commands` rejects a bad value at load, and `World::apply` leaves state unchanged for it.
 
 ## 6. Determinism and golden hashes
 
@@ -116,6 +117,7 @@ Every scenario pins state hashes in `golden.hashes`. The rules on length are in 
   cargo run --release -p pax_cli -- record scenarios/two_states
   ```
 
+- **Economic bands:** `pax_data/tests/economic_bands.rs` (release builds) checks that `two_states`' year-20 GDP, unemployment, tax take, life needs, militancy and population stay within bands. Golden hashes say *something* changed; the bands say whether the economy still *behaves* the same. If you change economic behaviour on purpose, update the bands and say why in the PR.
 - **If you didn't mean to,** `verify` names the first day that differs. Common causes:
   - iterating a `HashMap`;
   - a float sneaking in;
