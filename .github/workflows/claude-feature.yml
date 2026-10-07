@@ -152,26 +152,29 @@ jobs:
         with:
           fetch-depth: 0
 
-      # The plan must come from this pipeline (posted by github-actions with the
-      # marker), not from a user comment imitating one.
+      # The plan must come from this pipeline: posted by github-actions AND starting
+      # with the plan marker. Implementation reports start with a different marker,
+      # and user comments that imitate a plan are ignored. Feedback is human comments
+      # only; the pipeline's own comments are never fed back as instructions.
       - name: Load the latest plan and the feedback since
         run: |
           mkdir -p .claude-output
           gh issue view "$ISSUE" --json comments > .claude-output/comments.json
-          jq -r '[.comments[] | select(.author.login == "github-actions" and (.body | contains("<!-- claude-plan -->")))] | last | .body // ""' \
+          is_plan='.author.login == "github-actions" and (.body | startswith("<!-- claude-plan -->"))'
+          jq -r "[.comments[] | select($is_plan)] | last | .body // \"\"" \
             .claude-output/comments.json > .claude-output/plan.md
           if [ ! -s .claude-output/plan.md ]; then
             gh issue comment "$ISSUE" --body "⚠️ No plan found. Add the \`claude-plan\` label first, review the plan, then add \`claude-implement\`."
             gh issue edit "$ISSUE" --remove-label claude-implement || true
             exit 1
           fi
-          since=$(jq -r '[.comments[] | select(.author.login == "github-actions" and (.body | contains("<!-- claude-plan -->")))] | last | .createdAt' .claude-output/comments.json)
+          since=$(jq -r "[.comments[] | select($is_plan)] | last | .createdAt" .claude-output/comments.json)
           {
             echo "# Feature request: issue #$ISSUE"
             gh issue view "$ISSUE" --json title,body --jq '"## " + .title + "\n\n" + (.body // "")'
             echo
-            echo "## Feedback posted after the plan (apply it)"
-            jq -r --arg since "$since" '.comments[] | select(.createdAt > $since) | "### " + .author.login + "\n" + .body + "\n"' .claude-output/comments.json
+            echo "## Feedback from people, posted after the plan (apply it)"
+            jq -r --arg since "$since" '.comments[] | select(.createdAt > $since and .author.login != "github-actions") | "### " + .author.login + "\n" + .body + "\n"' .claude-output/comments.json
           } > .claude-output/request.md
           gh issue view "$ISSUE" --json title --jq .title > .claude-output/title.txt
 
@@ -230,7 +233,9 @@ jobs:
                - anything a reviewer must check by hand.
 
             Hard limits:
-            - Do not edit anything under .github/ or .claude/.
+            - Do not edit anything under .github/ or .claude/, and do not edit AGENTS.md.
+              These hold the rules the reviewers enforce. If the plan needs a rule
+              change, say so in the summary for a human to make.
             - Do not run git commit or git push; the workflow commits for you.
             - If the plan cannot be implemented safely, implement nothing; explain
               why in .claude-output/summary.md.
@@ -252,15 +257,29 @@ jobs:
       - name: Verify the result
         id: verify
         run: |
-          check() { if "$@" > /dev/null 2>&1; then echo "| \`$*\` | ✅ |"; else echo "| \`$*\` | ❌ |"; echo failed > .claude-output/verify-failed; fi; }
-          {
-            echo "| Check | Result |"
-            echo "|---|---|"
-            check cargo fmt --all --check
-            check cargo clippy --all-targets --release -- -D warnings
-            check cargo test --all --release
-            check cargo run --release -p pax_cli -- verify scenarios/mini_valley
-          } > .claude-output/verify.md
+          set -o pipefail # a check's status, not tee's, decides pass/fail
+          # Each check's full output goes to the job log and to its own log file; the
+          # tail of every failing check is appended to the issue report.
+          n=0
+          check() {
+            n=$((n + 1))
+            log=".claude-output/check-$n.log"
+            echo "::group::$*"
+            if "$@" 2>&1 | tee "$log"; then
+              echo "| \`$*\` | ✅ |" >> .claude-output/verify.md
+            else
+              echo "| \`$*\` | ❌ |" >> .claude-output/verify.md
+              { echo; echo "<details><summary>❌ <code>$*</code>: last 50 lines</summary>"; echo; echo '```'; tail -n 50 "$log"; echo '```'; echo "</details>"; } >> .claude-output/verify-failures.md
+              echo failed > .claude-output/verify-failed
+            fi
+            echo "::endgroup::"
+          }
+          printf '| Check | Result |\n|---|---|\n' > .claude-output/verify.md
+          check cargo fmt --all --check
+          check cargo clippy --all-targets --release -- -D warnings
+          check cargo test --all --release
+          check cargo run --release -p pax_cli -- verify scenarios/mini_valley
+          [ -f .claude-output/verify-failures.md ] && cat .claude-output/verify-failures.md >> .claude-output/verify.md
           cat .claude-output/verify.md >> "$GITHUB_STEP_SUMMARY"
 
       - name: Commit and push
@@ -272,8 +291,9 @@ jobs:
           git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          # Never commit pipeline scratch files, workflow or Claude config changes.
-          git add -A -- . ':(exclude).claude-output' ':(exclude).github' ':(exclude).claude' ':(exclude)comment.md'
+          # Never commit pipeline scratch files, or changes to the workflows, Claude
+          # config or AGENTS.md (the rules that CI and the critic enforce).
+          git add -A -- . ':(exclude).claude-output' ':(exclude).github' ':(exclude).claude' ':(exclude)AGENTS.md' ':(exclude)comment.md'
           if git diff --cached --quiet; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
             exit 0
@@ -294,6 +314,7 @@ jobs:
         run: |
           title=$(cat .claude-output/title.txt 2>/dev/null || echo "Issue #$ISSUE")
           {
+            echo "<!-- claude-implement-report -->"
             echo "## 🛠️ Implementation"
             if [ "$CHANGED" = "true" ]; then
               pr_title=$(jq -rn --arg t "Implement #$ISSUE: $title" '$t | @uri')
