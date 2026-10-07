@@ -48,6 +48,9 @@ fn cache_rebuilds_itself_when_inputs_change_without_invalidation() {
     assert_eq!(*world.pop_layout(), PopLayout::build(&world), "stale layout served after a market map change");
     // And for a new market, which resizes the owner pools even with the map unchanged.
     world.geography.market_keys.push("extra".into());
+    if !world.geography.market_nation.is_empty() {
+        world.geography.market_nation.push(None); // the new market is stateless
+    }
     let goods = world.defs.good_count();
     world.markets.price.extend(std::iter::repeat_n(Fixed::ONE, goods));
     assert_eq!(*world.pop_layout(), PopLayout::build(&world), "stale layout served after adding a market");
@@ -64,4 +67,22 @@ fn grouping_pops_by_market_keeps_state_and_order_within_markets() {
     assert_eq!(world.total_money(), money);
     assert_eq!(world.population(), population);
     assert_eq!(*world.pop_layout(), PopLayout::build(&world));
+}
+
+#[test]
+#[should_panic(expected = "names nation")]
+fn a_market_naming_a_missing_nation_is_rejected_clearly() {
+    let mut world = random_world(13);
+    let markets = world.geography.market_count();
+    world.geography.market_nation = vec![Some(99); markets];
+    world.pop_layout();
+}
+
+#[test]
+#[should_panic(expected = "one entry per market")]
+fn a_short_market_nation_map_is_rejected() {
+    let mut world = random_world(13);
+    world.geography.market_keys.push("extra".into());
+    world.geography.market_nation = vec![None];
+    world.pop_layout();
 }

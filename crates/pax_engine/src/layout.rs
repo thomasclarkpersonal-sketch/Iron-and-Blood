@@ -98,6 +98,7 @@ impl PopLayout {
     /// Builds the groupings from scratch: O(N). Systems should use
     /// [`World::pop_layout`] instead, which reuses a valid cached layout.
     pub fn build(world: &World) -> PopLayout {
+        world.check_market_nations();
         let pops = &world.pops;
         let market: Vec<u32> = pops.province.iter().map(|&p| world.geography.province_market[p as usize]).collect();
         let labour_keys: Vec<usize> =

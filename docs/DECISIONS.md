@@ -1,6 +1,6 @@
 # Design Decisions
 
-This is the binding record of decisions that other documents and the code depend on. Where any other document disagrees with this one, **this one wins**, and the other document is a bug to fix. Code comments refer to entries as `D1`–`D14`.
+This is the binding record of decisions that other documents and the code depend on. Where any other document disagrees with this one, **this one wins**, and the other document is a bug to fix. Code comments refer to entries as `D1`, `D2`, and so on.
 
 Each entry has a status:
 - **Accepted**: implemented or binding now.
@@ -99,7 +99,8 @@ To change a decision, edit its entry in the same pull request as the code. Say w
 | 1 | Labour: assign employment | daily |
 | 2 | Production | daily |
 | 3 | Market: orders → price discovery → settlement | daily |
-| 4 | Firms: wages, dividends | daily |
+| 4 | Firms: wages, dividends (income tax withheld, D15) | daily |
+| 4b | Government: transfers from treasuries to POPs (D15) | daily |
 | 5 | *(M2)* Promotion/demotion, migration | weekly (day 7, 14, …) |
 | 6 | *(M2)* Politics: militancy, consciousness | month end |
 | 7 | Demographics | month end |
@@ -153,7 +154,7 @@ To change a decision, edit its entry in the same pull request as the code. Say w
 - **POP identity** is `(province, profession, culture, religion)`. Culture and religion columns arrive in M2. Lookups by identity use a sorted index, never a `HashMap`.
 - **Derived values are never stored as state.** Nation, market and state come from the province; storing `nation_id` on POPs would go stale on conquest.
   - **Exception: self-validating caches.** For performance, derived data may live in a cache *outside* state, under three conditions: it's excluded from equality and `World::state_hash`; it fingerprints all of its inputs on every use and rebuilds on mismatch; and debug builds check it against a fresh build.
-  - The only such cache is `World::layout` (`layout.rs`). Its inputs are the POP row count, `pops.province`, `pops.profession`, `geography.province_market` and the number of professions.
+  - The only such cache is `World::layout` (`layout.rs`). Its inputs are the POP row count, `pops.province`, `pops.profession`, `geography.province_market`, `geography.market_nation` (D15), and the number of professions, markets and nations.
 
 ## D8. ECS: hand-rolled Struct-of-Arrays
 

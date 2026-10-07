@@ -27,8 +27,10 @@ pub struct Geography {
     /// Market row of each province.
     pub province_market: Vec<u32>,
     pub market_keys: Vec<String>,
-    /// Nation that owns each market (`None`: stateless, untaxed). May be empty,
-    /// which means no market belongs to a nation (D15).
+    /// Nation that owns each market (`None`: stateless, untaxed), D15.
+    /// Either empty (no market belongs to any nation) or exactly one entry per
+    /// market, each `Some(n)` naming an existing nation row. The engine checks
+    /// this whenever it builds the POP layout ([`World::check_market_nations`]).
     pub market_nation: Vec<Option<u32>>,
 }
 
@@ -285,6 +287,33 @@ impl World {
         permute(province, &order);
         permute(life_needs, &order);
         self.invalidate_pop_layout();
+    }
+
+    /// Checks the market→nation invariant documented on
+    /// [`Geography::market_nation`].
+    ///
+    /// # Panics
+    /// With a message naming the broken invariant, rather than an
+    /// index-out-of-bounds deep inside a system.
+    pub fn check_market_nations(&self) {
+        let map = &self.geography.market_nation;
+        if map.is_empty() {
+            return;
+        }
+        assert_eq!(
+            map.len(),
+            self.geography.market_count(),
+            "geography.market_nation must be empty or have one entry per market"
+        );
+        for (m, n) in map.iter().enumerate() {
+            if let Some(n) = n {
+                assert!(
+                    (*n as usize) < self.nations.len(),
+                    "market {m} names nation {n}, but only {} exist",
+                    self.nations.len()
+                );
+            }
+        }
     }
 
     /// Adds a nation. Assign it markets through `geography.market_nation`.
