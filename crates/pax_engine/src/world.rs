@@ -298,6 +298,21 @@ impl World {
         self.invalidate_pop_layout();
     }
 
+    /// Credits `amount` to the POP `rows` pro rata to their size, split exactly
+    /// (largest remainder, D5). Returns `false`, crediting nothing, if none of
+    /// the rows has people; the caller then keeps the money.
+    ///
+    /// The single "pay a group of POPs" primitive, used for wages, dividends and
+    /// government transfers.
+    pub fn credit_pops_by_size(&mut self, rows: &[u32], amount: Fixed) -> bool {
+        let sizes: Vec<i64> = rows.iter().map(|&r| self.pops.size[r as usize] as i64).collect();
+        let Some(shares) = crate::alloc::allocate_raw(amount.raw(), &sizes) else { return false };
+        for (&r, s) in rows.iter().zip(shares) {
+            self.pops.cash[r as usize] += Fixed::from_raw(s);
+        }
+        true
+    }
+
     /// Checks the market→nation invariant documented on
     /// [`Geography::market_nation`].
     ///

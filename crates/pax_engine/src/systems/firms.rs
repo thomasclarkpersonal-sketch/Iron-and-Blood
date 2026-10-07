@@ -23,7 +23,6 @@
 //! Every transfer is a debit from one column and a credit to another of
 //! exactly the same amount, so total money is unchanged.
 
-use crate::alloc::allocate_raw;
 use crate::fixed::Fixed;
 use crate::groups::Groups;
 use crate::layout::{PopLayout, owner_key, pool_key};
@@ -134,11 +133,7 @@ fn distribute(world: &mut World, groups: &Groups, income: &[Fixed]) {
         if amount.is_zero() {
             continue;
         }
-        let rows = groups.members(k);
-        let sizes: Vec<i64> = rows.iter().map(|&r| world.pops.size[r as usize] as i64).collect();
-        let shares = allocate_raw(amount.raw(), &sizes).expect("income is only routed to groups with living members");
-        for (&r, s) in rows.iter().zip(shares) {
-            world.pops.cash[r as usize] += Fixed::from_raw(s);
-        }
+        let credited = world.credit_pops_by_size(groups.members(k), amount);
+        assert!(credited, "income is only routed to groups with living members");
     }
 }
