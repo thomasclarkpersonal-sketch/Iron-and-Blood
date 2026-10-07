@@ -92,13 +92,19 @@ fn dispatch(args: &Args) -> Result<ExitCode, String> {
     match args.command.as_str() {
         "run" => run(scenario.world, &scenario.commands, args.days.unwrap_or(365), args.every, args.market.as_deref()),
         "record" => {
-            // Re-recording keeps the existing file's length (e.g. two_states pins
-            // 730 days so its whole command log is covered) unless --days says otherwise.
-            let existing = golden::read(&golden_path(&args.scenario)).map(|h| h.len() as u64).ok();
-            let days = args.days.or(existing).unwrap_or(golden::DEFAULT_DAYS);
+            // D11: keep the existing file's length unless --days says otherwise, and
+            // never record less than the scenario's minimum (past its last command).
+            let path = golden_path(&args.scenario);
+            let existing = golden::existing_len(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+            let min = golden::min_days(&scenario.commands);
+            let days = args.days.or(existing).unwrap_or(min);
+            if days < min {
+                return Err(format!(
+                    "--days {days} is shorter than this scenario's minimum of {min} (D11: past its last command)"
+                ));
+            }
             let mut world = scenario.world;
             let hashes = pax_data::run_logged(&mut world, &scenario.commands, days)?;
-            let path = golden_path(&args.scenario);
             golden::write(&path, &scenario.name, &hashes).map_err(|e| format!("{}: {e}", path.display()))?;
             println!("recorded {days} day hashes to {}", path.display());
             Ok(ExitCode::SUCCESS)
@@ -145,6 +151,14 @@ fn run(mut world: World, log: &CommandLog, days: u64, every: u64, market: Option
 
 fn verify(mut world: World, log: &CommandLog, path: &Path) -> Result<ExitCode, String> {
     let expected = golden::read(path).map_err(|e| format!("{}: {e} (run `pax_cli record` first)", path.display()))?;
+    let min = golden::min_days(log);
+    if (expected.len() as u64) < min {
+        return Err(format!(
+            "{}: pins {} days, but this scenario needs at least {min} to cover its command log (D11)",
+            path.display(),
+            expected.len()
+        ));
+    }
     for (day, &want) in expected.iter().enumerate() {
         tick(&mut world, log);
         let got = world.state_hash();
