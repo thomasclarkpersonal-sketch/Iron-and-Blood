@@ -52,3 +52,16 @@ fn cache_rebuilds_itself_when_inputs_change_without_invalidation() {
     world.markets.price.extend(std::iter::repeat_n(Fixed::ONE, goods));
     assert_eq!(*world.pop_layout(), PopLayout::build(&world), "stale layout served after adding a market");
 }
+
+#[test]
+fn grouping_pops_by_market_keeps_state_and_order_within_markets() {
+    let mut world = random_world(11);
+    let money = world.total_money();
+    let population = world.population();
+    world.group_pops_by_market();
+    let markets: Vec<usize> = world.pops.province.iter().map(|&p| world.market_of_province(p)).collect();
+    assert!(markets.windows(2).all(|w| w[0] <= w[1]), "rows not grouped by market");
+    assert_eq!(world.total_money(), money);
+    assert_eq!(world.population(), population);
+    assert_eq!(*world.pop_layout(), PopLayout::build(&world));
+}

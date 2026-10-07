@@ -229,10 +229,14 @@ pub fn clear_markets(world: &mut World, layout: &PopLayout) -> MarketOutcome {
     settle(world, pop_market, &orders, &offers, iterations)
 }
 
-/// Index ranges of each market in a list sorted by market.
+/// Index ranges of each market in a list that **must already be sorted by
+/// market** (the caller sorts orders and offers just before calling this).
 fn ranges_by_market(markets: usize, sorted: impl Iterator<Item = usize>) -> Vec<std::ops::Range<usize>> {
     let mut counts = vec![0usize; markets];
+    let mut previous = 0;
     for m in sorted {
+        debug_assert!(m >= previous, "ranges_by_market: input not sorted by market");
+        previous = m;
         counts[m] += 1;
     }
     let mut start = 0;
@@ -442,9 +446,11 @@ fn market_supply(prices: &[Fixed], offers: &[SellOffer]) -> Vec<Fixed> {
 ///
 /// Iterates are confined to today's band (`±max_daily_change`, technical
 /// bounds), so the executed price is simply the last iterate. A good whose
-/// clearing price lies beyond the band ends at the band edge, which is the same
-/// result as the earlier "iterate freely, then clamp" approach, minus the
-/// wasted iterations.
+/// clearing price lies beyond the band ends at its band edge, as before.
+/// Iterates of the *other* goods follow a different path than under the old
+/// "iterate freely, then clamp" approach (cross-price effects differ), so
+/// in-band prices can differ by up to the tolerance; aggregates were unchanged
+/// in both reference scenarios.
 fn discover_prices(
     defs: &Defs,
     opening: &[Fixed],
