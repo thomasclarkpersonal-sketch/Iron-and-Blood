@@ -116,6 +116,7 @@ Every scenario pins state hashes in `golden.hashes`. The rules on length are in 
   cargo run --release -p pax_cli -- record scenarios/two_states
   ```
 
+- **Economic bands:** `pax_data/tests/economic_bands.rs` (release builds) checks that `two_states`' year-20 GDP, unemployment, tax take, life needs, militancy and population stay within bands. Golden hashes say *something* changed; the bands say whether the economy still *behaves* the same. If you change economic behaviour on purpose, update the bands and say why in the PR.
 - **If you didn't mean to,** `verify` names the first day that differs. Common causes:
   - iterating a `HashMap`;
   - a float sneaking in;

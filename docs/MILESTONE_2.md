@@ -73,4 +73,4 @@ These need no further design decisions:
 | N2 | `DayReport` militancy summary (like `LifeNeedsSummary`) so the CLI stops reading raw columns | Critic suggestion on #22 |
 | N3 | Profile and optimise `firms` at large producer counts (per-market subsistence cost is recomputed every day) | ~2.3 ms at 36k producers |
 | N4 | Content: a third state and more consumer goods, with a 20-year stability check | Data only |
-| N5 | Pin `two_states` 20-year aggregates (GDP band, unemployment band) as a regression test, not just stability | Guards against silent economic drift |
+| N5 | ✅ Pin `two_states` 20-year aggregates as a regression test, not just stability | Done: `pax_data/tests/economic_bands.rs` checks GDP, unemployment, tax take, life needs, militancy and population bands |
