@@ -473,6 +473,8 @@ fn settle(
                 for (g, &wanted) in x.iter().enumerate() {
                     let k = m * goods + g;
                     let q = if ration[k] == Fixed::ONE { wanted } else { wanted.mul(ration[k]) };
+                    // D1: rationing never gives a buyer more than it asked for.
+                    assert!(q <= wanted, "market-good {k}: POP {i} received {q} > demanded {wanted}");
                     let cost = q.mul(prices[k]);
                     bought[k] += q;
                     paid[k] += cost;
@@ -500,7 +502,9 @@ fn settle(
     let mut input_cost = vec![Fixed::ZERO; producers.len()];
     for o in orders {
         let k = o.market * goods + o.good;
-        let q = o.demand(prices[k]).mul(ration[k]);
+        let wanted = o.demand(prices[k]);
+        let q = wanted.mul(ration[k]);
+        assert!(q <= wanted, "market-good {k}: producer {} received {q} > demanded {wanted}", o.producer);
         let cost = q.mul(prices[k]);
         producers.cash[o.producer] -= cost;
         assert!(!producers.cash[o.producer].is_negative(), "producer {} overspent", o.producer);

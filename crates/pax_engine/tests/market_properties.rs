@@ -10,8 +10,10 @@
 //! * buyers never overspend (no negative cash) and life-needs satisfaction
 //!   stays in `[0, 1]`.
 //!
-//! Per-seller delivery ≤ offer is asserted inside settlement itself (`market.rs`),
-//! so it is exercised by every test that steps a world.
+//! Per-buyer `received ≤ demanded` and per-seller `delivered ≤ offered` are
+//! asserted inside settlement itself (`market.rs`): the per-agent quantities
+//! are local to the parallel fold, and asserting them there means every test
+//! that steps a world exercises them.
 
 mod common;
 
@@ -55,6 +57,8 @@ fn prices_respect_daily_band_and_technical_bounds() {
             let opening = world.markets.price.clone();
             step(&mut world);
             for (k, (&open, &now)) in opening.iter().zip(&world.markets.price).enumerate() {
+                // Pins D1's band exactly as computed in discover_prices (rounded
+                // down, D3). Change both together if the band rounding changes.
                 let band = open.mul(rules.max_daily_change);
                 let lo = (open - band).max(rules.price_floor);
                 let hi = (open + band).min(rules.price_ceiling);
