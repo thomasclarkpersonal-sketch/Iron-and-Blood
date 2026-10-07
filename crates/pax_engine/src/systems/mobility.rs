@@ -144,7 +144,7 @@ fn weighted_mean(a: Fixed, a_size: i64, b: Fixed, b_size: i64) -> Fixed {
 /// their jobs send `⌊surplus × migration_rate⌋` people to provinces of the same
 /// market with vacancies for that profession (largest vacancy first, then lowest
 /// province), never beyond a destination's vacancies. Migrants keep their
-/// profession and take their cash, through the same [`execute_moves`] as labour
+/// profession and take their cash, through the same `execute_moves` as labour
 /// mobility, after which it runs on the workforce as it stands then. `layout`
 /// must be current (the tick passes a fresh one). Returns the number of people moved.
 pub fn migrate_within_markets(world: &mut World, layout: &PopLayout) -> u64 {
