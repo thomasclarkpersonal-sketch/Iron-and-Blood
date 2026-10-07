@@ -27,7 +27,7 @@ To build a highly concurrent, performant, and deeply interconnected socioeconomi
 - an outside-money conservation check on every tick;
 - golden-hash replay verification;
 - a TOML data loader;
-- a headless CLI, benchmarked at about 45 ms per simulated day for 1M POPs on 8 threads.
+- a headless CLI, benchmarked at about 36 ms per simulated day for 1M POPs on 8 threads.
 
 See [docs/MILESTONE_1.md](docs/MILESTONE_1.md) for acceptance criteria and open team tasks.
 

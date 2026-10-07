@@ -1,6 +1,6 @@
 # Backend Architecture & Schema
 
-This document describes the concrete Rust implementation. The code is authoritative for exact field names; this page explains structure and intent. Decisions are cited as D1–D14 ([DECISIONS.md](DECISIONS.md)).
+This document describes the concrete Rust implementation. The code is authoritative for exact field names; this page explains structure and intent. Decisions are cited as D1, D2, … ([DECISIONS.md](DECISIONS.md)).
 
 ## 🦀 Workspace Structure
 
