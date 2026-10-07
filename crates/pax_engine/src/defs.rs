@@ -49,6 +49,15 @@ pub struct ProfessionDef {
     pub preference: Vec<Fixed>,
 }
 
+impl ProfessionDef {
+    /// Per-capita subsistence cost `C = Σₖ pₖ γₖ` at `prices` (indexed by good),
+    /// rounded up so that spending the LES demand never exceeds the budget (D2).
+    /// The single definition, used by consumer demand and the wage floor (D6).
+    pub fn subsistence_cost(&self, prices: &[Fixed]) -> Fixed {
+        self.subsistence.iter().zip(prices).filter(|(g, _)| g.is_positive()).map(|(g, p)| g.mul_ceil(*p)).sum()
+    }
+}
+
 /// A production technology: fixed-coefficient (Leontief) recipe operated by a
 /// single worker profession (DECISIONS.md D6).
 ///

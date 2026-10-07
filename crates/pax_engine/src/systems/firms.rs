@@ -23,6 +23,7 @@ use crate::alloc::allocate_raw;
 use crate::fixed::Fixed;
 use crate::groups::Groups;
 use crate::layout::{PopLayout, owner_key, pool_key};
+use crate::systems::production::planned_inputs;
 use crate::world::World;
 
 /// Totals paid out by [`pay_wages_and_dividends`] (diagnostics only).
@@ -44,10 +45,11 @@ pub fn pay_wages_and_dividends(
 
     // Daily subsistence cost of one person, per (market, profession): the wage floor's base.
     let (markets, profs) = (world.geography.market_count(), defs.professions.len());
+    let goods = defs.good_count();
     let subsistence_cost: Vec<Fixed> = (0..markets * profs)
         .map(|k| {
-            let (m, c) = (k / profs, k % profs);
-            defs.professions[c].subsistence.iter().enumerate().map(|(g, gamma)| gamma.mul_ceil(world.price(m, g))).sum()
+            let m = k / profs;
+            defs.professions[k % profs].subsistence_cost(&world.markets.price[m * goods..(m + 1) * goods])
         })
         .collect();
 
@@ -59,17 +61,11 @@ pub fn pay_wages_and_dividends(
         let market = world.market_of_province(world.producers.province[i]);
         let wage_pool = pool_key(world, world.producers.province[i], def.worker);
         let owner_pool = owner_key(world, market, def.owner);
-        // Working capital: one day of inputs for today's workforce at today's prices.
-        let goods = defs.good_count();
-        let target = def.output_per_worker.mul_int(world.producers.employed[i] as i64);
-        let input_reserve: Fixed = def
-            .inputs
-            .iter()
-            .map(|&(g, a)| {
-                let short = (a.mul_ceil(target) - world.producers.input_stock[i * goods + g]).max(Fixed::ZERO);
-                short.mul_ceil(world.price(market, g))
-            })
-            .sum();
+        // Working capital: today's planned inputs at today's prices. This is the
+        // same plan the market orders from, so nothing is reserved for a
+        // shut-down producer.
+        let input_reserve: Fixed =
+            planned_inputs(world, i).iter().map(|&(g, need)| need.mul_ceil(world.price(market, g))).sum();
         let has_owners = owners.members(owner_pool).iter().any(|&r| world.pops.size[r as usize] > 0);
 
         let p = &mut world.producers;

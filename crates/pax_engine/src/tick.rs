@@ -16,7 +16,7 @@
 use crate::fixed::Fixed;
 use crate::systems::firms::Payouts;
 use crate::systems::labor::LabourReport;
-use crate::systems::market::GoodReport;
+use crate::systems::market::{GoodReport, LifeNeedsSummary};
 use crate::systems::{demographics, firms, labor, market, production};
 use crate::world::World;
 
@@ -37,6 +37,8 @@ pub struct DayReport {
     pub input_spending: Fixed,
     /// Wages and dividends paid out today.
     pub payouts: Payouts,
+    /// Life-needs coverage at today's market.
+    pub life_needs: LifeNeedsSummary,
     pub total_money: Fixed,
 }
 
@@ -66,6 +68,7 @@ pub fn step(world: &mut World) -> DayReport {
         day,
         input_spending: outcome.input_spending,
         household_spending: outcome.household_spending,
+        life_needs: outcome.life_needs,
         goods: outcome.goods,
         iterations: outcome.iterations,
         labour,
