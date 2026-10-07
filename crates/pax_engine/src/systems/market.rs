@@ -480,8 +480,9 @@ fn market_demand(
     consumers: &[ConsumerAggregate],
     orders: &[BuyOrder],
     scratch: &mut [Fixed],
-) -> Vec<Fixed> {
-    let mut demand = vec![Fixed::ZERO; prices.len()];
+    demand: &mut [Fixed],
+) {
+    demand.fill(Fixed::ZERO);
     for (prof, agg) in defs.professions.iter().zip(consumers) {
         let cost = prof.subsistence_cost(prices);
         for (comfortable, size, budget) in
@@ -499,7 +500,6 @@ fn market_demand(
     for o in orders {
         demand[o.good] += o.demand(prices[o.good]);
     }
-    demand
 }
 
 /// Normalised excess demand `(D − S) / (D + S)`, defined as 0 when both are 0.
@@ -509,12 +509,11 @@ fn excess(demand: Fixed, supply: Fixed) -> Fixed {
 }
 
 /// Total quantity offered per good at `prices`.
-fn market_supply(prices: &[Fixed], offers: &[SellOffer]) -> Vec<Fixed> {
-    let mut supply = vec![Fixed::ZERO; prices.len()];
+fn market_supply(prices: &[Fixed], offers: &[SellOffer], supply: &mut [Fixed]) {
+    supply.fill(Fixed::ZERO);
     for o in offers {
         supply[o.good] += o.supply(prices[o.good]);
     }
-    supply
 }
 
 /// Bounded tâtonnement for one market. Returns the executed prices and the
@@ -537,6 +536,8 @@ fn discover_prices(
     let rules: &MarketRules = &defs.rules.market;
     let mut prices = opening.to_vec();
     let mut scratch = vec![Fixed::ZERO; prices.len()];
+    let (mut demand, mut supply, mut z) =
+        (vec![Fixed::ZERO; prices.len()], vec![Fixed::ZERO; prices.len()], vec![Fixed::ZERO; prices.len()]);
     let mut stock = vec![Fixed::ZERO; prices.len()];
     for o in offers {
         stock[o.good] += o.stock;
@@ -558,9 +559,13 @@ fn discover_prices(
     let decay = Fixed::from_int(rules.step_decay_iterations.max(1) as i64);
     let mut used = 0;
     for k in 0..rules.max_iterations {
-        let demand = market_demand(defs, &prices, consumers, orders, &mut scratch);
-        let supply = market_supply(&prices, offers);
-        let z: Vec<Fixed> = demand.iter().zip(&supply).map(|(&d, &s)| excess(d, s)).collect();
+        // Buffers are reused across iterations: discovery runs up to
+        // max_iterations × markets times per tick.
+        market_demand(defs, &prices, consumers, orders, &mut scratch, &mut demand);
+        market_supply(&prices, offers, &mut supply);
+        for ((zg, &d), &s) in z.iter_mut().zip(&demand).zip(&supply) {
+            *zg = excess(d, s);
+        }
         // Settled: within tolerance, or pinned at a band edge with excess demand
         // pushing outward (its clearing price lies beyond today's reach). Without
         // the second case such goods kept every market iterating to the cap.
