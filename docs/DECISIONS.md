@@ -28,6 +28,7 @@ To change a decision, edit its entry in the same pull request as the code. Say w
 | [D15](#d15-nations-treasuries-income-tax-and-transfers) | Nations and fiscal policy | Accepted (M2-1) |
 | [D16](#d16-government-consumption) | Government consumption | Accepted (M2-2) |
 | [D18](#d18-labour-mobility) | Labour mobility | Accepted (M2-4) |
+| [D19](#d19-militancy) | Militancy | Accepted (M2-5) |
 
 ---
 
@@ -104,7 +105,7 @@ To change a decision, edit its entry in the same pull request as the code. Say w
 | 4 | Firms: wages, dividends (income tax withheld, D15) | daily |
 | 4b | Government: transfers from treasuries to POPs (D15) | daily |
 | 5 | Labour mobility: unemployed workers move to vacancies (D18); *(M2)* promotion, migration | month end |
-| 6 | *(M2)* Politics: militancy, consciousness | month end |
+| 6 | Politics: militancy (D19); *(M2)* consciousness | month end |
 | 7 | Demographics | month end |
 
 - A month is 30 days until a real calendar is needed (`rules.days_per_month`).
@@ -275,4 +276,15 @@ The state → national → sphere → global roll-up in the old ECONOMY_SYSTEM w
 - **Tuning:** `demographics.mobility_rate` in `rules.toml`. `mini_valley`'s frozen definitions use 0, which keeps it a pure regression fixture.
 - **What it does not fix:** unemployment caused by *total* job capacity lagging population. That needs investment (new and expanding producers), a later M2 item.
 - **Later:** migration between provinces (weighted by `τ`, MAP_AND_LOGISTICS.md), promotion to higher strata (literacy, D7), culture and religion.
+
+## D19. Militancy
+
+**Accepted (M2-5).** The first political state (POLITICS_SYSTEM.md). It has no effects yet.
+
+- **State:** `Pops::militancy`, a `Fixed` in `[0, 1]` (D3), starting at 0, part of the state hash. When POPs merge or move, the destination takes the size-weighted mean (D7).
+- **Monthly update** (D4 step 6, after mobility, before demographics): `m ← clamp(m + rise × (1 − life_needs) + tax_weight × t − decay × m, 0, 1)`, where `t` is the income tax rate of the POP's nation (0 when stateless).
+  - The parameters are `[politics]` in `rules.toml`.
+  - The equilibrium is `m* = (rise × (1 − s) + tax_weight × t) / decay`. For example, a fed POP under a 10% tax with the defaults settles at 0.1.
+- **Reported** as the population-weighted mean in `pax_cli report`.
+- **Later:** rebellions, which will be the one place genuine randomness is used (`rng::Stream::REBELLION`, D3); consciousness and reforms; interest groups.
 

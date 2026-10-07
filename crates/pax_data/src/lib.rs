@@ -22,7 +22,7 @@ use std::sync::Arc;
 
 use pax_engine::alloc::allocate;
 use pax_engine::defs::{
-    Defs, DemographicRules, FirmRules, GoodDef, MarketRules, ProducerTypeDef, ProfessionDef, Rules,
+    Defs, DemographicRules, FirmRules, GoodDef, MarketRules, PoliticsRules, ProducerTypeDef, ProfessionDef, Rules,
 };
 use pax_engine::world::{Geography, NewNation, NewProducer};
 use pax_engine::{Fixed, World};
@@ -268,6 +268,13 @@ pub fn parse_defs(src: &DefSources<'_>) -> Result<Defs, LoadError> {
     errors.check(in_range(r.demographics.mobility_rate.0, Fixed::ZERO, Fixed::ONE), || {
         "rules.demographics: mobility_rate must be in [0, 1]".into()
     });
+    for (name, v) in [
+        ("militancy_rise", r.politics.militancy_rise.0),
+        ("militancy_tax_weight", r.politics.militancy_tax_weight.0),
+        ("militancy_decay", r.politics.militancy_decay.0),
+    ] {
+        errors.check(in_range(v, Fixed::ZERO, Fixed::ONE), || format!("rules.politics: {name} must be in [0, 1]"));
+    }
     for g in &goods {
         errors.check(in_range(g.base_price, m.price_floor.0, m.price_ceiling.0), || {
             format!("good '{}': base_price outside price_floor..price_ceiling", g.key)
@@ -297,6 +304,11 @@ pub fn parse_defs(src: &DefSources<'_>) -> Result<Defs, LoadError> {
             growth_rate: r.demographics.growth_rate.0,
             starvation_rate: r.demographics.starvation_rate.0,
             mobility_rate: r.demographics.mobility_rate.0,
+        },
+        politics: PoliticsRules {
+            militancy_rise: r.politics.militancy_rise.0,
+            militancy_tax_weight: r.politics.militancy_tax_weight.0,
+            militancy_decay: r.politics.militancy_decay.0,
         },
     };
 

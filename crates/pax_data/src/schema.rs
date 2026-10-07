@@ -104,6 +104,15 @@ pub struct RulesFile {
     pub market: MarketRulesEntry,
     pub firms: FirmRulesEntry,
     pub demographics: DemographicRulesEntry,
+    pub politics: PoliticsRulesEntry,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PoliticsRulesEntry {
+    pub militancy_rise: Dec,
+    pub militancy_tax_weight: Dec,
+    pub militancy_decay: Dec,
 }
 
 #[derive(Deserialize)]

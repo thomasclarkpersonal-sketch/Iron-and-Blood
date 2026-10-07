@@ -63,6 +63,9 @@ pub struct Pops {
     /// Life-needs satisfaction from the last consumption pass, in `[0, 1]`:
     /// `minᵢ (bought subsistence goodᵢ / (N γᵢ))`. Drives demographics.
     pub life_needs: Vec<Fixed>,
+    /// Willingness to use violence against the state, in `[0, 1]` (D19).
+    /// Updated monthly; it has no effects yet (rebellions come later).
+    pub militancy: Vec<Fixed>,
 }
 
 impl Pops {
@@ -215,6 +218,7 @@ impl World {
         p.profession.push(u16::try_from(profession).expect("too many professions"));
         p.province.push(province);
         p.life_needs.push(Fixed::ONE);
+        p.militancy.push(Fixed::ZERO);
         self.invalidate_pop_layout();
         self.pops.len() - 1
     }
@@ -286,7 +290,7 @@ impl World {
         }
         // Exhaustive destructuring: adding a column to `Pops` is a compile error
         // here until it is permuted too.
-        let Pops { size, cash, profession, province, life_needs } = &mut self.pops;
+        let Pops { size, cash, profession, province, life_needs, militancy } = &mut self.pops;
         fn permute<T: Copy>(column: &mut Vec<T>, order: &[usize]) {
             *column = order.iter().map(|&i| column[i]).collect();
         }
@@ -295,6 +299,7 @@ impl World {
         permute(profession, &order);
         permute(province, &order);
         permute(life_needs, &order);
+        permute(militancy, &order);
         self.invalidate_pop_layout();
     }
 
@@ -404,6 +409,7 @@ impl World {
         h.u16s(&p.profession);
         h.u32s(&p.province);
         h.fixeds(&p.life_needs);
+        h.fixeds(&p.militancy);
         let f = &self.producers;
         h.u16s(&f.kind);
         h.u32s(&f.province);

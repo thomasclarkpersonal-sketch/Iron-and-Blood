@@ -10,7 +10,8 @@
 //! | 4 | firms: wages and dividends, income tax withheld | daily |
 //! | 4b | government: transfers from treasuries to POPs | daily |
 //! | 5 | mobility: unemployed workers move to vacancies (D18) | month end |
-//! | 6 | demographics | month end |
+//! | 6 | politics: militancy (D19) | month end |
+//! | 7 | demographics | month end |
 //!
 //! Weekly systems (promotion, migration) and monthly politics slot in after
 //! step 4 when they are implemented.
@@ -19,7 +20,7 @@ use crate::fixed::Fixed;
 use crate::systems::firms::Payouts;
 use crate::systems::labor::LabourReport;
 use crate::systems::market::{GoodReport, LifeNeedsSummary};
-use crate::systems::{demographics, firms, government, labor, market, mobility, production};
+use crate::systems::{demographics, firms, government, labor, market, mobility, politics, production};
 use crate::world::World;
 
 /// Diagnostics produced by one day. Not part of the simulation state.
@@ -68,6 +69,7 @@ pub fn step(world: &mut World) -> DayReport {
     let mut moved = 0;
     if demographics::is_month_end(world) {
         moved = mobility::reassign_workers(world, &layout, &labour);
+        politics::update_militancy(world);
         demographics::update_population(world);
     }
 

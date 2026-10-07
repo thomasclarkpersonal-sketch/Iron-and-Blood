@@ -55,6 +55,11 @@ pub fn rules() -> Rules {
             target_stock_days: 2,
             subsistence_wage_multiple: d("1.5"),
         },
+        politics: PoliticsRules {
+            militancy_rise: d("0.05"),
+            militancy_tax_weight: d("0.1"),
+            militancy_decay: d("0.1"),
+        },
         demographics: DemographicRules { growth_rate: d("0.01"), starvation_rate: d("0.3"), mobility_rate: d("0.2") },
     }
 }

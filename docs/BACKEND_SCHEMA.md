@@ -50,7 +50,8 @@ Rows are stored grouped by market: the loader sorts them stably. The market's pa
 | `province` | `u32` | |
 | `life_needs` | `Fixed` | `[0, 1]`, subsistence satisfaction from the last market day (D2) |
 | *`culture`, `religion`* | *`u16`* | *M2* |
-| *`literacy`, `militancy`, `consciousness`* | *`Fixed`* | *M2. Fixed-point, never `f32` (D3)* |
+| `militancy` | `Fixed` | `[0, 1]`, updated monthly (D19); no effects yet |
+| *`literacy`, `consciousness`* | *`Fixed`* | *M2. Fixed-point, never `f32` (D3)* |
 
 ### `Producers` (RGOs and factories; they differ only by recipe)
 | Column | Type | Notes |
@@ -104,7 +105,8 @@ All systems are plain functions over `&mut World`, called by `tick::step` in the
 4. **`firms::pay_wages_and_dividends`.** Value-added smoothing, sticky wages, then wage and dividend transfers with income tax withheld (D15).
 4b. **`government::pay_transfers`.** Each nation pays `treasury × transfer_rate` to its POPs, split by size.
 5. **`mobility::reassign_workers`** (month end). Unemployed workers move to vacancies in their province, taking their share of cash (D18).
-6. **`demographics::update_population`** (month end). Growth or starvation from `life_needs`; the estate of an extinct POP passes to an heir.
+6. **`politics::update_militancy`** (month end). Rises with hunger and taxes, and decays (D19).
+7. **`demographics::update_population`** (month end). Growth or starvation from `life_needs`; the estate of an extinct POP passes to an heir.
 
 > [!IMPORTANT]
 > **Determinism:** money, prices, quantities *and all rates* are `Fixed` (D3). `tax_rate`, `literacy` and `militancy` were `f32` in earlier drafts. That is no longer allowed, because a float tax rate applied to fixed-point wealth makes money itself platform-dependent.

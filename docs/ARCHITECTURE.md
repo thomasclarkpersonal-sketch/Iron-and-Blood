@@ -37,7 +37,7 @@ One tick is one day. Systems run in a fixed order (D4). The order is part of the
 | 4 | **Firms:** update value added, adjust sticky wages, pay wages and dividends, withhold income tax | daily | `systems/firms.rs` |
 | 4b | **Government:** transfers from treasuries to POPs | daily | `systems/government.rs` |
 | 5 | **Labour mobility:** unemployed workers move to vacancies in their province (D18) | month end | `systems/mobility.rs` |
-| 6 | *Politics: militancy, consciousness* (M2) | month end | |
+| 6 | **Politics:** militancy (D19) | month end | `systems/politics.rs` |
 | 7 | **Demographics:** births/deaths from life-needs satisfaction | month end | `systems/demographics.rs` |
 
 Consumption, production and pricing all run daily: an economy where buyers appear only once a week cannot clear daily markets. Slow structural changes (mobility, demographics, politics) are batched.
