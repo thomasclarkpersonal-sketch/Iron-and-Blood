@@ -21,6 +21,32 @@ cargo run --release -p pax_cli -- verify scenarios/mini_valley
 
 CI runs the same commands, and also the determinism gate on Windows and macOS.
 
+## CI/CD pipelines (`.github/workflows/`)
+
+| Workflow | Runs on | What it does |
+|---|---|---|
+| `ci.yml` | every PR and push to `main` | fmt, clippy, rustdoc, debug and release tests, the determinism gate (Linux at 1 and 4 threads, plus Windows and macOS), and a 1M-POP benchmark smoke run |
+| `critic.yml` | selected PRs | AI architectural review with [`/critic`](.claude/commands/critic.md), posted as a PR comment. **CRITICAL findings fail the `Critic` check and block the merge** |
+| `claude.yml` | a comment, issue or review mentioning `@claude` | Claude answers questions or investigates on request (read-only repo access) |
+| `release.yml` | pushing a tag `vX.Y.Z` | tests and determinism gate on 3 platforms, then a GitHub Release with `pax_cli` binaries plus `data/` and `scenarios/` |
+
+**The critic reviews a PR if any of these is true:**
+- it changes ≥ 200 lines or ≥ 20 files;
+- it was randomly sampled (1 in 5 PRs, decided once per PR number);
+- it carries the `critic` label.
+
+A selected PR is re-reviewed on every push. DEBT warnings and suggestions are advisory; only CRITICAL findings block. If you believe a CRITICAL finding is wrong, reply on the PR citing the rule and ask an admin. Do not remove the `critic` label to dodge a review.
+
+Repository admins: the one-time setup (GitHub App and its token secret, label, ruleset making the checks required) is in [docs/REPO_SETUP.md](docs/REPO_SETUP.md).
+
+**Cutting a release** (admins):
+
+```bash
+git tag v0.1.0 && git push origin v0.1.0
+```
+
+`v0.x` and `-rc` tags are published as pre-releases.
+
 ## Golden hashes: when `verify` fails
 
 `verify` failing means simulation results changed.
