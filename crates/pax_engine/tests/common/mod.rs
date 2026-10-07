@@ -43,6 +43,7 @@ pub fn rules() -> Rules {
             step_decay_iterations: 8,
             tolerance: d("0.001"),
             max_daily_change: d("0.2"),
+            min_stock: d("0.01"),
             price_floor: d("0.001"),
             price_ceiling: d("1000000"),
         },
@@ -52,6 +53,7 @@ pub fn rules() -> Rules {
             reserve_days: 5,
             dividend_payout_rate: d("0.1"),
             target_stock_days: 2,
+            subsistence_wage_multiple: d("1.5"),
         },
         demographics: DemographicRules { growth_rate: d("0.01"), starvation_rate: d("0.3") },
     }

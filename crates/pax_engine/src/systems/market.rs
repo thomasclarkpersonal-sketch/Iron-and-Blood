@@ -246,8 +246,10 @@ fn input_orders(world: &World) -> Vec<InputOrder> {
 fn sell_offers(world: &World) -> Vec<SellOffer> {
     let p = &world.producers;
     let mut offers = Vec::new();
+    let min_stock = world.defs.rules.market.min_stock;
     for i in 0..p.len() {
-        if !p.output_stock[i].is_positive() {
+        // Dust is neither offered nor counted as stock (see MarketRules::min_stock).
+        if !p.output_stock[i].is_positive() || p.output_stock[i] < min_stock {
             continue;
         }
         let def = &world.defs.producer_types[p.kind[i] as usize];

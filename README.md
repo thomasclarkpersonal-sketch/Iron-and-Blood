@@ -45,7 +45,7 @@ crates/pax_engine/   Pure simulation: Fixed, world tables, tick systems (no IO)
 crates/pax_data/     TOML loading + validation, golden-hash files
 crates/pax_cli/      Headless runner
 data/                Base definitions: goods, professions, production, rules
-scenarios/           Playable starting states + pinned golden hashes
+scenarios/           mini_valley (frozen regression fixture) and two_states (12 goods, 2 markets), each with pinned golden hashes
 docs/                Design documentation (source of truth)
 ```
 

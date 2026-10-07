@@ -1,0 +1,269 @@
+# Milestone 1 content scenario (task T2): two states with different endowments.
+# Lowland is agrarian and textile-heavy; Highland has the mines and the steel.
+# The markets do not trade until M2 (DECISIONS.md D14), so each state runs complete local chains.
+
+name = "Two States"
+seed = 1848
+data = "../../data"
+
+[[market]]
+key = "lowland"
+
+[[market]]
+key = "highland"
+
+[[province]]
+key = "riverlands"
+market = "lowland"
+
+[[province]]
+key = "coast"
+market = "lowland"
+
+[[province]]
+key = "dale"
+market = "highland"
+
+[[province]]
+key = "peaks"
+market = "highland"
+
+[[pop]]
+province = "riverlands"
+profession = "farmer"
+size = 90000
+cash = 4500.0
+
+[[pop]]
+province = "coast"
+profession = "labourer"
+size = 17500
+cash = 875.0
+
+[[pop]]
+province = "coast"
+profession = "miner"
+size = 5000
+cash = 250.0
+
+[[pop]]
+province = "riverlands"
+profession = "craftsman"
+size = 24000
+cash = 2400.0
+
+[[pop]]
+province = "riverlands"
+profession = "aristocrat"
+size = 1500
+cash = 4500
+
+[[pop]]
+province = "riverlands"
+profession = "capitalist"
+size = 1000
+cash = 3000
+
+[[producer]]
+type = "farm"
+province = "riverlands"
+capacity = 80000
+cash = 33600.0
+wage = 0.014
+
+[[producer]]
+type = "cotton_plantation"
+province = "riverlands"
+capacity = 7000
+cash = 2940.0
+wage = 0.014
+
+[[producer]]
+type = "vineyard"
+province = "riverlands"
+capacity = 3000
+cash = 1260.0
+wage = 0.014
+
+[[producer]]
+type = "fishery"
+province = "coast"
+capacity = 12000
+cash = 5040.0
+wage = 0.014
+
+[[producer]]
+type = "lumber_camp"
+province = "coast"
+capacity = 5500
+cash = 2310.0
+wage = 0.014
+
+[[producer]]
+type = "coal_mine"
+province = "coast"
+capacity = 1500
+cash = 720.0
+wage = 0.016
+
+[[producer]]
+type = "iron_mine"
+province = "coast"
+capacity = 3500
+cash = 1680.0
+wage = 0.016
+
+[[producer]]
+type = "textile_mill"
+province = "riverlands"
+capacity = 6000
+cash = 3600.0
+wage = 0.02
+
+[[producer]]
+type = "tailor"
+province = "riverlands"
+capacity = 6000
+cash = 3600.0
+wage = 0.02
+
+[[producer]]
+type = "furniture_workshop"
+province = "riverlands"
+capacity = 6000
+cash = 3600.0
+wage = 0.02
+
+[[producer]]
+type = "steel_mill"
+province = "riverlands"
+capacity = 3000
+cash = 1800.0
+wage = 0.02
+
+[[producer]]
+type = "tool_works"
+province = "riverlands"
+capacity = 3000
+cash = 1800.0
+wage = 0.02
+
+[[pop]]
+province = "dale"
+profession = "farmer"
+size = 75000
+cash = 3750.0
+
+[[pop]]
+province = "peaks"
+profession = "labourer"
+size = 15000
+cash = 750.0
+
+[[pop]]
+province = "peaks"
+profession = "miner"
+size = 13000
+cash = 650.0
+
+[[pop]]
+province = "dale"
+profession = "craftsman"
+size = 15000
+cash = 1500.0
+
+[[pop]]
+province = "dale"
+profession = "aristocrat"
+size = 1000
+cash = 3000
+
+[[pop]]
+province = "dale"
+profession = "capitalist"
+size = 1000
+cash = 3000
+
+[[producer]]
+type = "farm"
+province = "dale"
+capacity = 70000
+cash = 29400.0
+wage = 0.014
+
+[[producer]]
+type = "cotton_plantation"
+province = "dale"
+capacity = 3000
+cash = 1260.0
+wage = 0.014
+
+[[producer]]
+type = "vineyard"
+province = "dale"
+capacity = 2000
+cash = 840.0
+wage = 0.014
+
+[[producer]]
+type = "fishery"
+province = "peaks"
+capacity = 12000
+cash = 5040.0
+wage = 0.014
+
+[[producer]]
+type = "lumber_camp"
+province = "peaks"
+capacity = 3000
+cash = 1260.0
+wage = 0.014
+
+[[producer]]
+type = "coal_mine"
+province = "peaks"
+capacity = 4000
+cash = 1920.0
+wage = 0.016
+
+[[producer]]
+type = "iron_mine"
+province = "peaks"
+capacity = 8000
+cash = 3840.0
+wage = 0.016
+
+[[producer]]
+type = "steel_mill"
+province = "dale"
+capacity = 7000
+cash = 4200.0
+wage = 0.02
+
+[[producer]]
+type = "tool_works"
+province = "dale"
+capacity = 4000
+cash = 2400.0
+wage = 0.02
+
+[[producer]]
+type = "furniture_workshop"
+province = "dale"
+capacity = 2000
+cash = 1200.0
+wage = 0.02
+
+[[producer]]
+type = "textile_mill"
+province = "dale"
+capacity = 1000
+cash = 600.0
+wage = 0.02
+
+[[producer]]
+type = "tailor"
+province = "dale"
+capacity = 1000
+cash = 600.0
+wage = 0.02

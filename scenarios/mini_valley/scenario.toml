@@ -3,7 +3,7 @@
 
 name = "Mini Valley"
 seed = 1836
-data = "../../data"
+data = "defs"            # frozen copy: this scenario is the golden regression fixture
 
 [[market]]
 key = "valley"

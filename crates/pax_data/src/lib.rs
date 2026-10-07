@@ -242,6 +242,7 @@ pub fn parse_defs(src: &DefSources<'_>) -> Result<Defs, LoadError> {
     errors.check(m.step_decay_iterations >= 1, || "rules.market: step_decay_iterations must be >= 1".into());
     errors.check(in_range(m.step.0, Fixed::EPSILON, Fixed::ONE), || "rules.market: step must be in (0, 1]".into());
     errors.check(!m.tolerance.0.is_negative(), || "rules.market: tolerance must be >= 0".into());
+    errors.check(!m.min_stock.0.is_negative(), || "rules.market: min_stock must be >= 0".into());
     errors.check(in_range(m.max_daily_change.0, Fixed::EPSILON, Fixed::ONE - Fixed::EPSILON), || {
         "rules.market: max_daily_change must be in (0, 1)".into()
     });
@@ -254,6 +255,9 @@ pub fn parse_defs(src: &DefSources<'_>) -> Result<Defs, LoadError> {
     );
     errors.check(in_range(r.firms.dividend_payout_rate.0, Fixed::ZERO, Fixed::ONE), || {
         "rules.firms: dividend_payout_rate must be in [0, 1]".into()
+    });
+    errors.check(!r.firms.subsistence_wage_multiple.0.is_negative(), || {
+        "rules.firms: subsistence_wage_multiple must be >= 0".into()
     });
     errors.check(in_range(r.demographics.growth_rate.0, Fixed::ZERO, Fixed::ONE), || {
         "rules.demographics: growth_rate must be in [0, 1]".into()
@@ -274,6 +278,7 @@ pub fn parse_defs(src: &DefSources<'_>) -> Result<Defs, LoadError> {
             step_decay_iterations: m.step_decay_iterations,
             tolerance: m.tolerance.0,
             max_daily_change: m.max_daily_change.0,
+            min_stock: m.min_stock.0,
             price_floor: m.price_floor.0,
             price_ceiling: m.price_ceiling.0,
         },
@@ -283,6 +288,7 @@ pub fn parse_defs(src: &DefSources<'_>) -> Result<Defs, LoadError> {
             reserve_days: r.firms.reserve_days,
             dividend_payout_rate: r.firms.dividend_payout_rate.0,
             target_stock_days: r.firms.target_stock_days,
+            subsistence_wage_multiple: r.firms.subsistence_wage_multiple.0,
         },
         demographics: DemographicRules {
             growth_rate: r.demographics.growth_rate.0,

@@ -33,7 +33,7 @@
 | A8 | Reference scenario runs 5 years without collapse, with all goods traded | ✅ | `pax_cli run scenarios/mini_valley --days 1800` |
 | A9 | 1M POP rows ≤ 100 ms/day on 8 threads | ✅ 45 ms | `pax_cli bench scenarios/mini_valley --scale 170000 --threads 8` |
 | A10 | CI fails on > 20% benchmark regression | ✅ | `Benchmark regression` job in `ci.yml` (`scripts/bench-compare.sh`) |
-| A11 | Larger reference content (≥ 10 goods, ≥ 6 professions, ≥ 2 markets) runs 20 years stably | ⬜ | Task T2 |
+| A11 | Larger reference content (≥ 10 goods, ≥ 6 professions, ≥ 2 markets) runs 20 years stably | ✅ | `scenarios/two_states` (12 goods, 6 professions, 2 markets); `pax_data/tests/content_stability.rs` |
 | A12 | Economy health report (GDP, unemployment, price index, wage share) in `pax_cli` | ✅ | `pax_cli report scenarios/mini_valley --days 1800` |
 
 ## Open tasks for the team
@@ -43,7 +43,7 @@ Each task is sized for one developer. All must keep `cargo test`, `clippy -D war
 | ID | Task | Notes |
 |----|------|-------|
 | T1 | ✅ **Benchmark gate.** A CI job that runs `pax_cli bench` and compares against a baseline. | Done: the `Benchmark regression` job builds the PR's base and head, times both on the same runner (5 alternating runs, median, 300k POP rows, 2 threads) and fails above +20%. A stored baseline was rejected because runner speed varies. |
-| T2 | **Content and balance.** Grow `data/` to ≥ 10 goods (e.g. coal, iron, steel, cloth, cotton, fish, liquor) and a two-market scenario; tune until 20 years are stable. | Expect to find engine edge cases; write a regression test for each. |
+| T2 | ✅ **Content and balance.** ≥ 10 goods, ≥ 6 professions, ≥ 2 markets, 20 stable years. | Done: `data/` holds 12 goods with real chains (ore + coal → steel → tools; cotton → cloth → clothes; timber → furniture) and 6 professions; the `two_states` scenario has two endowments. The stability test runs 20 years. Three engine fixes came out of it (D1, D6): the dust threshold `min_stock`, the liquidity rule, and the subsistence wage floor. `mini_valley` now has frozen `defs/`, and its golden hashes were re-recorded because the wage floor changes results. |
 | T3 | ✅ **Health report.** `pax_cli report <scenario> --days N`: GDP, unemployment rate, Laspeyres price index, wage share of income, life-needs coverage. | Done: `crates/pax_cli/src/report.rs`. Engine `DayReport` gained `household_spending`, `input_spending`, `payouts` (wages, dividends); diagnostics only, hashes unchanged. |
 | T4 | ✅ **Group caching.** Labour and owner groups were rebuilt every tick. | Done: `layout::PopLayout` (labour pools, owner pools, POP→market) is cached in `World`. It is self-validating: an O(N) input fingerprint each tick triggers a rebuild on any change (D7 amended). Largest-remainder allocation now uses O(n) selection instead of a sort, with identical results. **1M POPs: 43 → ~37 ms/day on 8 threads**; golden hashes unchanged. |
 | T5 | **Per-market locality.** Settlement keeps a `markets × goods` accumulator per rayon job. With ~3,000 markets that is too large. Keep POP rows sorted by market and reduce per market range. | Required for the D13 long-term target. |
@@ -53,7 +53,7 @@ Each task is sized for one developer. All must keep `cargo test`, `clippy -D war
 
 ## Known risks and limitations
 
-- **Reservation-price drift.** Wages track value added and the reservation price tracks wages (D6). In a bilateral market with an inelastic buyer, prices can drift slowly. Inventory targeting damps it; T2 will show whether a floor on the mark-up is needed.
+- **Reservation-price drift.** Wages track value added, and the reservation price tracks wages (D6). T2 confirmed this drift drives prices to the technical floor in fixed-quantity supply chains. It is now anchored by the subsistence wage floor (D6).
 - **No unemployment benefit.** Unemployed POPs live off savings until they starve. This is intended until government spending exists (M2).
 - **Aggregated regime approximation** in price discovery (D2). Monitor tâtonnement iteration counts in `DayReport.iterations`; consistently hitting `max_iterations` indicates the approximation is hurting.
 

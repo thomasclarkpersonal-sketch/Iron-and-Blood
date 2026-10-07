@@ -1,15 +1,34 @@
-# Production technologies: fixed-coefficient (Leontief) recipes (DECISIONS.md D6).
-#   output_per_worker = units of output per employed person per day
-#   inputs            = units of each input good per unit of output
-#   worker / owner    = professions that supply labour / receive dividends
-#   labor_share       = target share of revenue paid as wages
-#   input_spend_rate  = fraction of cash the producer may spend on inputs per day
+# Production technologies: fixed-coefficient (Leontief) recipes (DECISIONS.md D6). See docs/DATA_FORMAT.md.
 
 [[producer_type]]
 key = "farm"
 output = "grain"
 output_per_worker = 0.02
 worker = "farmer"
+owner = "aristocrat"
+labor_share = 0.7
+
+[[producer_type]]
+key = "cotton_plantation"
+output = "cotton"
+output_per_worker = 0.012
+worker = "farmer"
+owner = "aristocrat"
+labor_share = 0.7
+
+[[producer_type]]
+key = "vineyard"
+output = "wine"
+output_per_worker = 0.005
+worker = "farmer"
+owner = "aristocrat"
+labor_share = 0.7
+
+[[producer_type]]
+key = "fishery"
+output = "fish"
+output_per_worker = 0.008
+worker = "labourer"
 owner = "aristocrat"
 labor_share = 0.7
 
@@ -22,18 +41,66 @@ owner = "aristocrat"
 labor_share = 0.7
 
 [[producer_type]]
-key = "vineyard"
-output = "wine"
-output_per_worker = 0.005
-worker = "labourer"
-owner = "aristocrat"
+key = "coal_mine"
+output = "coal"
+output_per_worker = 0.01
+worker = "miner"
+owner = "capitalist"
 labor_share = 0.7
+
+[[producer_type]]
+key = "iron_mine"
+output = "iron_ore"
+output_per_worker = 0.008
+worker = "miner"
+owner = "capitalist"
+labor_share = 0.7
+
+[[producer_type]]
+key = "steel_mill"
+output = "steel"
+output_per_worker = 0.004
+inputs = { iron_ore = 2.0, coal = 1.0 }
+worker = "craftsman"
+owner = "capitalist"
+labor_share = 0.5
+input_spend_rate = 0.5
+
+[[producer_type]]
+key = "textile_mill"
+output = "cloth"
+output_per_worker = 0.01
+inputs = { cotton = 1.5 }
+worker = "craftsman"
+owner = "capitalist"
+labor_share = 0.5
+input_spend_rate = 0.5
+
+[[producer_type]]
+key = "tailor"
+output = "clothes"
+output_per_worker = 0.006
+inputs = { cloth = 1.0 }
+worker = "craftsman"
+owner = "capitalist"
+labor_share = 0.5
+input_spend_rate = 0.5
 
 [[producer_type]]
 key = "furniture_workshop"
 output = "furniture"
 output_per_worker = 0.006
 inputs = { timber = 2.0 }
+worker = "craftsman"
+owner = "capitalist"
+labor_share = 0.5
+input_spend_rate = 0.5
+
+[[producer_type]]
+key = "tool_works"
+output = "tools"
+output_per_worker = 0.004
+inputs = { steel = 1.0, timber = 0.5 }
 worker = "craftsman"
 owner = "capitalist"
 labor_share = 0.5
