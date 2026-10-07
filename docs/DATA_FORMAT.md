@@ -70,6 +70,7 @@ input_spend_rate = 0.5      # fraction of cash spendable on inputs per day, in [
 | `demographics.growth_rate` | Monthly growth at full life needs | [0, 1] |
 | `demographics.starvation_rate` | Monthly decline at zero life needs | [0, 1] |
 | `demographics.mobility_rate` | Share of a pool's unemployed who move to vacancies each month (D18) | [0, 1] |
+| `demographics.migration_rate` | Share of a province's surplus workers who migrate within their market each month (D20) | [0, 1] |
 | `politics.militancy_rise` | Monthly militancy rise at zero life needs (D19) | [0, 1] |
 | `politics.militancy_tax_weight` | Monthly rise per unit of income tax rate | [0, 1] |
 | `politics.militancy_decay` | Share of militancy that fades each month | [0, 1] |

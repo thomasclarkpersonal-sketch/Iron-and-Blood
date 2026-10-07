@@ -9,7 +9,7 @@
 //! | 3 | market: orders → price discovery → settlement | daily |
 //! | 4 | firms: wages and dividends, income tax withheld | daily |
 //! | 4b | government: transfers from treasuries to POPs | daily |
-//! | 5 | mobility: unemployed workers move to vacancies (D18) | month end |
+//! | 5 | mobility: unemployed workers move to vacancies (D18), then migrate within their market (D20) | month end |
 //! | 6 | politics: militancy (D19) | month end |
 //! | 7 | demographics | month end |
 //!
@@ -48,6 +48,8 @@ pub struct DayReport {
     pub government_spending: Fixed,
     /// People who changed profession today (month end only, D18).
     pub moved: u64,
+    /// People who moved to another province of their market today (month end only, D20).
+    pub migrated: u64,
     pub total_money: Fixed,
 }
 
@@ -66,9 +68,12 @@ pub fn step(world: &mut World) -> DayReport {
     let outcome = market::clear_markets(world, &layout);
     let payouts = firms::pay_wages_and_dividends(world, &layout, &outcome.revenue, &outcome.input_cost);
     let transfers = government::pay_transfers(world, &layout);
-    let mut moved = 0;
+    let (mut moved, mut migrated) = (0, 0);
     if demographics::is_month_end(world) {
         moved = mobility::reassign_workers(world, &layout, &labour);
+        // Mobility may have appended rows: migrate on a fresh layout.
+        let regrouped = world.pop_layout();
+        migrated = mobility::migrate_within_markets(world, &regrouped);
         politics::update_militancy(world);
         demographics::update_population(world);
     }
@@ -85,6 +90,7 @@ pub fn step(world: &mut World) -> DayReport {
         transfers,
         government_spending: outcome.government_spending,
         moved,
+        migrated,
         goods: outcome.goods,
         iterations: outcome.iterations,
         labour,

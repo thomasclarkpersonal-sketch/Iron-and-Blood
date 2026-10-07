@@ -268,6 +268,9 @@ pub fn parse_defs(src: &DefSources<'_>) -> Result<Defs, LoadError> {
     errors.check(in_range(r.demographics.mobility_rate.0, Fixed::ZERO, Fixed::ONE), || {
         "rules.demographics: mobility_rate must be in [0, 1]".into()
     });
+    errors.check(in_range(r.demographics.migration_rate.0, Fixed::ZERO, Fixed::ONE), || {
+        "rules.demographics: migration_rate must be in [0, 1]".into()
+    });
     for (name, v) in [
         ("militancy_rise", r.politics.militancy_rise.0),
         ("militancy_tax_weight", r.politics.militancy_tax_weight.0),
@@ -304,6 +307,7 @@ pub fn parse_defs(src: &DefSources<'_>) -> Result<Defs, LoadError> {
             growth_rate: r.demographics.growth_rate.0,
             starvation_rate: r.demographics.starvation_rate.0,
             mobility_rate: r.demographics.mobility_rate.0,
+            migration_rate: r.demographics.migration_rate.0,
         },
         politics: PoliticsRules {
             militancy_rise: r.politics.militancy_rise.0,

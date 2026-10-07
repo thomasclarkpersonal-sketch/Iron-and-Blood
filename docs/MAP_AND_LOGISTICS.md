@@ -44,5 +44,6 @@ Infrastructure lowers `τ` on the links it serves and raises their capacity (the
 POPs move according to push factors (low `life_needs`, unemployment) and pull factors (wages, jobs, free land). Migration is a deterministic flow `⌊N × rate⌋` that carries its share of cash (D7).
 
 *   **Intra-state migration:** easy. Farmers moving from a rural province to an urban one in the same state.
-*   **Inter-state migration:** moderate, within the same nation. Rate scaled down by `τ` between the states.
+*   **Within a state market:** implemented (D20). Surplus workers move to provinces of the same market with vacancies in their profession.
+*   **Inter-state migration:** moderate, within the same nation. Rate scaled down by `τ` between the states (after trade, D14).
 *   **International migration:** hard (e.g. Europe to the Americas). Influenced by laws, available land, and same-culture POPs at the destination.

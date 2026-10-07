@@ -29,6 +29,7 @@ To change a decision, edit its entry in the same pull request as the code. Say w
 | [D16](#d16-government-consumption) | Government consumption | Accepted (M2-2) |
 | [D18](#d18-labour-mobility) | Labour mobility | Accepted (M2-4) |
 | [D19](#d19-militancy) | Militancy | Accepted (M2-5) |
+| [D20](#d20-migration-within-a-market) | Migration within a market | Accepted (M2-6) |
 
 ---
 
@@ -104,7 +105,7 @@ To change a decision, edit its entry in the same pull request as the code. Say w
 | 3 | Market: orders (households, producers' inputs, governments D16) → price discovery → settlement | daily |
 | 4 | Firms: wages, dividends (income tax withheld, D15) | daily |
 | 4b | Government: transfers from treasuries to POPs (D15) | daily |
-| 5 | Labour mobility: unemployed workers move to vacancies (D18); *(M2)* promotion, migration | month end |
+| 5 | Labour mobility within a province (D18), then migration within a market (D20); *(M2)* promotion | month end |
 | 6 | Politics: militancy (D19); *(M2)* consciousness | month end |
 | 7 | Demographics | month end |
 
@@ -275,7 +276,7 @@ The state → national → sphere → global roll-up in the old ECONOMY_SYSTEM w
   - Population and money are conserved, and tested.
 - **Tuning:** `demographics.mobility_rate` in `rules.toml`. `mini_valley`'s frozen definitions use 0, which keeps it a pure regression fixture.
 - **What it does not fix:** unemployment caused by *total* job capacity lagging population. That needs investment (new and expanding producers), a later M2 item.
-- **Later:** migration between provinces (weighted by `τ`, MAP_AND_LOGISTICS.md), promotion to higher strata (literacy, D7), culture and religion.
+- **Later:** migration between provinces (D20 covers provinces of the same market), promotion to higher strata (literacy, D7), culture and religion.
 
 ## D19. Militancy
 
@@ -287,4 +288,14 @@ The state → national → sphere → global roll-up in the old ECONOMY_SYSTEM w
   - The equilibrium is `m* = (rise × (1 − s) + tax_weight × t) / decay`. For example, a fed POP under a 10% tax with the defaults settles at 0.1.
 - **Reported** as the population-weighted mean in `pax_cli report`.
 - **Later:** rebellions, which will be the one place genuine randomness is used (`rng::Stream::REBELLION`, D3); consciousness and reforms; interest groups.
+
+## D20. Migration within a market
+
+**Accepted (M2-6).** People follow jobs across provinces of the same state market.
+
+- **When:** at month end, right after labour mobility (D18), on the workforce as it stands then.
+- **Rule:** for each market and worker profession, a province whose workforce exceeds its jobs sends `⌊surplus × migration_rate⌋` people to provinces of the same market with vacancies for that profession. The largest vacancy goes first, then the lowest province; no destination goes beyond its vacancies.
+- **Migrants keep their profession** and move with their cash under the D7 split rules, into the destination's existing row or a new one. People and money are conserved, and tested.
+- **Never across markets.** Moving between states, or to colonies, needs friction (`τ`, D14) and is left for after trade (TRADE.md).
+- **Tuning:** `demographics.migration_rate` (0.05 in `data/`, 0 in `mini_valley`'s frozen definitions). In `two_states` each profession lives in only one province per state, so results there are unchanged.
 

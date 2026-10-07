@@ -64,7 +64,7 @@ If a market is short, every buyer receives the same fraction of what it asked fo
 - Cash is unchanged: survivors inherit. If a POP dies out, its cash passes to the largest living POP in the same province, so money is never destroyed (D5).
 
 ## 🔀 Labour Mobility (D18)
-Each month, within a province, unemployed workers move to professions with vacancies, taking their share of cash with them. See [DECISIONS.md D18](DECISIONS.md#d18-labour-mobility). Migration between provinces and promotion to higher strata come later.
+Each month, within a province, unemployed workers move to professions with vacancies (D18). Then surplus workers migrate to provinces of the same market that have vacancies in their profession (D20). Both take their share of cash with them. Migration across markets and promotion to higher strata come later.
 
 ## 🧮 Merging and Splitting (M2)
 

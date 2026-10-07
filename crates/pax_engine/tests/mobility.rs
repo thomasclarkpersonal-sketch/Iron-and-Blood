@@ -7,7 +7,7 @@ use std::sync::Arc;
 use common::{d, random_world, rules};
 use pax_engine::defs::{Defs, GoodDef, ProducerTypeDef, ProfessionDef};
 use pax_engine::systems::labor::assign_employment;
-use pax_engine::systems::mobility::reassign_workers;
+use pax_engine::systems::mobility::{migrate_within_markets, reassign_workers};
 use pax_engine::world::{Geography, NewProducer};
 use pax_engine::{Fixed, World};
 
@@ -101,4 +101,63 @@ fn mobility_conserves_people_and_money_in_random_worlds() {
         }
     }
     assert!(moves > 0, "random worlds should exercise mobility");
+}
+
+/// Two provinces of one market: 1,000 farmers and 100 farm jobs in province 0;
+/// a farm with 300 jobs and nobody in province 1.
+fn two_province_world() -> World {
+    let mut world = mismatched_world();
+    world.geography.province_keys.push("q".into());
+    world.geography.province_market.push(0);
+    world.producers.capacity[1] = 0; // no labourer jobs: farmers must migrate, not switch
+    world.push_producer(NewProducer {
+        kind: 0,
+        province: 1,
+        capacity: 300,
+        cash: d("50"),
+        wage: d("0.01"),
+        output_stock: Fixed::ZERO,
+    });
+    world
+}
+
+#[test]
+fn surplus_workers_migrate_to_vacancies_in_their_market() {
+    let mut world = two_province_world();
+    let (people, money) = (world.population(), world.total_money());
+    let layout = world.pop_layout();
+    let moved = migrate_within_markets(&mut world, &layout);
+    // Surplus 900 farmers × migration_rate 0.1 = 90, well within 300 vacancies.
+    assert_eq!(moved, 90);
+    let dest = (0..world.pops.len()).find(|&i| world.pops.province[i] == 1).expect("a farmer row in province 1");
+    assert_eq!(world.pops.profession[dest], 0, "migrants keep their profession");
+    assert_eq!(world.pops.size[dest], 90);
+    assert_eq!(world.pops.cash[dest], d("9"), "migrants take 90/1000 of the cash");
+    assert_eq!((world.population(), world.total_money()), (people, money));
+}
+
+#[test]
+fn migration_never_crosses_markets() {
+    let mut world = two_province_world();
+    world.geography.market_keys.push("other".into());
+    world.geography.province_market[1] = 1;
+    let goods = world.defs.good_count();
+    world.markets.price.extend(std::iter::repeat_n(Fixed::ONE, goods));
+    let layout = world.pop_layout();
+    assert_eq!(migrate_within_markets(&mut world, &layout), 0);
+}
+
+#[test]
+fn migration_conserves_people_and_money_in_random_worlds() {
+    let mut moves = 0;
+    for seed in 4100..4200 {
+        let mut world = random_world(seed);
+        for _ in 0..3 {
+            let (people, money) = (world.population(), world.total_money());
+            let layout = world.pop_layout();
+            moves += migrate_within_markets(&mut world, &layout);
+            assert_eq!((world.population(), world.total_money()), (people, money), "seed {seed}");
+        }
+    }
+    assert!(moves > 0, "random worlds should exercise migration");
 }
