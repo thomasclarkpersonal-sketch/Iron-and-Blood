@@ -1,0 +1,54 @@
+name: Feature request
+description: Propose a feature. Maintainers can hand it to the Claude feature pipeline.
+title: "[Feature] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A maintainer can add the `claude-plan` label to have Claude draft an implementation
+        plan from this issue (see docs/CLAUDE_FEATURE_PIPELINE.md). The clearer the request,
+        the better the plan. Please don't write "@claude" here: that triggers the
+        separate assistant workflow.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What should the simulation do that it does not do today?
+      placeholder: e.g. Add an income tax on wages that is paid into a national treasury.
+    validations:
+      required: true
+  - type: textarea
+    id: motivation
+    attributes:
+      label: Motivation
+      description: Why is it needed? Which milestone or design document does it serve?
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: Checkable outcomes. Each becomes a test or a review item.
+      placeholder: |
+        - Tax is deducted when wages are paid, before POPs spend
+        - Treasury cash is included in the money-conservation invariant
+        - Tax rate is configured per nation in data, as a Fixed value
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      multiple: true
+      options:
+        - Economy / markets
+        - POPs / demographics
+        - Politics / fiscal
+        - Map / logistics
+        - Military
+        - Data format / loader
+        - CLI / tooling
+        - Other
+  - type: textarea
+    id: constraints
+    attributes:
+      label: Constraints and out of scope
+      description: Anything Claude must not change, or decisions already made.
