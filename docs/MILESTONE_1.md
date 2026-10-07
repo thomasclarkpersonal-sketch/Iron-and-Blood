@@ -34,7 +34,7 @@
 | A9 | 1M POP rows ≤ 100 ms/day on 8 threads | ✅ 45 ms | `pax_cli bench scenarios/mini_valley --scale 170000 --threads 8` |
 | A10 | CI fails on > 20% benchmark regression | ✅ | `Benchmark regression` job in `ci.yml` (`scripts/bench-compare.sh`) |
 | A11 | Larger reference content (≥ 10 goods, ≥ 6 professions, ≥ 2 markets) runs 20 years stably | ⬜ | Task T2 |
-| A12 | Economy health report (GDP, unemployment, price index, wage share) in `pax_cli` | ⬜ | Task T3 |
+| A12 | Economy health report (GDP, unemployment, price index, wage share) in `pax_cli` | ✅ | `pax_cli report scenarios/mini_valley --days 1800` |
 
 ## Open tasks for the team
 
@@ -44,7 +44,7 @@ Each task is sized for one developer. All must keep `cargo test`, `clippy -D war
 |----|------|-------|
 | T1 | ✅ **Benchmark gate.** A CI job that runs `pax_cli bench` and compares against a baseline. | Done: the `Benchmark regression` job builds the PR's base and head, times both on the same runner (5 alternating runs, median, 300k POP rows, 2 threads) and fails above +20%. A stored baseline was rejected because runner speed varies. |
 | T2 | **Content and balance.** Grow `data/` to ≥ 10 goods (e.g. coal, iron, steel, cloth, cotton, fish, liquor) and a two-market scenario; tune until 20 years are stable. | Expect to find engine edge cases; write a regression test for each. |
-| T3 | **Health report.** `pax_cli report <scenario> --days N`: GDP (value added), unemployment rate, Laspeyres price index, wage share of income, life-needs coverage. | Presentation-only, so floats are fine here. |
+| T3 | ✅ **Health report.** `pax_cli report <scenario> --days N`: GDP, unemployment rate, Laspeyres price index, wage share of income, life-needs coverage. | Done: `crates/pax_cli/src/report.rs`. Engine `DayReport` gained `household_spending`, `input_spending`, `payouts` (wages, dividends); diagnostics only, hashes unchanged. |
 | T4 | **Group caching.** `labor::pop_pools` and the owner groups are rebuilt every tick. Cache them in `World` and invalidate when rows or provinces change. | Profile first: `cargo build --release` then `perf record`. |
 | T5 | **Per-market locality.** Settlement keeps a `markets × goods` accumulator per rayon job. With ~3,000 markets that is too large. Keep POP rows sorted by market and reduce per market range. | Required for the D13 long-term target. |
 | T6 | ✅ **Heir lookup.** `demographics::update_population` scanned all POPs for each extinct POP (O(N²) worst case). | Done: one O(N) pass picks each province's heir (sizes are fixed while estates settle). Results are identical; golden hashes are unchanged. Tests in `tests/demographics.rs` (20,000 simultaneous extinctions, ties, empty province). |

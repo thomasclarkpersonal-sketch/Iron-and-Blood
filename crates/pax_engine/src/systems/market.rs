@@ -61,6 +61,8 @@ pub struct MarketOutcome {
     pub goods: Vec<GoodReport>,
     /// Tâtonnement iterations used, per market.
     pub iterations: Vec<u32>,
+    /// Total paid by households (POPs) for consumption: final demand.
+    pub household_spending: Fixed,
 }
 
 /// A producer's input purchase order: `D(p) = min(need, budget / p)`.
@@ -496,6 +498,7 @@ fn settle(
             |(b1, p1), (b2, p2)| (add_vectors(b1, b2), add_vectors(p1, p2)),
         );
     let (mut bought, mut paid) = (bought, paid);
+    let household_spending: Fixed = paid.iter().copied().sum();
 
     // Producers buy inputs.
     let producers = &mut world.producers;
@@ -546,7 +549,7 @@ fn settle(
             traded: std::mem::take(&mut bought[k]),
         })
         .collect();
-    MarketOutcome { revenue, input_cost, goods: reports, iterations }
+    MarketOutcome { revenue, input_cost, household_spending, goods: reports, iterations }
 }
 
 fn add_vectors(mut a: Vec<Fixed>, b: Vec<Fixed>) -> Vec<Fixed> {
