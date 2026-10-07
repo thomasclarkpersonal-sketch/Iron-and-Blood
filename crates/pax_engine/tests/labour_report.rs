@@ -10,6 +10,9 @@ fn labour_report_matches_employment() {
     for seed in 2000..2100 {
         let mut world = random_world(seed);
         for day in 0..20 {
+            // Labour is assigned at the start of the day; month-end demographics
+            // change sizes afterwards, so labels are checked against the pre-day table.
+            let start = world.clone();
             let report = step(&mut world);
             let mut reported_employed = 0u64;
             let mut last_key = None;
@@ -20,6 +23,24 @@ fn labour_report_matches_employment() {
                 let key = (pool.province, pool.profession);
                 assert!(last_key < Some(key), "seed {seed} day {day}: pools out of order");
                 last_key = Some(key);
+                // Labels must match the tables, not just the totals.
+                let workforce: u64 = (0..start.pops.len())
+                    .filter(|&i| start.pops.province[i] == pool.province && start.pops.profession[i] == pool.profession)
+                    .map(|i| start.pops.size[i] as u64)
+                    .sum();
+                let jobs: u64 = (0..start.producers.len())
+                    .filter(|&i| {
+                        start.producers.province[i] == pool.province
+                            && start.defs.producer_types[start.producers.kind[i] as usize].worker
+                                == pool.profession as usize
+                    })
+                    .map(|i| start.producers.capacity[i] as u64)
+                    .sum();
+                assert_eq!(
+                    (pool.workforce, pool.jobs),
+                    (workforce, jobs),
+                    "seed {seed} day {day}: mislabelled {pool:?}"
+                );
                 reported_employed += pool.employed;
             }
             let actual: u64 = world.producers.employed.iter().map(|&e| e as u64).sum();

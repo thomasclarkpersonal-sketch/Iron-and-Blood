@@ -17,6 +17,13 @@ pub fn pool_key(world: &World, province: u32, profession: usize) -> usize {
     province as usize * world.defs.professions.len() + profession
 }
 
+/// Inverse of [`pool_key`]: the `(province, profession)` of a labour pool key.
+/// Keep both functions together; they define the pool layout.
+pub fn pool_of_key(world: &World, key: usize) -> (u32, u16) {
+    let professions = world.defs.professions.len();
+    ((key / professions) as u32, (key % professions) as u16)
+}
+
 /// Number of labour pools.
 pub fn pool_count(world: &World) -> usize {
     world.geography.province_count() * world.defs.professions.len()
@@ -64,7 +71,6 @@ pub fn assign_employment(world: &mut World, pools: &Groups) -> Vec<LabourReport>
         })
         .collect();
     let by_pool = Groups::build(pool_count(world), &producer_keys);
-    let professions = world.defs.professions.len();
     let mut report = Vec::new();
 
     for pool in 0..by_pool.key_count() {
@@ -72,13 +78,8 @@ pub fn assign_employment(world: &mut World, pools: &Groups) -> Vec<LabourReport>
         let supply: u64 = pools.members(pool).iter().map(|&r| world.pops.size[r as usize] as u64).sum();
         if employers.is_empty() {
             if supply > 0 {
-                report.push(LabourReport {
-                    province: (pool / professions) as u32,
-                    profession: (pool % professions) as u16,
-                    workforce: supply,
-                    jobs: 0,
-                    employed: 0,
-                });
+                let (province, profession) = pool_of_key(world, pool);
+                report.push(LabourReport { province, profession, workforce: supply, jobs: 0, employed: 0 });
             }
             continue;
         }
@@ -94,13 +95,8 @@ pub fn assign_employment(world: &mut World, pools: &Groups) -> Vec<LabourReport>
             world.producers.employed[r as usize] = h as u32;
             employed += h as u64;
         }
-        report.push(LabourReport {
-            province: (pool / professions) as u32,
-            profession: (pool % professions) as u16,
-            workforce: supply,
-            jobs: demand as u64,
-            employed,
-        });
+        let (province, profession) = pool_of_key(world, pool);
+        report.push(LabourReport { province, profession, workforce: supply, jobs: demand as u64, employed });
     }
     report
 }
