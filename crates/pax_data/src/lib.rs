@@ -24,7 +24,7 @@ use pax_engine::alloc::allocate;
 use pax_engine::defs::{
     Defs, DemographicRules, FirmRules, GoodDef, MarketRules, ProducerTypeDef, ProfessionDef, Rules,
 };
-use pax_engine::world::{Geography, NewProducer};
+use pax_engine::world::{Geography, NewNation, NewProducer};
 use pax_engine::{Fixed, World};
 
 pub use schema::Dec;
@@ -301,6 +301,7 @@ pub fn parse_defs(src: &DefSources<'_>) -> Result<Defs, LoadError> {
 
 fn build_world(defs: Arc<Defs>, s: &ScenarioFile) -> Result<World, LoadError> {
     let mut errors = Errors::default();
+    let nation_ix = index("nation", s.nation.iter().map(|n| n.key.as_str()), &mut errors);
     let market_ix = index("market", s.market.iter().map(|m| m.key.as_str()), &mut errors);
     let province_ix = index("province", s.province.iter().map(|p| p.key.as_str()), &mut errors);
     let prof_ix: BTreeMap<String, usize> =
@@ -317,7 +318,33 @@ fn build_world(defs: Arc<Defs>, s: &ScenarioFile) -> Result<World, LoadError> {
             .map(|p| lookup(&market_ix, "market", &p.market, &format!("province '{}'", p.key), &mut errors) as u32)
             .collect(),
         market_keys: s.market.iter().map(|m| m.key.clone()).collect(),
+        market_nation: s
+            .market
+            .iter()
+            .map(|m| {
+                m.nation
+                    .as_ref()
+                    .map(|n| lookup(&nation_ix, "nation", n, &format!("market '{}'", m.key), &mut errors) as u32)
+            })
+            .collect(),
     };
+    let nations: Vec<NewNation> = s
+        .nation
+        .iter()
+        .map(|n| {
+            let ctx = format!("nation '{}'", n.key);
+            errors.check(!n.treasury.0.is_negative(), || format!("{ctx}: treasury must be >= 0"));
+            for (name, v) in [("income_tax_rate", n.income_tax_rate.0), ("transfer_rate", n.transfer_rate.0)] {
+                errors.check(in_range(v, Fixed::ZERO, Fixed::ONE), || format!("{ctx}: {name} must be in [0, 1]"));
+            }
+            NewNation {
+                key: n.key.clone(),
+                treasury: n.treasury.0,
+                income_tax_rate: n.income_tax_rate.0,
+                transfer_rate: n.transfer_rate.0,
+            }
+        })
+        .collect();
 
     // Resolve every reference before mutating the world, so a bad file never
     // trips the engine's own assertions.
@@ -355,6 +382,9 @@ fn build_world(defs: Arc<Defs>, s: &ScenarioFile) -> Result<World, LoadError> {
         })
         .collect();
     let mut world = errors.finish(World::new(defs, geography, s.seed))?;
+    for n in nations {
+        world.push_nation(n);
+    }
     for (province, profession, size, cash) in pops {
         world.push_pop(province, profession, size, cash);
     }

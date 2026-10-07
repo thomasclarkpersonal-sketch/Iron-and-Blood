@@ -6,11 +6,27 @@ name = "Two States"
 seed = 1848
 data = "../../data"
 
+# Governments (M2-1, DECISIONS.md D15): a flat income tax withheld from wages and
+# dividends, and a daily per-capita transfer of a share of the treasury.
+[[nation]]
+key = "lowland_kingdom"
+treasury = 2000
+income_tax_rate = 0.08
+transfer_rate = 0.05
+
+[[nation]]
+key = "highland_republic"
+treasury = 2000
+income_tax_rate = 0.12
+transfer_rate = 0.05
+
 [[market]]
 key = "lowland"
+nation = "lowland_kingdom"
 
 [[market]]
 key = "highland"
+nation = "highland_republic"
 
 [[province]]
 key = "riverlands"

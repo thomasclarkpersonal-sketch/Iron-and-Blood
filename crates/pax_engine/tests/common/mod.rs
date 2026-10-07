@@ -6,7 +6,7 @@
 use std::sync::Arc;
 
 use pax_engine::defs::*;
-use pax_engine::world::{Geography, NewProducer};
+use pax_engine::world::{Geography, NewNation, NewProducer};
 use pax_engine::{Fixed, World};
 
 /// Xorshift64: a tiny deterministic generator for test inputs only.
@@ -98,8 +98,23 @@ pub fn random_world(seed: u64) -> World {
         province_keys: (0..provinces).map(|p| format!("p{p}")).collect(),
         province_market: (0..provinces).map(|p| (p % markets) as u32).collect(),
         market_keys: (0..markets).map(|m| format!("m{m}")).collect(),
+        market_nation: Vec::new(),
     };
+    // 0–2 nations; each market belongs to a random nation or to none (stateless).
+    let nations = r.below(3) as u32;
+    let mut geography = geography;
+    geography.market_nation = (0..markets)
+        .map(|_| if nations == 0 || r.below(4) == 0 { None } else { Some(r.below(nations as u64) as u32) })
+        .collect();
     let mut world = World::new(Arc::new(defs), geography, seed);
+    for n in 0..nations {
+        world.push_nation(NewNation {
+            key: format!("n{n}"),
+            treasury: r.fixed(1_000_000_000),
+            income_tax_rate: r.fixed(500_000),
+            transfer_rate: r.fixed(200_000),
+        });
+    }
     for _ in 0..(1 + r.below(30)) {
         let size = if r.below(10) == 0 { 0 } else { 1 + r.below(50_000) as u32 };
         world.push_pop(r.below(provinces as u64) as u32, r.below(profs as u64) as usize, size, r.fixed(10_000_000_000));

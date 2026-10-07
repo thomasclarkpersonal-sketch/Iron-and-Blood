@@ -174,8 +174,23 @@ fn replicate(base: &World, scale: u32, regions: u32) -> World {
         geography.province_keys.extend(g.province_keys.iter().map(|k| format!("{k}#{r}")));
         geography.province_market.extend(g.province_market.iter().map(|&m| m + r * markets));
         geography.market_keys.extend(g.market_keys.iter().map(|k| format!("{k}#{r}")));
+        let nations = base.nations.len() as u32;
+        geography
+            .market_nation
+            .extend((0..markets as usize).map(|m| g.nation_of_market(m).map(|n| n as u32 + r * nations)));
     }
     let mut world = World::new(base.defs.clone(), geography, base.seed);
+    for r in 0..regions {
+        let n = &base.nations;
+        for k in 0..n.len() {
+            world.push_nation(pax_engine::world::NewNation {
+                key: format!("{}#{r}", n.key[k]),
+                treasury: n.treasury[k],
+                income_tax_rate: n.income_tax_rate[k],
+                transfer_rate: n.transfer_rate[k],
+            });
+        }
+    }
     let (pops, producers) = (&base.pops, &base.producers);
     for r in 0..regions {
         for _ in 0..scale {

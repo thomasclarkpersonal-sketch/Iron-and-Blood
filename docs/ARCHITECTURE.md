@@ -34,7 +34,8 @@ One tick is one day. Systems run in a fixed order (D4). The order is part of the
 | 1 | **Labour:** match producers' capacity to POPs of the worker profession in the same province | daily | `systems/labor.rs` |
 | 2 | **Production:** Leontief recipes, limited by labour, inputs and inventory target | daily | `systems/production.rs` |
 | 3 | **Market:** input orders and sell offers → POP aggregation (map) → price discovery (reduce) → settlement | daily | `systems/market.rs` |
-| 4 | **Firms:** update value added, adjust sticky wages, pay wages and dividends | daily | `systems/firms.rs` |
+| 4 | **Firms:** update value added, adjust sticky wages, pay wages and dividends, withhold income tax | daily | `systems/firms.rs` |
+| 4b | **Government:** transfers from treasuries to POPs | daily | `systems/government.rs` |
 | 5 | *Promotion/demotion, migration* (M2) | weekly | |
 | 6 | *Politics: militancy, consciousness* (M2) | month end | |
 | 7 | **Demographics:** births/deaths from life-needs satisfaction | month end | `systems/demographics.rs` |

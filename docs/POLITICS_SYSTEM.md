@@ -4,7 +4,9 @@ The government is the largest single economic actor. In a stock-flow consistent 
 
 ## 🏛️ Fiscal Policy (the Balance Sheet)
 
-Each nation has a treasury: a `cash: Fixed` account that is included in the outside-money invariant (D5). All rates are `Fixed` (D3); a floating-point tax rate would make money itself platform-dependent.
+Each nation has a treasury: a `Fixed` account that is included in the outside-money invariant (D5). All rates are `Fixed` (D3); a floating-point tax rate would make money itself platform-dependent.
+
+> **Implemented in M2-1 (D15):** nations owning markets, treasuries, a **flat** income tax withheld at source from wages and dividends, and daily per-capita transfers. Everything else on this page is still design.
 
 ### 1. Revenue
 *   **Income tax:** deducted when wages and dividends are paid (in `firms.rs`), *before* POPs spend. Brackets can be flat, progressive or regressive depending on law. A bracket rate applies to per-capita income; the POP's total tax is that times its size, rounded down. Every unit is transferred to the treasury, never discarded.
