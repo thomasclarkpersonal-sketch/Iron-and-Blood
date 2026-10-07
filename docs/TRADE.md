@@ -69,7 +69,7 @@ These steps slot into the existing tick (`tick.rs`):
   both_ways = true    # also creates highland → lowland
   ```
 
-- **Multi-hop routes:** at load time, `τ` between all market pairs is computed with Floyd–Warshall on `−ln(1 − τ)` (losses multiply along a path). Capacity is the minimum along the path. The result is a precomputed friction matrix, as D14.5 and MAP_AND_LOGISTICS.md require.
+- **Multi-hop routes:** at load time, the best retention `Π(1 − τ)` between market pairs (losses multiply along a path) is computed in fixed point, with no floats or logarithms. The capacity is the minimum along the path. That gives the precomputed friction data D14.5 requires; see open question 6 for its size.
   - In M2-3 a merchant is created only for each *direct* route. Multi-hop merchants are a follow-up.
 - **Tariffs:**
   - A nation gets `tariff_rate`, an ad-valorem rate on goods arriving from a market of another nation (or a stateless market).
@@ -115,3 +115,4 @@ These steps slot into the existing tick (`tick.rs`):
 3. **Margin and flow speed (`margin`, `k`):** global tuning in `rules.toml` (proposed), or per route?
 4. **Tariff base:** origin price (proposed; simple and deterministic) or destination price?
 5. **Merchant creation:** one merchant per direct route, created at load (proposed), or dynamic entry when profitable? Dynamic entry needs investment rules (a later M2 item).
+6. **Friction matrix size:** a dense all-pairs matrix (D14.5) costs `markets²` entries: about 72 MB of `Fixed` at 3,000 markets, and Floyd–Warshall is O(markets³). Proposed: a **trade horizon**. Run a per-source Dijkstra over the sparse route graph (max-product of retention, deterministic tie-break) and keep only pairs whose retention `Π(1 − τ)` is at least a `min_retention` threshold (e.g. 0.5) in a per-market sparse list. Beyond that, goods lose too much to be worth shipping. Is a horizon acceptable for gameplay, or do you want every pair?
