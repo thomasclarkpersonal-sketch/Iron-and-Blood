@@ -25,8 +25,8 @@ fn two_states_year_20_aggregates_stay_in_band() {
     let (mut final_demand, mut taxes, mut gross_income) = (Fixed::ZERO, Fixed::ZERO, Fixed::ZERO);
     let mut last = None;
     for day in 0..days {
-        let (report, outcome) = pax_data::step_logged(&mut world, &log);
-        outcome.unwrap_or_else(|e| panic!("{e}"));
+        let (report, rejected) = pax_data::step_logged(&mut world, &log);
+        assert!(rejected.is_empty(), "day {day}: logged commands rejected: {rejected:?}");
         if day + window >= days {
             final_demand += report.household_spending + report.government_spending;
             taxes += report.payouts.taxes;
