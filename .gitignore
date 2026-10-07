@@ -1,12 +1,42 @@
+# --- Rust build output ---
 /target/
+**/*.rs.bk
+# Cargo.lock IS committed: this workspace ships binaries, and a pinned lockfile
+# keeps builds (and therefore determinism checks) reproducible.
 
-# Copyrighted reference texts: keep locally, never commit or redistribute.
+# --- Copyrighted reference texts: keep locally, never commit or redistribute ---
 /Reference Books/
 *.pdf
 
-# Editor / OS noise
+# --- Claude Code: share commands/settings, not personal overrides ---
+.claude/settings.local.json
+CLAUDE.local.md
+.claude/scheduled_tasks.lock
+
+# --- Secrets and local environment ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# --- Profiling and benchmark artefacts ---
+perf.data
+perf.data.old
+flamegraph.svg
+*.profraw
+*.profdata
+/bench-results/
+
+# --- Local run output (golden.hashes files ARE tracked) ---
+*.log
+/out/
+
+# --- Editors and OS noise ---
 .idea/
 .vscode/
 *.swp
+*~
 .DS_Store
 Thumbs.db
+desktop.ini

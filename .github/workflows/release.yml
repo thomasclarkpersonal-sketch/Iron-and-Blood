@@ -1,0 +1,94 @@
+# Continuous delivery: pushing a version tag publishes a GitHub Release with
+# pax_cli binaries for Linux, Windows and macOS, bundled with data/ and
+# scenarios/ so testers can run scenarios without a Rust toolchain.
+#
+#   git tag v0.1.0 && git push origin v0.1.0
+#
+# Each platform must pass the determinism gate before its binary is packaged,
+# so a release can never ship a build that desyncs from the others.
+# pax_server deployment (Docker) will be added here in M3 (DECISIONS.md D10).
+name: Release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_TOOLCHAIN: "1.99" # keep in sync with rust-toolchain.toml
+
+jobs:
+  build:
+    name: Build (${{ matrix.target }})
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            exe: pax_cli
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            exe: pax_cli.exe
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            exe: pax_cli
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+      - name: Tests
+        run: cargo test --all --release
+      - name: Build
+        run: cargo build --release -p pax_cli --target ${{ matrix.target }}
+      - name: Determinism gate
+        shell: bash
+        run: ./target/${{ matrix.target }}/release/${{ matrix.exe }} verify scenarios/mini_valley
+      - name: Package
+        shell: bash
+        run: |
+          name="iron-and-blood-${GITHUB_REF_NAME}-${{ matrix.target }}"
+          mkdir -p "dist/$name"
+          cp "target/${{ matrix.target }}/release/${{ matrix.exe }}" "dist/$name/"
+          cp -r data scenarios README.md "dist/$name/"
+          cd dist
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            7z a "$name.zip" "$name" > /dev/null
+          else
+            tar czf "$name.tar.gz" "$name"
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.target }}
+          path: dist/*.*z*
+          if-no-files-found: error
+
+  publish:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: dist-*
+          merge-multiple: true
+          path: dist
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          prerelease=""
+          case "$GITHUB_REF_NAME" in v0.*|*-*) prerelease="--prerelease" ;; esac
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "Iron and Blood $GITHUB_REF_NAME" \
+            --generate-notes $prerelease

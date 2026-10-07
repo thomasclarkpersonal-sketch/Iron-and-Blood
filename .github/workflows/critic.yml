@@ -1,0 +1,157 @@
+# Architectural critic: runs the project's /critic review (.claude/commands/critic.md)
+# on a pull request with Claude Code, posts the result as a PR comment, and FAILS
+# the "Critic" check when the review contains CRITICAL findings. With "Critic" set
+# as a required status check on main (docs/REPO_SETUP.md), that blocks the merge.
+#
+# A PR is reviewed when ANY of these is true:
+#   1. it is big:      additions + deletions >= CRITIC_MIN_LINES, or changed files >= CRITIC_MIN_FILES
+#   2. it is sampled:  1 in CRITIC_SAMPLE_ONE_IN PRs, picked at random once per PR number
+#   3. it is labelled: the PR carries the `critic` label
+#
+# The decision depends ONLY on the PR's state, never on which event fired. GitHub
+# counts a skipped required check as passing, and the newest run on a commit
+# wins. If an unrelated event (e.g. adding some other label) produced a skipped
+# run, it would silently override a failing critique.
+#
+# Fail-closed: if the critic errors or produces no report, the check fails. Re-run the job.
+# Fork PRs and drafts are not reviewed (forks receive no secrets).
+name: Critic
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, labeled]
+
+concurrency:
+  group: critic-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CRITIC_MIN_LINES: 200
+  CRITIC_MIN_FILES: 20
+  CRITIC_SAMPLE_ONE_IN: 5
+
+jobs:
+  gate:
+    name: Decide whether to run
+    runs-on: ubuntu-latest
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      !github.event.pull_request.draft
+    outputs:
+      run: ${{ steps.decide.outputs.run }}
+      reason: ${{ steps.decide.outputs.reason }}
+    steps:
+      - id: decide
+        env:
+          HAS_LABEL: ${{ contains(github.event.pull_request.labels.*.name, 'critic') }}
+          ADDITIONS: ${{ github.event.pull_request.additions }}
+          DELETIONS: ${{ github.event.pull_request.deletions }}
+          FILES: ${{ github.event.pull_request.changed_files }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          lines=$((ADDITIONS + DELETIONS))
+          # Stable per-PR draw: hash the repo and PR number, so the decision does not change between pushes.
+          draw=$(( 0x$(printf '%s#%s' "$GITHUB_REPOSITORY" "$PR" | sha256sum | cut -c1-8) % CRITIC_SAMPLE_ONE_IN ))
+
+          run=false; reason="not selected ($lines lines, $FILES files, draw $draw/$CRITIC_SAMPLE_ONE_IN)"
+          if [ "$HAS_LABEL" = "true" ]; then
+            run=true; reason="'critic' label"
+          elif [ "$lines" -ge "$CRITIC_MIN_LINES" ] || [ "$FILES" -ge "$CRITIC_MIN_FILES" ]; then
+            run=true; reason="big change: $lines lines, $FILES files"
+          elif [ "$draw" -eq 0 ]; then
+            run=true; reason="randomly sampled (1 in $CRITIC_SAMPLE_ONE_IN)"
+          fi
+
+          echo "run=$run" >> "$GITHUB_OUTPUT"
+          echo "reason=$reason" >> "$GITHUB_OUTPUT"
+          echo "Critic: $run ($reason)" | tee -a "$GITHUB_STEP_SUMMARY"
+
+  critic:
+    name: Critic
+    needs: gate
+    if: needs.gate.outputs.run == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read        # read-only: the critic can never push changes
+      pull-requests: write  # post the report comment
+      issues: write
+      id-token: write       # Claude GitHub App authentication
+    env:
+      PR: ${{ github.event.pull_request.number }}
+      BASE_REF: ${{ github.event.pull_request.base.ref }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0  # the review diffs against the base branch
+
+      # The critic may confirm findings with cargo clippy / test / pax_cli verify.
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.99"
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Run /critic
+        uses: anthropics/claude-code-action@v1
+        with:
+          # Created by /install-github-app (Claude subscription). To bill an API key
+          # instead, replace with: anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: |
+            Perform the review defined in .claude/commands/critic.md, following every
+            rule in it, with $ARGUMENTS = "origin/${{ env.BASE_REF }}...HEAD"
+            (the changes in pull request #${{ env.PR }}).
+
+            Write your complete review output, exactly as that file's output format
+            specifies (starting with CRITIQUE_PASS if it applies), to the file
+            critic-report.md in the repository root. Then append one final line,
+            exactly `CRITICAL_COUNT: <n>`, where <n> is the number of 🚨 CRITICAL
+            findings you reported (0 if none). Do not modify any other file.
+          claude_args: |
+            --model claude-opus-5-5
+            --max-turns 40
+            --allowedTools "Read,Grep,Glob,Write,Bash(git diff:*),Bash(git show:*),Bash(git log:*),Bash(git status:*),Bash(cargo clippy:*),Bash(cargo test:*),Bash(cargo run --release -p pax_cli -- verify:*)"
+
+      - name: Post report and enforce verdict
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REASON: ${{ needs.gate.outputs.reason }}
+        run: |
+          if [ ! -s critic-report.md ]; then
+            echo "::error::The critic produced no report (see the 'Run /critic' step). Failing closed; re-run the job."
+            exit 1
+          fi
+          count=$(grep -oE '^CRITICAL_COUNT: *[0-9]+' critic-report.md | tail -n1 | grep -oE '[0-9]+$' || true)
+          if [ -z "$count" ]; then
+            echo "::error::The report has no CRITICAL_COUNT line. Failing closed; re-run the job."
+            verdict="⚠️ Report malformed: the merge is blocked until the critic re-runs."
+            failed=true
+          elif [ "$count" -gt 0 ]; then
+            verdict="🚨 **${count} CRITICAL finding(s): merge blocked.** Fix them and push; the critic re-runs on every push. To dispute a false positive, ask a repo admin (docs/REPO_SETUP.md)."
+            failed=true
+          else
+            verdict="✅ No CRITICAL findings."
+            failed=false
+          fi
+          {
+            echo "<!-- iron-and-blood-critic -->"
+            echo "### 🧐 Architectural critic"
+            echo "_Triggered because: ${REASON}. Rules: \`.claude/commands/critic.md\`._"
+            echo
+            echo "$verdict"
+            echo
+            grep -vE '^CRITICAL_COUNT:' critic-report.md
+          } > comment.md
+          cat comment.md >> "$GITHUB_STEP_SUMMARY"
+          # Update this workflow's previous comment instead of adding a new one on every push.
+          gh pr comment "$PR" --body-file comment.md --edit-last --create-if-none \
+            || gh pr comment "$PR" --body-file comment.md
+          if [ "$failed" = "true" ]; then
+            echo "::error::Critic verdict: blocked (CRITICAL_COUNT=${count:-missing})."
+            exit 1
+          fi

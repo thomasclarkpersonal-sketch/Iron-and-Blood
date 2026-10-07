@@ -1,3 +1,7 @@
+# Claude assistant: mention @claude in an issue, PR comment or review to ask Claude
+# for help (explanations, investigations, suggested fixes). Installed by
+# /install-github-app. Usage is billed to the CLAUDE_CODE_OAUTH_TOKEN secret's owner.
+# Distinct from critic.yml, which is the automatic architectural PR review.
 name: Claude Code
 
 on:
