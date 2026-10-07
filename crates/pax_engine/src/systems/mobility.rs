@@ -104,7 +104,9 @@ pub(crate) fn execute_moves(world: &mut World, layout: &PopLayout, moves: &[Move
 fn move_people(world: &mut World, rows: &[u32], dest: usize, n: u64) -> u64 {
     let sizes: Vec<i64> = rows.iter().map(|&r| world.pops.size[r as usize] as i64).collect();
     let available: i64 = sizes.iter().sum();
-    let n = n.min(available.max(0) as u64);
+    // Planning invariant: a move never exceeds the people it was planned from
+    // (unemployed ≤ workforce, surplus ≤ workforce). A violation is a planning bug.
+    assert!(n as i64 <= available, "planned move of {n} exceeds the {available} people available");
     let Some(take) = allocate_raw(n as i64, &sizes) else { return 0 };
     for (&r, m) in rows.iter().zip(take) {
         let r = r as usize;

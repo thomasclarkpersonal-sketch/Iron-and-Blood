@@ -71,7 +71,9 @@ pub fn step(world: &mut World) -> DayReport {
     let (mut moved, mut migrated) = (0, 0);
     if demographics::is_month_end(world) {
         moved = mobility::reassign_workers(world, &layout, &labour);
-        // Mobility may have appended rows: migrate on a fresh layout.
+        // Mobility may have appended rows, so the tick's layout snapshot is stale
+        // from here on. Migration re-fetches it; later month-end systems (politics,
+        // demographics, compaction) do not read the layout.
         let regrouped = world.pop_layout();
         migrated = mobility::migrate_within_markets(world, &regrouped);
         politics::update_militancy(world);
