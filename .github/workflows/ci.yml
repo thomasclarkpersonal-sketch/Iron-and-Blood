@@ -90,9 +90,11 @@ jobs:
             "$RUNNER_TEMP/pax_cli_base" "$RUNNER_TEMP/base/scenarios/mini_valley" \
             "$RUNNER_TEMP/pax_cli_head" scenarios/mini_valley
       - name: Compare base vs head (two_states, nations and inputs)
-        # Exercises the paths mini_valley doesn't: taxes, transfers, input chains.
+        # Exercises the paths mini_valley doesn't: taxes, transfers, input chains,
+        # and month-end systems (35 days covers the first month end).
         env:
           SCALE: "2000"
+          DAYS: "35"
         run: |
           scripts/bench-compare.sh \
             "$RUNNER_TEMP/pax_cli_base" "$RUNNER_TEMP/base/scenarios/two_states" \

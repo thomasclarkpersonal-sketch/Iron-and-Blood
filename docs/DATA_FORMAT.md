@@ -69,6 +69,7 @@ input_spend_rate = 0.5      # fraction of cash spendable on inputs per day, in [
 | `firms.subsistence_wage_multiple` | Target wage floor, as a multiple of a worker's daily subsistence cost | ≥ 0 |
 | `demographics.growth_rate` | Monthly growth at full life needs | [0, 1] |
 | `demographics.starvation_rate` | Monthly decline at zero life needs | [0, 1] |
+| `demographics.mobility_rate` | Share of a pool's unemployed who move to vacancies each month (D18) | [0, 1] |
 
 ## Scenario directory (`scenarios/<name>/`)
 

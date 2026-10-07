@@ -23,3 +23,4 @@ subsistence_wage_multiple = 1.5   # target wage >= 1.5x a worker's daily subsist
 [demographics]              # D7, monthly rates
 growth_rate = 0.001
 starvation_rate = 0.05
+mobility_rate = 0             # frozen fixture: no mobility

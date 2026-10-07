@@ -37,8 +37,7 @@ fn basket_value(prices: &[Fixed], basket: &[f64]) -> f64 {
 }
 
 pub fn run(mut world: World, days: u64, every: u64) -> Result<ExitCode, String> {
-    let worker_professions: Vec<bool> =
-        (0..world.defs.professions.len()).map(|c| world.defs.producer_types.iter().any(|t| t.worker == c)).collect();
+    let worker_professions = world.defs.worker_professions();
 
     println!(
         "{:>5} {:>10} {:>12} {:>9} {:>12} {:>8} {:>8} {:>6} {:>10} {:>9}",

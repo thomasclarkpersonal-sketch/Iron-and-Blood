@@ -15,7 +15,9 @@ use crate::world::World;
 
 /// Employment in one labour pool `(province, profession)` on one day.
 ///
-/// Diagnostics only: nothing here is simulation state. `jobs` is the pool's
+/// Not simulation state: it is derived from state each tick. Besides
+/// diagnostics it is the input to month-end labour mobility (D18), so its
+/// numbers are exactly what mobility acts on. `jobs` is the pool's
 /// total producer capacity; a pool with `jobs == 0` has no employer at all
 /// (e.g. owner professions), which reports may want to exclude from
 /// unemployment figures.

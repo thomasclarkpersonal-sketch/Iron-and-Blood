@@ -96,6 +96,11 @@ fn life_needs_summary_matches_the_market_snapshot() {
             // Sizes as the market sees them (demographics may change them after).
             let sizes = world.pops.size.clone();
             let report = step(&mut world);
+            if report.moved > 0 {
+                // Month-end mobility (D18) rewrote rows after the market; the
+                // market-time values are no longer observable from outside.
+                continue;
+            }
             let (mut people, mut deprived, mut weighted) = (0u64, 0u64, 0i128);
             for (&n, &life) in sizes.iter().zip(&world.pops.life_needs) {
                 if n > 0 {
