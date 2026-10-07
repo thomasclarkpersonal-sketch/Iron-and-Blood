@@ -96,6 +96,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: Run /critic
+        id: claude
         uses: anthropics/claude-code-action@v1
         with:
           # Created by /install-github-app (Claude subscription). To bill an API key
@@ -115,6 +116,16 @@ jobs:
             --model claude-opus-5-5
             --max-turns 40
             --allowedTools "Read,Grep,Glob,Write,Bash(git diff:*),Bash(git show:*),Bash(git log:*),Bash(git status:*),Bash(cargo clippy:*),Bash(cargo test:*),Bash(cargo run --release -p pax_cli -- verify:*)"
+
+      # The action hides Claude's output for safety. On failure, surface only the
+      # final result message (e.g. an authentication or model error), not the transcript.
+      - name: Explain critic failure
+        if: failure() && steps.claude.outputs.execution_file != ''
+        env:
+          EXEC_FILE: ${{ steps.claude.outputs.execution_file }}
+        run: |
+          msg=$(jq -r '[.[] | select(.type == "result")] | last | (.result // .error // "no message") | tostring' "$EXEC_FILE" 2>/dev/null | head -c 2000)
+          echo "::error title=Claude run failed::${msg:-could not read execution file}"
 
       - name: Post report and enforce verdict
         if: always()
