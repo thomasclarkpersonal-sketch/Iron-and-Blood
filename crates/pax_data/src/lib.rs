@@ -355,6 +355,12 @@ fn build_world(defs: Arc<Defs>, s: &ScenarioFile) -> Result<World, LoadError> {
         })
         .collect();
     let mut world = errors.finish(World::new(defs, geography, s.seed))?;
+    // Store POP rows grouped by market (stable: file order within a market). The
+    // market's parallel passes then touch one or two markets per job (see
+    // `MarketRuns` in pax_engine's market.rs). Row order is part of the state,
+    // so this is done once, deterministically, at load.
+    let mut pops = pops;
+    pops.sort_by_key(|&(province, ..)| world.geography.province_market[province as usize]);
     for (province, profession, size, cash) in pops {
         world.push_pop(province, profession, size, cash);
     }

@@ -170,8 +170,15 @@ pub fn clear_markets(world: &mut World, layout: &PopLayout) -> MarketOutcome {
     let markets = world.geography.market_count();
     let pop_market: &[u32] = &layout.market;
 
-    let orders = input_orders(world);
-    let offers = sell_offers(world);
+    // Orders and offers sorted by market (stable, so per-market order is unchanged),
+    // with per-market ranges: discovery reads a slice instead of filtering every
+    // list once per market, which was O(markets × producers).
+    let mut orders = input_orders(world);
+    orders.sort_by_key(|o| o.market);
+    let mut offers = sell_offers(world);
+    offers.sort_by_key(|o| o.market);
+    let order_ranges = ranges_by_market(markets, orders.iter().map(|o| o.market));
+    let offer_ranges = ranges_by_market(markets, offers.iter().map(|o| o.market));
     let aggregates = aggregate_consumers(world, pop_market);
 
     // --- Price discovery, independent per market. ---
@@ -179,14 +186,12 @@ pub fn clear_markets(world: &mut World, layout: &PopLayout) -> MarketOutcome {
     let discovered: Vec<(Vec<Fixed>, u32)> = (0..markets)
         .into_par_iter()
         .map(|m| {
-            let market_orders: Vec<InputOrder> = orders.iter().copied().filter(|o| o.market == m).collect();
-            let market_offers: Vec<SellOffer> = offers.iter().copied().filter(|o| o.market == m).collect();
             discover_prices(
                 &defs,
                 &opening[m * goods..(m + 1) * goods],
                 &aggregates[m * profs..(m + 1) * profs],
-                &market_orders,
-                &market_offers,
+                &orders[order_ranges[m].clone()],
+                &offers[offer_ranges[m].clone()],
             )
         })
         .collect();
@@ -197,6 +202,66 @@ pub fn clear_markets(world: &mut World, layout: &PopLayout) -> MarketOutcome {
     }
 
     settle(world, pop_market, &orders, &offers, iterations)
+}
+
+/// Index ranges of each market in a list sorted by market.
+fn ranges_by_market(markets: usize, sorted: impl Iterator<Item = usize>) -> Vec<std::ops::Range<usize>> {
+    let mut counts = vec![0usize; markets];
+    for m in sorted {
+        counts[m] += 1;
+    }
+    let mut start = 0;
+    counts
+        .into_iter()
+        .map(|c| {
+            let r = start..start + c;
+            start += c;
+            r
+        })
+        .collect()
+}
+
+/// Per-market partial sums over a contiguous chunk of POP rows, stored as
+/// `(market, sums)` runs.
+///
+/// POP rows are kept grouped by market (the loader sorts them), so a parallel
+/// job usually touches one or two markets and its accumulator stays tiny. The
+/// alternative was a dense `markets × width` vector per job, megabytes each with
+/// thousands of markets. The sums are integers, so merging runs in any order
+/// gives identical results.
+struct MarketRuns<T> {
+    width: usize,
+    runs: Vec<(usize, Vec<T>)>,
+}
+
+impl<T: Copy + Default> MarketRuns<T> {
+    fn new(width: usize) -> Self {
+        MarketRuns { width, runs: Vec::new() }
+    }
+
+    /// The sums slot for `market`, starting a new run if the market changed.
+    fn row(&mut self, market: usize) -> &mut [T] {
+        if self.runs.last().is_none_or(|r| r.0 != market) {
+            self.runs.push((market, vec![T::default(); self.width]));
+        }
+        &mut self.runs.last_mut().expect("just ensured").1
+    }
+
+    fn append(mut self, mut other: Self) -> Self {
+        self.runs.append(&mut other.runs);
+        self
+    }
+
+    /// Folds all runs into a dense `[market * width + i]` vector.
+    fn into_dense(self, markets: usize, add: impl Fn(&mut T, &T)) -> Vec<T> {
+        let mut dense = vec![T::default(); markets * self.width];
+        for (m, sums) in &self.runs {
+            for (d, s) in dense[m * self.width..(m + 1) * self.width].iter_mut().zip(sums) {
+                add(d, s);
+            }
+        }
+        dense
+    }
 }
 
 /// Producers' input orders, priced at the opening prices.
@@ -286,17 +351,16 @@ fn aggregate_consumers(world: &World, pop_market: &[u32]) -> Vec<ConsumerAggrega
         .into_par_iter()
         .with_min_len(4096)
         .fold(
-            || vec![ConsumerAggregate::default(); markets * profs],
+            || MarketRuns::<ConsumerAggregate>::new(profs),
             |mut acc, i| {
                 let size = pops.size[i];
                 if size == 0 {
                     return acc;
                 }
-                let c = pops.profession[i] as usize;
-                let key = pop_market[i] as usize * profs + c;
+                let (m, c) = (pop_market[i] as usize, pops.profession[i] as usize);
                 let y = budget(&defs.professions[c], pops.cash[i]);
-                let cost = costs[key];
-                let a = &mut acc[key];
+                let cost = costs[m * profs + c];
+                let a = &mut acc.row(m)[c];
                 if cost.is_zero() || y >= cost.mul_int(size as i64) {
                     a.comfortable_size += size as i64;
                     a.comfortable_budget += y;
@@ -306,17 +370,12 @@ fn aggregate_consumers(world: &World, pop_market: &[u32]) -> Vec<ConsumerAggrega
                 acc
             },
         )
-        .reduce(
-            || vec![ConsumerAggregate::default(); markets * profs],
-            |mut a, b| {
-                for (x, y) in a.iter_mut().zip(b) {
-                    x.comfortable_size += y.comfortable_size;
-                    x.comfortable_budget += y.comfortable_budget;
-                    x.deprived_budget += y.deprived_budget;
-                }
-                a
-            },
-        )
+        .reduce(|| MarketRuns::new(profs), MarketRuns::append)
+        .into_dense(markets, |x: &mut ConsumerAggregate, y| {
+            x.comfortable_size += y.comfortable_size;
+            x.comfortable_budget += y.comfortable_budget;
+            x.deprived_budget += y.deprived_budget;
+        })
 }
 
 /// Aggregate demand of one market at `prices`.
@@ -365,6 +424,12 @@ fn market_supply(prices: &[Fixed], offers: &[SellOffer]) -> Vec<Fixed> {
 
 /// Bounded tâtonnement for one market. Returns the executed prices and the
 /// number of iterations used.
+///
+/// Iterates are confined to today's band (`±max_daily_change`, technical
+/// bounds), so the executed price is simply the last iterate. A good whose
+/// clearing price lies beyond the band ends at the band edge, which is the same
+/// result as the earlier "iterate freely, then clamp" approach, minus the
+/// wasted iterations.
 fn discover_prices(
     defs: &Defs,
     opening: &[Fixed],
@@ -379,32 +444,43 @@ fn discover_prices(
     for o in offers {
         stock[o.good] += o.stock;
     }
+    // Today's admissible band per good: ±max_daily_change around yesterday's
+    // price, within the technical bounds. A good with no stock is held at its
+    // opening price (nothing to discover from; scarcity shows as unmet demand).
+    let (mut lo, mut hi) = (Vec::with_capacity(prices.len()), Vec::with_capacity(prices.len()));
+    for (&open, &s) in opening.iter().zip(&stock) {
+        if s.is_zero() {
+            lo.push(open);
+            hi.push(open);
+        } else {
+            let band = open.mul(rules.max_daily_change);
+            lo.push((open - band).max(rules.price_floor));
+            hi.push((open + band).min(rules.price_ceiling));
+        }
+    }
     let decay = Fixed::from_int(rules.step_decay_iterations.max(1) as i64);
     let mut used = 0;
     for k in 0..rules.max_iterations {
         let demand = market_demand(defs, &prices, consumers, orders, &mut scratch);
         let supply = market_supply(&prices, offers);
         let z: Vec<Fixed> = demand.iter().zip(&supply).map(|(&d, &s)| excess(d, s)).collect();
-        if z.iter().all(|z| z.abs() <= rules.tolerance) {
+        // Settled: within tolerance, or pinned at a band edge with excess demand
+        // pushing outward (its clearing price lies beyond today's reach). Without
+        // the second case such goods kept every market iterating to the cap.
+        let settled = |g: usize| {
+            z[g].abs() <= rules.tolerance
+                || (prices[g] >= hi[g] && !z[g].is_negative())
+                || (prices[g] <= lo[g] && !z[g].is_positive())
+        };
+        if (0..prices.len()).all(settled) {
             break;
         }
         used = k + 1;
-        // λₖ = λ · decay / (decay + k)
+        // λₖ = λ · decay / (decay + k); iterates stay inside today's band.
         let step = rules.step.mul_div(decay, decay + Fixed::from_int(k as i64));
-        for (p, z) in prices.iter_mut().zip(z) {
-            *p = (*p + p.mul(step.mul(z))).clamp(rules.price_floor, rules.price_ceiling);
+        for (g, p) in prices.iter_mut().enumerate() {
+            *p = (*p + p.mul(step.mul(z[g]))).clamp(lo[g], hi[g]);
         }
-    }
-    // Daily movement limit relative to yesterday, then the technical bounds.
-    // With no stock anywhere there is no trade to discover a price from, so
-    // the quote is held; scarcity remains visible as unmet demand in the report.
-    for ((p, &open), &s) in prices.iter_mut().zip(opening).zip(&stock) {
-        if s.is_zero() {
-            *p = open;
-            continue;
-        }
-        let band = open.mul(rules.max_daily_change);
-        *p = (*p).clamp(open - band, open + band).clamp(rules.price_floor, rules.price_ceiling);
     }
     (prices, used)
 }
@@ -432,19 +508,20 @@ fn settle(
         .into_par_iter()
         .with_min_len(4096)
         .fold(
-            || (vec![Fixed::ZERO; markets * goods], vec![Fixed::ZERO; goods]),
+            || (MarketRuns::<Fixed>::new(goods), vec![Fixed::ZERO; goods]),
             |(mut acc, mut x), i| {
                 let (m, c) = (pop_market[i] as usize, pops.profession[i] as usize);
                 let row = &prices[m * goods..(m + 1) * goods];
                 pop_demand(&defs.professions[c], pops.size[i], pops.cash[i], costs[m * profs + c], row, &mut x);
-                for (a, q) in acc[m * goods..(m + 1) * goods].iter_mut().zip(&x) {
+                for (a, q) in acc.row(m).iter_mut().zip(&x) {
                     *a += *q;
                 }
                 (acc, x)
             },
         )
         .map(|(acc, _)| acc)
-        .reduce(|| vec![Fixed::ZERO; markets * goods], add_vectors);
+        .reduce(|| MarketRuns::new(goods), MarketRuns::append)
+        .into_dense(markets, |a, b| *a += *b);
     for o in orders {
         demand[o.market * goods + o.good] += o.demand(prices[o.market * goods + o.good]);
     }
@@ -463,28 +540,30 @@ fn settle(
     // Pass B: POPs buy, pay, and record life-needs satisfaction.
     let crate::world::Pops { size, cash, profession, life_needs, .. } = &mut world.pops;
     let (size, profession) = (&*size, &*profession);
-    let (bought, paid) = cash
+    // Per-market runs of width 2 × goods: [bought per good | paid per good].
+    let bought_paid = cash
         .par_iter_mut()
         .zip(life_needs.par_iter_mut())
         .enumerate()
         .with_min_len(4096)
         .fold(
-            || (vec![Fixed::ZERO; markets * goods], vec![Fixed::ZERO; markets * goods], vec![Fixed::ZERO; goods]),
-            |(mut bought, mut paid, mut x), (i, (cash, life))| {
+            || (MarketRuns::<Fixed>::new(2 * goods), vec![Fixed::ZERO; goods]),
+            |(mut runs, mut x), (i, (cash, life))| {
                 let (m, c) = (pop_market[i] as usize, profession[i] as usize);
                 let prof = &defs.professions[c];
                 let row = m * goods..(m + 1) * goods;
                 pop_demand(prof, size[i], *cash, costs[m * profs + c], &prices[row.clone()], &mut x);
                 let mut spent = Fixed::ZERO;
                 let mut satisfaction = Fixed::ONE;
+                let sums = runs.row(m);
                 for (g, &wanted) in x.iter().enumerate() {
                     let k = m * goods + g;
                     let q = if ration[k] == Fixed::ONE { wanted } else { wanted.mul(ration[k]) };
                     // D1: rationing never gives a buyer more than it asked for.
                     assert!(q <= wanted, "market-good {k}: POP {i} received {q} > demanded {wanted}");
                     let cost = q.mul(prices[k]);
-                    bought[k] += q;
-                    paid[k] += cost;
+                    sums[g] += q;
+                    sums[goods + g] += cost;
                     spent += cost;
                     let need = prof.subsistence[g].mul_int(size[i] as i64);
                     if need.is_positive() {
@@ -494,15 +573,18 @@ fn settle(
                 assert!(spent <= *cash, "POP {i} overspent: {spent} > {cash}");
                 *cash -= spent;
                 *life = satisfaction;
-                (bought, paid, x)
+                (runs, x)
             },
         )
-        .map(|(b, p, _)| (b, p))
-        .reduce(
-            || (vec![Fixed::ZERO; markets * goods], vec![Fixed::ZERO; markets * goods]),
-            |(b1, p1), (b2, p2)| (add_vectors(b1, b2), add_vectors(p1, p2)),
-        );
-    let (mut bought, mut paid) = (bought, paid);
+        .map(|(runs, _)| runs)
+        .reduce(|| MarketRuns::new(2 * goods), MarketRuns::append)
+        .into_dense(markets, |a, b| *a += *b);
+    let (mut bought, mut paid) = (vec![Fixed::ZERO; markets * goods], vec![Fixed::ZERO; markets * goods]);
+    for m in 0..markets {
+        let row = &bought_paid[m * 2 * goods..(m + 1) * 2 * goods];
+        bought[m * goods..(m + 1) * goods].copy_from_slice(&row[..goods]);
+        paid[m * goods..(m + 1) * goods].copy_from_slice(&row[goods..]);
+    }
     let household_spending: Fixed = paid.iter().copied().sum();
 
     // Producers buy inputs.
@@ -556,13 +638,6 @@ fn settle(
         .collect();
     let input_spending = input_cost.iter().copied().sum();
     MarketOutcome { revenue, input_cost, household_spending, input_spending, goods: reports, iterations }
-}
-
-fn add_vectors(mut a: Vec<Fixed>, b: Vec<Fixed>) -> Vec<Fixed> {
-    for (x, y) in a.iter_mut().zip(b) {
-        *x += y;
-    }
-    a
 }
 
 #[cfg(test)]

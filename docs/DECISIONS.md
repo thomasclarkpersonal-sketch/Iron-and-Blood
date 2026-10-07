@@ -35,7 +35,10 @@ To change a decision, edit its entry in the same pull request as the code. Say w
 **Decision.** Each market node runs, every day:
 
 1. **Map:** buyers and sellers state their demand and supply as *functions of price*, not fixed quantities.
-2. **Discover:** iterate `pᵢ ← pᵢ(1 + λₖ zᵢ)` with `zᵢ = (Dᵢ − Sᵢ)/(Dᵢ + Sᵢ) ∈ [−1, 1]` and a decaying step `λₖ = λ·d/(d + k)`. Stop when every `|zᵢ| ≤ tolerance`, or after `max_iterations`.
+2. **Discover:** iterate `pᵢ ← pᵢ(1 + λₖ zᵢ)` with `zᵢ = (Dᵢ − Sᵢ)/(Dᵢ + Sᵢ) ∈ [−1, 1]` and a decaying step `λₖ = λ·d/(d + k)`.
+   - Iterates stay inside today's band (step 3).
+   - Stop when every good is settled (`|zᵢ| ≤ tolerance`, or pinned at a band edge with excess demand pushing outward), or after `max_iterations`.
+   - Before the band confinement, unreachable goods kept every market iterating to the cap.
 3. **Limit:** the executed price may move at most `max_daily_change` (default ±10%) from yesterday's. If a market holds **no stock at all** of a good, its price is held, since there is nothing to discover from, and the scarcity is reported as unmet demand.
    - Stock below `min_stock` (0.01 units) counts as none and is not offered. Before this rule, rounding dust of 10⁻⁶ units let discovery push a price to the ceiling against almost nothing, which killed a whole supply chain in `two_states`.
 4. **Settle:** if `D > S`, every buyer receives the same fraction `S/D`. No buyer is favoured by queue position, nation rank or entity order.
@@ -203,7 +206,7 @@ The engine does not care, by construction.
 | Target | Budget | Measured |
 |---|---|---|
 | M1: 1M POP rows, 1 market, 4 goods, 8 threads | ≤ 100 ms/day | **≈37 ms/day** after T4 (was 45; `pax_cli bench … --scale 170000 --threads 8`) |
-| Long-term: 2M POP rows, ~3,000 markets, ~50 goods, 8-core desktop | ≤ 100 ms/day | Not yet measured; see risks in [MILESTONE_1.md](MILESTONE_1.md) |
+| Long-term: 2M POP rows, ~3,000 markets, ~50 goods, 8-core desktop | ≤ 100 ms/day | 1M rows / 3,000 markets / 4 goods: **≈35 ms/day** after T5 (`bench --scale 56 --regions 3000`) |
 
 At 100 ms/day, the fastest game speed runs at about 10 in-game days per second. CI fails a PR that makes the tick more than 20% slower. The `Benchmark regression` job times the PR's base and head on the same runner (`scripts/bench-compare.sh`), so runner speed cancels out.
 

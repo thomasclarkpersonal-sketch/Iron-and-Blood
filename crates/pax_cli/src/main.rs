@@ -4,7 +4,7 @@
 //! pax_cli run    <scenario-dir> [--days N] [--every K]
 //! pax_cli record <scenario-dir> [--days N]      # write <scenario-dir>/golden.hashes
 //! pax_cli verify <scenario-dir> [--threads T]   # replay and compare with golden.hashes
-//! pax_cli bench  <scenario-dir> [--days N] [--scale K] [--threads T]
+//! pax_cli bench  <scenario-dir> [--days N] [--scale K] [--regions R] [--threads T]
 //! pax_cli report <scenario-dir> [--days N] [--every K]   # economy health indicators
 //! ```
 //!
@@ -28,7 +28,7 @@ const USAGE: &str = "usage:
   pax_cli run    <scenario-dir> [--days N] [--every K]
   pax_cli record <scenario-dir> [--days N]
   pax_cli verify <scenario-dir> [--threads T]
-  pax_cli bench  <scenario-dir> [--days N] [--scale K] [--threads T]
+  pax_cli bench  <scenario-dir> [--days N] [--scale K] [--regions R] [--threads T]
   pax_cli report <scenario-dir> [--days N] [--every K]";
 
 struct Args {
@@ -37,6 +37,7 @@ struct Args {
     days: Option<u64>,
     every: u64,
     scale: u32,
+    regions: u32,
     threads: Option<usize>,
 }
 
@@ -44,7 +45,7 @@ fn parse_args() -> Result<Args, String> {
     let mut it = std::env::args().skip(1);
     let command = it.next().ok_or("missing command")?;
     let scenario = PathBuf::from(it.next().ok_or("missing scenario directory")?);
-    let mut args = Args { command, scenario, days: None, every: 30, scale: 1, threads: None };
+    let mut args = Args { command, scenario, days: None, every: 30, scale: 1, regions: 1, threads: None };
     while let Some(flag) = it.next() {
         let value = it.next().ok_or(format!("{flag} needs a value"))?;
         let num = |v: &str| v.parse::<u64>().map_err(|_| format!("{flag}: '{v}' is not a number"));
@@ -52,6 +53,7 @@ fn parse_args() -> Result<Args, String> {
             "--days" => args.days = Some(num(&value)?),
             "--every" => args.every = num(&value)?.max(1),
             "--scale" => args.scale = num(&value)?.max(1) as u32,
+            "--regions" => args.regions = num(&value)?.max(1) as u32,
             "--threads" => args.threads = Some(num(&value)?.max(1) as usize),
             _ => return Err(format!("unknown flag {flag}")),
         }
@@ -95,7 +97,7 @@ fn dispatch(args: &Args) -> Result<ExitCode, String> {
             Ok(ExitCode::SUCCESS)
         }
         "verify" => verify(scenario.world, &golden_path(&args.scenario)),
-        "bench" => bench(scenario.world, args.days.unwrap_or(30), args.scale),
+        "bench" => bench(scenario.world, args.days.unwrap_or(30), args.scale, args.regions),
         "report" => report::run(scenario.world, args.days.unwrap_or(365), args.every),
         other => Err(format!("unknown command '{other}'\n{USAGE}")),
     }
@@ -142,28 +144,62 @@ fn verify(mut world: World, path: &Path) -> Result<ExitCode, String> {
     Ok(ExitCode::SUCCESS)
 }
 
-fn bench(mut world: World, days: u64, scale: u32) -> Result<ExitCode, String> {
-    // Replicate every POP row `scale` times to measure throughput at size.
-    let n = world.pops.len();
-    for _ in 1..scale {
-        for i in 0..n {
-            let (prov, prof, size, cash) =
-                (world.pops.province[i], world.pops.profession[i] as usize, world.pops.size[i], world.pops.cash[i]);
-            world.push_pop(prov, prof, size, cash);
-        }
-    }
+fn bench(world: World, days: u64, scale: u32, regions: u32) -> Result<ExitCode, String> {
+    let mut world = replicate(&world, scale, regions);
     let start = Instant::now();
     for _ in 0..days {
         step(&mut world);
     }
     let per_day = start.elapsed().as_secs_f64() * 1e3 / days.max(1) as f64;
     println!(
-        "{} POP rows, {} producers, {} threads: {per_day:.3} ms/day over {days} days",
+        "{} POP rows, {} producers, {} markets, {} threads: {per_day:.3} ms/day over {days} days",
         world.pops.len(),
         world.producers.len(),
+        world.geography.market_count(),
         rayon::current_num_threads()
     );
     Ok(ExitCode::SUCCESS)
+}
+
+/// Builds a benchmark world: the scenario's whole map copied `regions` times
+/// (separate provinces and markets), with every POP row repeated `scale` times.
+/// Rows are pushed region by region, so they stay grouped by market as a loaded
+/// scenario's are.
+fn replicate(base: &World, scale: u32, regions: u32) -> World {
+    use pax_engine::world::{Geography, NewProducer};
+    let g = &base.geography;
+    let (provinces, markets) = (g.province_count() as u32, g.market_count() as u32);
+    let mut geography = Geography::default();
+    for r in 0..regions {
+        geography.province_keys.extend(g.province_keys.iter().map(|k| format!("{k}#{r}")));
+        geography.province_market.extend(g.province_market.iter().map(|&m| m + r * markets));
+        geography.market_keys.extend(g.market_keys.iter().map(|k| format!("{k}#{r}")));
+    }
+    let mut world = World::new(base.defs.clone(), geography, base.seed);
+    let (pops, producers) = (&base.pops, &base.producers);
+    for r in 0..regions {
+        for _ in 0..scale {
+            for i in 0..pops.len() {
+                world.push_pop(
+                    pops.province[i] + r * provinces,
+                    pops.profession[i] as usize,
+                    pops.size[i],
+                    pops.cash[i],
+                );
+            }
+        }
+        for i in 0..producers.len() {
+            world.push_producer(NewProducer {
+                kind: producers.kind[i] as usize,
+                province: producers.province[i] + r * provinces,
+                capacity: producers.capacity[i],
+                cash: producers.cash[i],
+                wage: producers.wage[i],
+                output_stock: producers.output_stock[i],
+            });
+        }
+    }
+    world
 }
 
 /// True if 0-based `day` ends a reporting period of `every` days, or is the last
