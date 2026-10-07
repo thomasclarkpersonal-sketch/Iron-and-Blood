@@ -72,7 +72,7 @@ This takes 10–60 minutes depending on size.
 ### 5. Open the PR
 Click **Open pull request**; title and body are pre-filled, and the body says `Closes #<n>`. The PR is opened by *you*, which is why CI and the critic run on it. (PRs opened by the workflow's own token would never start them.)
 
-Review it like any PR. If it's over 200 lines, the critic reviews it too, and CRITICAL findings block the merge.
+Review it like any PR. If it's over 200 lines, the critic reviews it too, and CRITICAL findings block the merge. If a check failed in the pipeline, its report includes the last 50 lines of that check's output.
 
 ### 6. Iterate
 To change the implementation, comment on the **issue** and re-add `claude-implement`. Claude continues on the same branch, and the open PR updates.
@@ -85,8 +85,8 @@ The workflow's pushes don't start new CI runs on the PR (the same token limitati
 |---|---|
 | Strangers triggering paid runs | Only users with triage/write access can add labels, and the Claude action also checks the actor has write access |
 | Prompt injection via issue text | Issue text is passed as a data file, never interpolated into the prompt or shell. The prompt puts `AGENTS.md`/`DECISIONS.md` above it. The label is a human checkpoint: only label issues you have read |
-| Implementing an unapproved plan | `claude-implement` only uses plans posted by the pipeline itself (author `github-actions` plus a marker). User comments cannot pose as a plan |
-| Weakening its own review | Changes under `.github/` and `.claude/` are never committed, even if made |
+| Implementing an unapproved plan | `claude-implement` only uses plans posted by the pipeline itself: author `github-actions` and a comment that *starts* with the plan marker. Implementation reports carry a different marker. User comments cannot pose as a plan, and the pipeline's own comments are never fed back as feedback |
+| Weakening its own review | Changes under `.github/`, `.claude/` and to `AGENTS.md` are never committed, even if made. **Known gap:** the critic reads `docs/DECISIONS.md` from the PR branch, which the pipeline is supposed to edit. A PR that changes `DECISIONS.md` therefore also changes the yardstick it is judged by. Review decision changes by hand |
 | Touching `main` | The workflow pushes only `claude/issue-<n>`. `main` remains protected by the ruleset |
 | Bad code reaching `main` | You open the PR, then CI, the critic, and your merge decision |
 
