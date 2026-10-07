@@ -64,6 +64,7 @@ Start with **[Design Decisions](docs/DECISIONS.md)**: it is binding and wins ove
 * Research notes: [Victoria 2 economy redesign](docs/research/victoria_2_economy_redesign.md), [reference textbook summaries](docs/research/economic_textbooks_summary.md).
 * [Contributing](CONTRIBUTING.md) and [AGENTS.md](AGENTS.md): rules for humans and AI agents.
 * [Repository setup](docs/REPO_SETUP.md): one-time admin steps for GitHub, CI and the blocking critic.
+* [Claude feature pipeline](docs/CLAUDE_FEATURE_PIPELINE.md): issue → plan → docs + code via labels.
 
 ## 🛠️ Tech Stack & Environment
 * **Simulation engine:** Rust, with a hand-rolled Struct-of-Arrays ECS (D8), decimal fixed-point math (D3) and rayon for parallel map-reduce.
