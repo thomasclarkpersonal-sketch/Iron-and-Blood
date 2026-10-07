@@ -1,0 +1,172 @@
+//! `pax_cli`: headless runner for the simulation.
+//!
+//! ```text
+//! pax_cli run    <scenario-dir> [--days N] [--every K]
+//! pax_cli record <scenario-dir> [--days N]      # write <scenario-dir>/golden.hashes
+//! pax_cli verify <scenario-dir> [--threads T]   # replay and compare with golden.hashes
+//! pax_cli bench  <scenario-dir> [--days N] [--scale K] [--threads T]
+//! ```
+//!
+//! `verify` is the determinism gate used by CI: any change to simulation
+//! results makes it fail until the hashes are deliberately re-recorded.
+
+// Floats are banned from simulation state, not from presentation: the CLI
+// uses them only to print wall-clock timings.
+#![allow(clippy::float_arithmetic)]
+
+use std::path::{Path, PathBuf};
+use std::process::ExitCode;
+use std::time::Instant;
+
+use pax_data::golden;
+use pax_engine::{Fixed, World, step};
+
+const USAGE: &str = "usage:
+  pax_cli run    <scenario-dir> [--days N] [--every K]
+  pax_cli record <scenario-dir> [--days N]
+  pax_cli verify <scenario-dir> [--threads T]
+  pax_cli bench  <scenario-dir> [--days N] [--scale K] [--threads T]";
+
+struct Args {
+    command: String,
+    scenario: PathBuf,
+    days: Option<u64>,
+    every: u64,
+    scale: u32,
+    threads: Option<usize>,
+}
+
+fn parse_args() -> Result<Args, String> {
+    let mut it = std::env::args().skip(1);
+    let command = it.next().ok_or("missing command")?;
+    let scenario = PathBuf::from(it.next().ok_or("missing scenario directory")?);
+    let mut args = Args { command, scenario, days: None, every: 30, scale: 1, threads: None };
+    while let Some(flag) = it.next() {
+        let value = it.next().ok_or(format!("{flag} needs a value"))?;
+        let num = |v: &str| v.parse::<u64>().map_err(|_| format!("{flag}: '{v}' is not a number"));
+        match flag.as_str() {
+            "--days" => args.days = Some(num(&value)?),
+            "--every" => args.every = num(&value)?.max(1),
+            "--scale" => args.scale = num(&value)?.max(1) as u32,
+            "--threads" => args.threads = Some(num(&value)?.max(1) as usize),
+            _ => return Err(format!("unknown flag {flag}")),
+        }
+    }
+    Ok(args)
+}
+
+fn main() -> ExitCode {
+    let args = match parse_args() {
+        Ok(a) => a,
+        Err(e) => {
+            eprintln!("error: {e}\n{USAGE}");
+            return ExitCode::from(2);
+        }
+    };
+    let mut pool = rayon::ThreadPoolBuilder::new();
+    if let Some(t) = args.threads {
+        pool = pool.num_threads(t);
+    }
+    let pool = pool.build().expect("failed to build thread pool");
+    pool.install(|| match dispatch(&args) {
+        Ok(code) => code,
+        Err(e) => {
+            eprintln!("error: {e}");
+            ExitCode::FAILURE
+        }
+    })
+}
+
+fn dispatch(args: &Args) -> Result<ExitCode, String> {
+    let scenario = pax_data::load_scenario(&args.scenario).map_err(|e| e.to_string())?;
+    match args.command.as_str() {
+        "run" => run(scenario.world, args.days.unwrap_or(365), args.every),
+        "record" => {
+            let days = args.days.unwrap_or(golden::DEFAULT_DAYS);
+            let mut world = scenario.world;
+            let hashes = pax_engine::tick::run(&mut world, days);
+            let path = golden_path(&args.scenario);
+            golden::write(&path, &scenario.name, &hashes).map_err(|e| format!("{}: {e}", path.display()))?;
+            println!("recorded {days} day hashes to {}", path.display());
+            Ok(ExitCode::SUCCESS)
+        }
+        "verify" => verify(scenario.world, &golden_path(&args.scenario)),
+        "bench" => bench(scenario.world, args.days.unwrap_or(30), args.scale),
+        other => Err(format!("unknown command '{other}'\n{USAGE}")),
+    }
+}
+
+fn golden_path(scenario: &Path) -> PathBuf {
+    scenario.join("golden.hashes")
+}
+
+fn run(mut world: World, days: u64, every: u64) -> Result<ExitCode, String> {
+    let goods: Vec<String> = world.defs.goods.iter().map(|g| g.key.clone()).collect();
+    print!("{:>5} {:>10} {:>14}", "day", "population", "money");
+    for g in &goods {
+        print!(" {:>12} {:>10}", format!("{g} p"), "traded");
+    }
+    println!();
+    for _ in 0..days {
+        let report = step(&mut world);
+        if !(report.day + 1).is_multiple_of(every) && report.day + 1 != days {
+            continue;
+        }
+        print!("{:>5} {:>10} {:>14}", report.day + 1, world.population(), short(report.total_money, 2));
+        // M1 prints the first market; per-market views come with pax_server.
+        for r in report.goods.iter().take(goods.len()) {
+            print!(" {:>12} {:>10}", short(r.price, 4), short(r.traded, 1));
+        }
+        println!();
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+fn verify(mut world: World, path: &Path) -> Result<ExitCode, String> {
+    let expected = golden::read(path).map_err(|e| format!("{}: {e} (run `pax_cli record` first)", path.display()))?;
+    for (day, &want) in expected.iter().enumerate() {
+        step(&mut world);
+        let got = world.state_hash();
+        if got != want {
+            eprintln!("DESYNC on day {day}: expected {want:016x}, got {got:016x}");
+            eprintln!("If this change to simulation results is intended, re-record with `pax_cli record`.");
+            return Ok(ExitCode::FAILURE);
+        }
+    }
+    println!("ok: {} days match {}", expected.len(), path.display());
+    Ok(ExitCode::SUCCESS)
+}
+
+fn bench(mut world: World, days: u64, scale: u32) -> Result<ExitCode, String> {
+    // Replicate every POP row `scale` times to measure throughput at size.
+    let n = world.pops.len();
+    for _ in 1..scale {
+        for i in 0..n {
+            let (prov, prof, size, cash) =
+                (world.pops.province[i], world.pops.profession[i] as usize, world.pops.size[i], world.pops.cash[i]);
+            world.push_pop(prov, prof, size, cash);
+        }
+    }
+    let start = Instant::now();
+    for _ in 0..days {
+        step(&mut world);
+    }
+    let per_day = start.elapsed().as_secs_f64() * 1e3 / days.max(1) as f64;
+    println!(
+        "{} POP rows, {} producers, {} threads: {per_day:.3} ms/day over {days} days",
+        world.pops.len(),
+        world.producers.len(),
+        rayon::current_num_threads()
+    );
+    Ok(ExitCode::SUCCESS)
+}
+
+/// Formats a Fixed with `decimals` places (display only).
+fn short(v: Fixed, decimals: usize) -> String {
+    let s = v.to_string();
+    match s.split_once('.') {
+        Some((i, _)) if decimals == 0 => i.to_string(),
+        Some((i, f)) => format!("{i}.{}", &f[..decimals.min(f.len())]),
+        None => s,
+    }
+}

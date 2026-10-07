@@ -1,0 +1,29 @@
+[workspace]
+resolver = "3"
+members = ["crates/pax_engine", "crates/pax_data", "crates/pax_cli"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.99"
+license = "UNLICENSED"
+publish = false
+
+[workspace.dependencies]
+pax_engine = { path = "crates/pax_engine" }
+pax_data = { path = "crates/pax_data" }
+rayon = "1.12"
+serde = { version = "1", features = ["derive"] }
+toml = "1.1"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+# Floats are banned from simulation state (DECISIONS.md D3); flag accidental use.
+float_arithmetic = "warn"
+
+[profile.release]
+debug = 1
+# Overflow in fixed-point math is a bug: keep integer overflow checks on in release too.
+overflow-checks = true

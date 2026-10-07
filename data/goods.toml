@@ -1,0 +1,18 @@
+# Goods traded in markets. See docs/DATA_FORMAT.md.
+# base_price is only the opening price; markets move freely afterwards.
+
+[[good]]
+key = "grain"
+base_price = 1.0
+
+[[good]]
+key = "timber"
+base_price = 1.5
+
+[[good]]
+key = "furniture"
+base_price = 6.0
+
+[[good]]
+key = "wine"
+base_price = 4.0

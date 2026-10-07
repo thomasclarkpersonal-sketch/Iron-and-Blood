@@ -1,0 +1,40 @@
+# Production technologies: fixed-coefficient (Leontief) recipes (DECISIONS.md D6).
+#   output_per_worker = units of output per employed person per day
+#   inputs            = units of each input good per unit of output
+#   worker / owner    = professions that supply labour / receive dividends
+#   labor_share       = target share of revenue paid as wages
+#   input_spend_rate  = fraction of cash the producer may spend on inputs per day
+
+[[producer_type]]
+key = "farm"
+output = "grain"
+output_per_worker = 0.02
+worker = "farmer"
+owner = "aristocrat"
+labor_share = 0.7
+
+[[producer_type]]
+key = "lumber_camp"
+output = "timber"
+output_per_worker = 0.015
+worker = "labourer"
+owner = "aristocrat"
+labor_share = 0.7
+
+[[producer_type]]
+key = "vineyard"
+output = "wine"
+output_per_worker = 0.005
+worker = "labourer"
+owner = "aristocrat"
+labor_share = 0.7
+
+[[producer_type]]
+key = "furniture_workshop"
+output = "furniture"
+output_per_worker = 0.006
+inputs = { timber = 2.0 }
+worker = "craftsman"
+owner = "capitalist"
+labor_share = 0.5
+input_spend_rate = 0.5

@@ -1,0 +1,109 @@
+# Backend Architecture & Schema
+
+This document describes the concrete Rust implementation. The code is authoritative for exact field names; this page explains structure and intent. Decisions are cited as D1–D14 ([DECISIONS.md](DECISIONS.md)).
+
+## 🦀 Workspace Structure
+
+The repository root is a Cargo workspace:
+
+```text
+Cargo.toml                 workspace; release profile keeps overflow checks ON (D3)
+crates/
+├── pax_engine/            no IO
+│   └── src/
+│       ├── fixed.rs       Fixed: decimal fixed point, floor rounding, panics on overflow
+│       ├── alloc.rs       largest-remainder splitting (exact sums)
+│       ├── rng.rs         counter-based deterministic RNG
+│       ├── hash.rs        FNV-1a state hashing (stable across Rust versions)
+│       ├── groups.rs      counting-sort row grouping (replaces HashMap lookups)
+│       ├── defs.rs        static definitions: goods, professions, producer types, rules
+│       ├── world.rs       SoA tables: Geography, Pops, Producers, Markets; World
+│       ├── tick.rs        step(): fixed system order + money conservation assert
+│       └── systems/       labor, production, market, firms, demographics
+├── pax_data/              TOML schema (schema.rs), validation, World builder, golden files
+└── pax_cli/               run | record | verify | bench
+data/                      base definitions
+scenarios/<name>/          scenario.toml + golden.hashes
+```
+
+`pax_server` will be added in M3 (D10).
+
+## 🧩 State Schema
+
+There is no ECS framework (D8). Each table below is a set of equally long column `Vec`s, and an entity is a row index. Static definitions (`Defs`) are shared through `Arc` and excluded from the state hash.
+
+### `Geography` (static topology)
+| Column | Type | Notes |
+|---|---|---|
+| `province_keys` | `Vec<String>` | |
+| `province_market` | `Vec<u32>` | Market row of each province. Nation and state are derived, never stored on POPs (D7). |
+| `market_keys` | `Vec<String>` | |
+
+### `Pops`
+| Column | Type | Notes |
+|---|---|---|
+| `size` | `u32` | People |
+| `cash` | `Fixed` | **Total** holdings of the POP, not per capita (D7) |
+| `profession` | `u16` | Index into `Defs::professions` |
+| `province` | `u32` | |
+| `life_needs` | `Fixed` | `[0, 1]`, subsistence satisfaction from the last market day (D2) |
+| *`culture`, `religion`* | *`u16`* | *M2* |
+| *`literacy`, `militancy`, `consciousness`* | *`Fixed`* | *M2. Fixed-point, never `f32` (D3)* |
+
+### `Producers` (RGOs and factories; they differ only by recipe)
+| Column | Type | Notes |
+|---|---|---|
+| `kind` | `u16` | Index into `Defs::producer_types` |
+| `province` | `u32` | |
+| `capacity`, `employed` | `u32` | Workers |
+| `cash` | `Fixed` | |
+| `wage` | `Fixed` | Daily wage per worker (sticky, D6) |
+| `value_added_avg` | `Fixed` | Smoothed revenue − input cost |
+| `output_stock` | `Fixed` | Unsold output; goods persist (D4) |
+| `input_stock` | `Fixed` | Row-major `[producer × good]` |
+
+### `Markets`
+| Column | Type | Notes |
+|---|---|---|
+| `price` | `Fixed` | Row-major `[market × good]` |
+
+Orders and offers are **not** stored in state: they exist only during the market phase. The old `MarketNode { buy_orders: HashMap, … }` design is retired, because HashMap iteration order is non-deterministic (D3).
+
+### *M2 tables (planned)*
+- `Nations` (treasury `Fixed`, tax rates `Fixed`, laws).
+- `Accounts` for inside money: deposits, loans and bonds as asset/liability pairs (D5).
+- `Shares` (owner POP/nation → producer).
+
+## ⚙️ Core Systems
+
+All systems are plain functions over `&mut World`, called by `tick::step` in the order given in [ARCHITECTURE.md](ARCHITECTURE.md#-the-game-loop).
+
+1. **`labor::assign_employment`.** Labour pool = `(province, profession)`. If total capacity exceeds the pool, employment is split pro rata to capacity (largest remainder).
+2. **`production::produce`.** `output = min(Eπ, minⱼ stockⱼ/aⱼ, T·Eπ − unsold)`.
+3. **`market::clear_markets`.** Runs four phases:
+   - **Map:** POPs are summed in parallel into `(market, profession, regime)` aggregates.
+   - **Discover:** each market runs bounded tâtonnement in parallel.
+   - **Settle:** POPs buy in parallel; producers buy inputs; sellers are paid pro rata to their offers.
+   - The concurrency rule (AGENTS.md §3) is satisfied by construction: no POP ever touches shared market state.
+4. **`firms::pay_wages_and_dividends`.** Value-added smoothing, sticky wages, then wage and dividend transfers.
+5. **`demographics::update_population`** (month end). Growth or starvation from `life_needs`; the estate of an extinct POP passes to an heir.
+
+> [!IMPORTANT]
+> **Determinism:** money, prices, quantities *and all rates* are `Fixed` (D3). `tax_rate`, `literacy` and `militancy` were `f32` in earlier drafts. That is no longer allowed, because a float tax rate applied to fixed-point wealth makes money itself platform-dependent.
+
+## 🔌 API Boundary (M3)
+
+`pax_server` will wrap the engine. It is server-authoritative (D10) and uses a binary protocol: FlatBuffers or Cap'n Proto, chosen at the start of M3.
+
+> [!WARNING]
+> **Serialization overhead:** never use JSON for the per-tick state sync. Sending aggregated state for thousands of provinces each tick as JSON costs severe CPU time and bandwidth.
+
+**Server → client (state sync):**
+* Map state (ownership, occupation).
+* Aggregated statistics (population, GDP, prices).
+* The server never sends individual POP data unless the client requests to inspect a single province.
+
+**Client → server (commands):** applied at the start of the next tick, ordered by `(tick, player, sequence)`:
+* `ChangeTaxRate { nation, rate: Fixed }` (the rate is sent as `Fixed`'s raw `i64`, never a float)
+* `SubsidizeFactory { producer, enabled: bool }`
+* `MoveArmy { army, target_province }`

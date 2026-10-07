@@ -1,0 +1,12 @@
+/target/
+
+# Copyrighted reference texts: keep locally, never commit or redistribute.
+/Reference Books/
+*.pdf
+
+# Editor / OS noise
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db

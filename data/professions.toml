@@ -1,0 +1,35 @@
+# Consumer behaviour per profession: Linear Expenditure System (DECISIONS.md D2).
+#   subsistence = gamma: units per person per day needed to survive ("life needs")
+#   preference  = beta:  relative share of discretionary budget per good
+#                         (normalised to sum to 1 at load time)
+#   spend_rate  = fraction of cash budgeted for consumption each day
+
+[[profession]]
+key = "farmer"
+spend_rate = 0.2
+subsistence = { grain = 0.01 }
+preference = { grain = 0.3, furniture = 0.35, wine = 0.35 }
+
+[[profession]]
+key = "labourer"
+spend_rate = 0.2
+subsistence = { grain = 0.01 }
+preference = { grain = 0.3, furniture = 0.35, wine = 0.35 }
+
+[[profession]]
+key = "craftsman"
+spend_rate = 0.2
+subsistence = { grain = 0.01 }
+preference = { grain = 0.2, furniture = 0.4, wine = 0.4 }
+
+[[profession]]
+key = "aristocrat"
+spend_rate = 0.1
+subsistence = { grain = 0.01 }
+preference = { grain = 0.05, furniture = 0.5, wine = 0.45 }
+
+[[profession]]
+key = "capitalist"
+spend_rate = 0.1
+subsistence = { grain = 0.01 }
+preference = { grain = 0.05, furniture = 0.5, wine = 0.45 }

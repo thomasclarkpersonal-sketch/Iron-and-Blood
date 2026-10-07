@@ -1,0 +1,19 @@
+[package]
+name = "pax_data"
+description = "Loads and validates TOML definition/scenario files into a pax_engine World."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+pax_engine.workspace = true
+serde.workspace = true
+toml.workspace = true
+
+[dev-dependencies]
+rayon.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,2 @@
+# Golden hash files and data must not get CRLF line endings on Windows checkouts.
+* text=auto eol=lf

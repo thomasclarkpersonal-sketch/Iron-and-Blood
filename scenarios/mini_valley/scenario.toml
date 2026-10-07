@@ -1,0 +1,83 @@
+# Milestone 1 reference scenario: one nation, one market, two provinces.
+# Its replay hashes are pinned in golden.hashes (see CONTRIBUTING.md).
+
+name = "Mini Valley"
+seed = 1836
+data = "../../data"
+
+[[market]]
+key = "valley"
+
+[[province]]
+key = "riverside"
+market = "valley"
+
+[[province]]
+key = "highlands"
+market = "valley"
+
+[[pop]]
+province = "riverside"
+profession = "farmer"
+size = 60000
+cash = 6000
+
+[[pop]]
+province = "riverside"
+profession = "craftsman"
+size = 10000
+cash = 2000
+
+[[pop]]
+province = "riverside"
+profession = "aristocrat"
+size = 1000
+cash = 5000
+
+[[pop]]
+province = "riverside"
+profession = "capitalist"
+size = 500
+cash = 3000
+
+[[pop]]
+province = "highlands"
+profession = "labourer"
+size = 18000
+cash = 1800
+
+[[pop]]
+province = "highlands"
+profession = "aristocrat"
+size = 400
+cash = 2000
+
+[[producer]]
+type = "farm"
+province = "riverside"
+capacity = 60000
+cash = 3000
+wage = 0.014
+
+[[producer]]
+type = "furniture_workshop"
+province = "riverside"
+capacity = 10000
+cash = 2000
+wage = 0.02
+stock = 20
+
+[[producer]]
+type = "lumber_camp"
+province = "highlands"
+capacity = 8000
+cash = 1000
+wage = 0.02
+stock = 100
+
+[[producer]]
+type = "vineyard"
+province = "highlands"
+capacity = 10000
+cash = 1000
+wage = 0.02

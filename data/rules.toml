@@ -1,0 +1,23 @@
+# Tunable simulation rules. See docs/DATA_FORMAT.md and DECISIONS.md.
+
+days_per_month = 30
+
+[market]                    # D1: bounded tâtonnement
+max_iterations = 64
+step = 0.5                  # lambda in p <- p * (1 + lambda * z)
+step_decay_iterations = 8   # lambda_k = lambda * d / (d + k)
+tolerance = 0.0005          # stop when every |z| <= tolerance
+max_daily_change = 0.1      # executed price within +-10% of yesterday
+price_floor = 0.001         # technical bounds only (fixed-point range safety)
+price_ceiling = 1000000
+
+[firms]                     # D6
+wage_stickiness_days = 30
+revenue_smoothing_days = 30
+reserve_days = 30
+dividend_payout_rate = 0.05
+target_stock_days = 1        # stop producing once unsold stock = 1 day of output
+
+[demographics]              # D7, monthly rates
+growth_rate = 0.001
+starvation_rate = 0.05

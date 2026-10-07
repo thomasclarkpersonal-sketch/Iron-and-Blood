@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.99"
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Format
+        run: cargo fmt --all --check
+      - name: Clippy
+        run: cargo clippy --all-targets --release -- -D warnings
+      - name: Tests (debug)
+        run: cargo test --all
+      - name: Tests (release)
+        run: cargo test --all --release
+      - name: Determinism gate
+        run: |
+          cargo run --release -p pax_cli -- verify scenarios/mini_valley --threads 1
+          cargo run --release -p pax_cli -- verify scenarios/mini_valley --threads 4
+
+  determinism-cross-platform:
+    # Fixed-point state must hash identically on every OS/CPU we ship to.
+    strategy:
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.99"
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo run --release -p pax_cli -- verify scenarios/mini_valley
