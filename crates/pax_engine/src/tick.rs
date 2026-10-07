@@ -45,7 +45,7 @@ pub struct DayReport {
     pub payouts: Payouts,
     /// Life-needs coverage at today's market.
     pub life_needs: LifeNeedsSummary,
-    /// Militancy as today's market saw it (before any month-end update).
+    /// Population-weighted militancy at the end of the day (D19).
     pub militancy: MilitancySummary,
     /// Paid from treasuries to POPs today (D15).
     pub transfers: Fixed,
@@ -88,6 +88,7 @@ fn step_systems(world: &mut World) -> DayReport {
     let payouts = firms::pay_wages_and_dividends(world, &layout, &outcome.revenue, &outcome.input_cost);
     let transfers = government::pay_transfers(world, &layout);
     let (mut moved, mut migrated, mut compacted) = (0, 0, 0);
+    let mut militancy = outcome.militancy;
     if demographics::is_month_end(world) {
         moved = mobility::reassign_workers(world, &layout, &labour);
         // Mobility may have appended rows, so the tick's layout snapshot is stale
@@ -98,6 +99,7 @@ fn step_systems(world: &mut World) -> DayReport {
         politics::update_militancy(world);
         demographics::update_population(world);
         compacted = world.compact_pops();
+        militancy = MilitancySummary::of(&world.pops);
     }
 
     let money_after = world.total_money();
@@ -109,7 +111,7 @@ fn step_systems(world: &mut World) -> DayReport {
         input_spending: outcome.input_spending,
         household_spending: outcome.household_spending,
         life_needs: outcome.life_needs,
-        militancy: outcome.militancy,
+        militancy,
         transfers,
         government_spending: outcome.government_spending,
         moved,

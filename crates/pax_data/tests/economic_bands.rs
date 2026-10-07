@@ -19,7 +19,6 @@ fn two_states_year_20_aggregates_stay_in_band() {
     let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two_states");
     let scenario = pax_data::load_scenario(&dir).expect("two_states loads");
     let (mut world, log) = (scenario.world, scenario.commands);
-    let worker = world.defs.worker_professions();
 
     let (days, window) = (7200u64, 360u64);
     let (mut final_demand, mut taxes, mut gross_income) = (Fixed::ZERO, Fixed::ZERO, Fixed::ZERO);
@@ -42,11 +41,7 @@ fn two_states_year_20_aggregates_stay_in_band() {
 
     // Unemployment among worker professions on the last day: 5%..15% (structural
     // drift from fixed capacity; investment, INVESTMENT.md, will move this band).
-    let (mut workforce, mut unemployed) = (0u64, 0u64);
-    for pool in last.labour.iter().filter(|p| worker[p.profession as usize]) {
-        workforce += pool.workforce;
-        unemployed += pool.unemployed();
-    }
+    let (unemployed, workforce) = pax_engine::systems::labor::unemployment(&world.defs, &last.labour);
     assert!(
         unemployed * 100 >= workforce * 5 && unemployed * 100 <= workforce * 15,
         "unemployment {unemployed}/{workforce} outside 5%..15%"

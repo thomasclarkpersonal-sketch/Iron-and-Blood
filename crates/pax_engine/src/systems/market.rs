@@ -75,8 +75,9 @@ pub struct MarketOutcome {
     pub government_spending: Fixed,
 }
 
-/// Population-weighted militancy as the market saw it: before any month-end
-/// politics update that day (diagnostics, D19).
+/// Population-weighted militancy (diagnostics, D19). Tallied at the market,
+/// and recomputed after the month-end politics update on month-end days, so it
+/// always reflects the end of the day.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct MilitancySummary {
     /// People in POPs that took part in the market.
@@ -86,6 +87,20 @@ pub struct MilitancySummary {
 }
 
 impl MilitancySummary {
+    /// Summary of the POP table as it stands now. The tick uses it on month-end
+    /// days, after the politics update, so reports show current militancy, not
+    /// last month's (O(N), once a month).
+    pub fn of(pops: &crate::world::Pops) -> MilitancySummary {
+        let mut s = MilitancySummary::default();
+        for (&n, &m) in pops.size.iter().zip(&pops.militancy) {
+            if n > 0 {
+                s.people += n as u64;
+                s.weighted_raw += n as i128 * m.raw() as i128;
+            }
+        }
+        s
+    }
+
     /// Population-weighted mean militancy; `None` if nobody took part.
     pub fn mean(&self) -> Option<Fixed> {
         (self.people > 0).then(|| Fixed::from_raw((self.weighted_raw / self.people as i128) as i64))

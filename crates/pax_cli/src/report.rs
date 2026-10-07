@@ -20,8 +20,8 @@
 //!   people whose subsistence was not fully met.
 //!   `population` is the end-of-period population, after demographics.
 //!
-//! * **Militancy:** `DayReport::militancy`, the population-weighted mean as the
-//!   period's last market saw it (D19).
+//! * **Militancy:** `DayReport::militancy`, the population-weighted mean at the
+//!   end of the period (D19).
 //!
 //! If day 1 traded nothing, there is no base basket and the price index and real
 //! GDP print as `n/a` rather than a made-up 100.
@@ -41,8 +41,6 @@ fn basket_value(prices: &[Fixed], basket: &[f64]) -> f64 {
 }
 
 pub fn run(mut world: World, log: &CommandLog, days: u64, every: u64) -> Result<ExitCode, String> {
-    let worker_professions = world.defs.worker_professions();
-
     println!(
         "{:>5} {:>10} {:>12} {:>9} {:>12} {:>8} {:>8} {:>6} {:>10} {:>9} {:>9}",
         "day",
@@ -87,11 +85,7 @@ pub fn run(mut world: World, log: &CommandLog, days: u64, every: u64) -> Result<
             ("n/a".to_string(), "n/a".to_string())
         };
 
-        let (mut workforce, mut unemployed) = (0u64, 0u64);
-        for pool in report.labour.iter().filter(|p| worker_professions[p.profession as usize]) {
-            workforce += pool.workforce;
-            unemployed += pool.unemployed();
-        }
+        let (unemployed, workforce) = pax_engine::systems::labor::unemployment(&world.defs, &report.labour);
         let unemployment = if workforce > 0 { unemployed as f64 / workforce as f64 * 100.0 } else { 0.0 };
         let wage_share = if wages + dividends > 0.0 { wages / (wages + dividends) * 100.0 } else { 0.0 };
         let tax_take = if wages + dividends > 0.0 { taxes / (wages + dividends) * 100.0 } else { 0.0 };
