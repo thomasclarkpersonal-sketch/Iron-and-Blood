@@ -29,14 +29,6 @@ pub fn pool_count(world: &World) -> usize {
     world.geography.province_count() * world.defs.professions.len()
 }
 
-/// POP rows grouped by labour pool.
-pub fn pop_pools(world: &World) -> Groups {
-    let keys: Vec<usize> = (0..world.pops.len())
-        .map(|i| pool_key(world, world.pops.province[i], world.pops.profession[i] as usize))
-        .collect();
-    Groups::build(pool_count(world), &keys)
-}
-
 /// Employment in one labour pool `(province, profession)` on one day.
 ///
 /// Diagnostics only: nothing here is simulation state. `jobs` is the pool's

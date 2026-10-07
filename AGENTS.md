@@ -9,6 +9,7 @@ Binding design decisions live in [docs/DECISIONS.md](docs/DECISIONS.md) (cited a
 - **Pattern:** a hand-rolled ECS-style Struct-of-Arrays (D8). An entity is a dense row index, a component is a `Vec` column in `crates/pax_engine/src/world.rs`, and a system is a plain function called in a fixed order from `tick.rs`. Do not add an ECS framework without amending D8.
 - **Rule:** no Object-Oriented patterns or pointer-chasing for simulation entities: no `Box<dyn Trait>` per entity, no `Rc<RefCell<T>>`, no arrays of structs for hot data. Keep data contiguous.
 - When adding a component column, push it in the table's `push_*` method (all columns must stay the same length) and add it to `World::state_hash`.
+- After changing any POP's `province` or `profession` (migration, promotion) or the province→market map, call `World::invalidate_pop_layout()`. Debug builds panic on a stale cache.
 
 ## 2. Strict Decoupling
 - **Engine purity:** `pax_engine` MUST stay agnostic of presentation, IO, files and networking. No rendering, Godot, Web, filesystem or socket code.

@@ -13,7 +13,10 @@
 //!    at a time to the largest `remᵢ`, ties broken by lower index.
 //!
 //! The tie-break makes the result a pure function of its inputs, which keeps it
-//! deterministic.
+//! deterministic. Finding the `leftover` largest remainders uses selection
+//! (`select_nth_unstable_by`, O(n)) rather than a full sort. Because the
+//! comparator is a strict total order (remainder, then index), the selected set
+//! is unique, so the result is identical to sorting.
 
 use crate::fixed::Fixed;
 
@@ -46,8 +49,11 @@ pub fn allocate_raw(total: i64, weights: &[i64]) -> Option<Vec<i64>> {
     let leftover = (total - assigned) as usize;
     if leftover > 0 {
         // Largest remainder first; equal remainders go to the lower index.
-        remainders.sort_unstable_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
-        for &(_, i) in remainders.iter().take(leftover) {
+        let order = |a: &(i128, usize), b: &(i128, usize)| b.0.cmp(&a.0).then(a.1.cmp(&b.1));
+        if leftover < remainders.len() {
+            remainders.select_nth_unstable_by(leftover - 1, order);
+        }
+        for &(_, i) in &remainders[..leftover] {
             shares[i] += 1;
         }
     }
@@ -84,6 +90,41 @@ mod tests {
         assert!(allocate_raw(5, &[0, 0]).is_none());
         assert!(allocate_raw(5, &[]).is_none());
         assert_eq!(allocate_raw(5, &[0, 3]).unwrap(), vec![0, 5]);
+    }
+
+    /// Reference implementation: the original full sort.
+    fn allocate_by_sorting(total: i64, weights: &[i64]) -> Vec<i64> {
+        let w: i128 = weights.iter().map(|&w| w as i128).sum();
+        let mut shares: Vec<i64> = weights.iter().map(|&x| (total as i128 * x as i128 / w) as i64).collect();
+        let mut rem: Vec<(i128, usize)> =
+            weights.iter().enumerate().map(|(i, &x)| ((total as i128 * x as i128) % w, i)).collect();
+        rem.sort_unstable_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
+        let leftover = (total - shares.iter().sum::<i64>()) as usize;
+        for &(_, i) in rem.iter().take(leftover) {
+            shares[i] += 1;
+        }
+        shares
+    }
+
+    #[test]
+    fn selection_matches_full_sort() {
+        let mut s: u64 = 0x2545_F491_4F6C_DD1D;
+        let mut next = || {
+            s ^= s << 13;
+            s ^= s >> 7;
+            s ^= s << 17;
+            s
+        };
+        for _ in 0..3_000 {
+            let n = (next() % 200 + 1) as usize;
+            // Small weight range forces many equal remainders, exercising the tie-break.
+            let weights: Vec<i64> = (0..n).map(|_| (next() % 7) as i64).collect();
+            if weights.iter().all(|&w| w == 0) {
+                continue;
+            }
+            let total = (next() % 100_000) as i64;
+            assert_eq!(allocate_raw(total, &weights).unwrap(), allocate_by_sorting(total, &weights));
+        }
     }
 
     #[test]

@@ -15,6 +15,7 @@ pub mod defs;
 pub mod fixed;
 pub mod groups;
 pub mod hash;
+pub mod layout;
 pub mod rng;
 pub mod systems;
 pub mod tick;

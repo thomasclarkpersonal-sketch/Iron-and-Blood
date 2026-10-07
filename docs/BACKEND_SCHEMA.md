@@ -67,6 +67,8 @@ There is no ECS framework (D8). Each table below is a set of equally long column
 |---|---|---|
 | `price` | `Fixed` | Row-major `[market × good]` |
 
+**Derived cache:** `World::layout` holds `PopLayout`: labour pools, owner pools and each POP's market. It is derived from `pops.province`/`pops.profession`, rebuilt only after `World::invalidate_pop_layout()`, and excluded from equality and the state hash.
+
 Orders and offers are **not** stored in state: they exist only during the market phase. The old `MarketNode { buy_orders: HashMap, … }` design is retired, because HashMap iteration order is non-deterministic (D3).
 
 ### *M2 tables (planned)*

@@ -17,6 +17,7 @@ use std::sync::Arc;
 use crate::defs::{Defs, GoodId, ProducerTypeId, ProfessionId};
 use crate::fixed::Fixed;
 use crate::hash::StateHasher;
+use crate::layout::{LayoutCache, PopLayout};
 
 /// Static map topology. A province belongs to exactly one market (a *state*
 /// market in the design docs); M1 has a single nation and no market hierarchy.
@@ -113,6 +114,8 @@ pub struct World {
     pub pops: Pops,
     pub producers: Producers,
     pub markets: Markets,
+    /// Cached POP groupings; derived, not state (see [`crate::layout`]).
+    pub layout: LayoutCache,
 }
 
 /// Initial values for a new producer row.
@@ -142,6 +145,7 @@ impl World {
             pops: Pops::default(),
             producers: Producers::default(),
             markets: Markets { price },
+            layout: LayoutCache::default(),
         }
     }
 
@@ -155,7 +159,32 @@ impl World {
         p.profession.push(u16::try_from(profession).expect("too many professions"));
         p.province.push(province);
         p.life_needs.push(Fixed::ONE);
-        p.len() - 1
+        self.invalidate_pop_layout();
+        self.pops.len() - 1
+    }
+
+    /// The cached POP groupings, rebuilt if the layout changed since last use.
+    ///
+    /// # Panics
+    /// In debug builds, if the cache is stale, i.e. some code changed POP
+    /// provinces or professions without calling [`World::invalidate_pop_layout`].
+    pub fn pop_layout(&mut self) -> Arc<PopLayout> {
+        if let Some(cached) = &self.layout.0 {
+            debug_assert!(
+                **cached == PopLayout::build(self),
+                "stale POP layout cache: call World::invalidate_pop_layout after changing POP province/profession"
+            );
+            return cached.clone();
+        }
+        let fresh = Arc::new(PopLayout::build(self));
+        self.layout.0 = Some(fresh.clone());
+        fresh
+    }
+
+    /// Marks the cached POP groupings stale. Call after adding POP rows or
+    /// changing any POP's `province` or `profession`.
+    pub fn invalidate_pop_layout(&mut self) {
+        self.layout.0 = None;
     }
 
     pub fn push_producer(&mut self, new: NewProducer) -> usize {
