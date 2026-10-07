@@ -19,7 +19,7 @@
 use crate::alloc::allocate_raw;
 use crate::fixed::Fixed;
 use crate::groups::Groups;
-use crate::systems::labor::pool_key;
+use crate::layout::{PopLayout, owner_key, pool_key};
 use crate::world::World;
 
 /// Totals paid out by [`pay_wages_and_dividends`] (diagnostics only).
@@ -29,17 +29,15 @@ pub struct Payouts {
     pub dividends: Fixed,
 }
 
-pub fn pay_wages_and_dividends(world: &mut World, pools: &Groups, revenue: &[Fixed], input_cost: &[Fixed]) -> Payouts {
+pub fn pay_wages_and_dividends(
+    world: &mut World,
+    layout: &PopLayout,
+    revenue: &[Fixed],
+    input_cost: &[Fixed],
+) -> Payouts {
     let defs = world.defs.clone();
     let rules = &defs.rules.firms;
-    let profs = defs.professions.len();
-    let markets = world.geography.market_count();
-
-    // Owner pools: POP rows by (market, profession).
-    let owner_keys: Vec<usize> = (0..world.pops.len())
-        .map(|i| world.market_of_province(world.pops.province[i]) * profs + world.pops.profession[i] as usize)
-        .collect();
-    let owners = Groups::build(markets * profs, &owner_keys);
+    let (pools, owners) = (&layout.labour, &layout.owners);
 
     let mut wage_income = vec![Fixed::ZERO; pools.key_count()];
     let mut dividend_income = vec![Fixed::ZERO; owners.key_count()];
@@ -48,7 +46,7 @@ pub fn pay_wages_and_dividends(world: &mut World, pools: &Groups, revenue: &[Fix
         let def = &defs.producer_types[world.producers.kind[i] as usize];
         let market = world.market_of_province(world.producers.province[i]);
         let wage_pool = pool_key(world, world.producers.province[i], def.worker);
-        let owner_pool = market * profs + def.owner;
+        let owner_pool = owner_key(world, market, def.owner);
         let has_owners = owners.members(owner_pool).iter().any(|&r| world.pops.size[r as usize] > 0);
 
         let p = &mut world.producers;
@@ -79,7 +77,7 @@ pub fn pay_wages_and_dividends(world: &mut World, pools: &Groups, revenue: &[Fix
     }
 
     distribute(world, pools, &wage_income);
-    distribute(world, &owners, &dividend_income);
+    distribute(world, owners, &dividend_income);
     Payouts { wages: wage_income.iter().copied().sum(), dividends: dividend_income.iter().copied().sum() }
 }
 

@@ -39,6 +39,7 @@ use crate::alloc::allocate;
 use crate::defs::{Defs, MarketRules, ProfessionDef};
 use crate::fixed::Fixed;
 use crate::groups::Groups;
+use crate::layout::PopLayout;
 use crate::world::World;
 
 /// Market statistics for one good in one market on one day.
@@ -160,16 +161,16 @@ fn pop_demand(prof: &ProfessionDef, size: u32, cash: Fixed, cost: Fixed, prices:
 }
 
 /// Runs the whole market phase for every market.
-pub fn clear_markets(world: &mut World) -> MarketOutcome {
+pub fn clear_markets(world: &mut World, layout: &PopLayout) -> MarketOutcome {
     let defs = world.defs.clone();
     let goods = defs.good_count();
     let profs = defs.professions.len();
     let markets = world.geography.market_count();
-    let pop_market: Vec<usize> = world.pops.province.iter().map(|&p| world.market_of_province(p)).collect();
+    let pop_market: &[u32] = &layout.market;
 
     let orders = input_orders(world);
     let offers = sell_offers(world);
-    let aggregates = aggregate_consumers(world, &pop_market);
+    let aggregates = aggregate_consumers(world, pop_market);
 
     // --- Price discovery, independent per market. ---
     let opening = world.markets.price.clone();
@@ -193,7 +194,7 @@ pub fn clear_markets(world: &mut World) -> MarketOutcome {
         iterations.push(iters);
     }
 
-    settle(world, &pop_market, &orders, &offers, iterations)
+    settle(world, pop_market, &orders, &offers, iterations)
 }
 
 /// Producers' input orders, priced at the opening prices.
@@ -264,7 +265,7 @@ fn sell_offers(world: &World) -> Vec<SellOffer> {
 }
 
 /// Map phase: `[market * professions + profession]` consumer aggregates.
-fn aggregate_consumers(world: &World, pop_market: &[usize]) -> Vec<ConsumerAggregate> {
+fn aggregate_consumers(world: &World, pop_market: &[u32]) -> Vec<ConsumerAggregate> {
     let defs = &world.defs;
     let goods = defs.good_count();
     let profs = defs.professions.len();
@@ -288,7 +289,7 @@ fn aggregate_consumers(world: &World, pop_market: &[usize]) -> Vec<ConsumerAggre
                     return acc;
                 }
                 let c = pops.profession[i] as usize;
-                let key = pop_market[i] * profs + c;
+                let key = pop_market[i] as usize * profs + c;
                 let y = budget(&defs.professions[c], pops.cash[i]);
                 let cost = costs[key];
                 let a = &mut acc[key];
@@ -407,7 +408,7 @@ fn discover_prices(
 /// Settlement at the executed prices. See the module docs, step 3.
 fn settle(
     world: &mut World,
-    pop_market: &[usize],
+    pop_market: &[u32],
     orders: &[InputOrder],
     offers: &[SellOffer],
     iterations: Vec<u32>,
@@ -429,7 +430,7 @@ fn settle(
         .fold(
             || (vec![Fixed::ZERO; markets * goods], vec![Fixed::ZERO; goods]),
             |(mut acc, mut x), i| {
-                let (m, c) = (pop_market[i], pops.profession[i] as usize);
+                let (m, c) = (pop_market[i] as usize, pops.profession[i] as usize);
                 let row = &prices[m * goods..(m + 1) * goods];
                 pop_demand(&defs.professions[c], pops.size[i], pops.cash[i], costs[m * profs + c], row, &mut x);
                 for (a, q) in acc[m * goods..(m + 1) * goods].iter_mut().zip(&x) {
@@ -466,7 +467,7 @@ fn settle(
         .fold(
             || (vec![Fixed::ZERO; markets * goods], vec![Fixed::ZERO; markets * goods], vec![Fixed::ZERO; goods]),
             |(mut bought, mut paid, mut x), (i, (cash, life))| {
-                let (m, c) = (pop_market[i], profession[i] as usize);
+                let (m, c) = (pop_market[i] as usize, profession[i] as usize);
                 let prof = &defs.professions[c];
                 let row = m * goods..(m + 1) * goods;
                 pop_demand(prof, size[i], *cash, costs[m * profs + c], &prices[row.clone()], &mut x);

@@ -48,12 +48,12 @@ pub struct DayReport {
 /// system, and continuing would corrupt every later tick.
 pub fn step(world: &mut World) -> DayReport {
     let money_before = world.total_money();
-    let pools = labor::pop_pools(world);
+    let layout = world.pop_layout();
 
-    let labour = labor::assign_employment(world, &pools);
+    let labour = labor::assign_employment(world, &layout.labour);
     production::produce(world);
-    let outcome = market::clear_markets(world);
-    let payouts = firms::pay_wages_and_dividends(world, &pools, &outcome.revenue, &outcome.input_cost);
+    let outcome = market::clear_markets(world, &layout);
+    let payouts = firms::pay_wages_and_dividends(world, &layout, &outcome.revenue, &outcome.input_cost);
     if demographics::is_month_end(world) {
         demographics::update_population(world);
     }

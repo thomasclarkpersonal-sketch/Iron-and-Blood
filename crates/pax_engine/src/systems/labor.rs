@@ -10,32 +10,8 @@
 
 use crate::alloc::allocate_raw;
 use crate::groups::Groups;
+use crate::layout::{pool_count, pool_key, pool_of_key};
 use crate::world::World;
-
-/// Dense key of the labour pool `(province, profession)`.
-pub fn pool_key(world: &World, province: u32, profession: usize) -> usize {
-    province as usize * world.defs.professions.len() + profession
-}
-
-/// Inverse of [`pool_key`]: the `(province, profession)` of a labour pool key.
-/// Keep both functions together; they define the pool layout.
-pub fn pool_of_key(world: &World, key: usize) -> (u32, u16) {
-    let professions = world.defs.professions.len();
-    ((key / professions) as u32, (key % professions) as u16)
-}
-
-/// Number of labour pools.
-pub fn pool_count(world: &World) -> usize {
-    world.geography.province_count() * world.defs.professions.len()
-}
-
-/// POP rows grouped by labour pool.
-pub fn pop_pools(world: &World) -> Groups {
-    let keys: Vec<usize> = (0..world.pops.len())
-        .map(|i| pool_key(world, world.pops.province[i], world.pops.profession[i] as usize))
-        .collect();
-    Groups::build(pool_count(world), &keys)
-}
 
 /// Employment in one labour pool `(province, profession)` on one day.
 ///

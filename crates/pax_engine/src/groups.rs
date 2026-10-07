@@ -6,7 +6,7 @@
 //! iterates them in a deterministic order.
 
 /// Rows grouped by key: members of key `k` are `members[offsets[k]..offsets[k + 1]]`.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Groups {
     offsets: Vec<u32>,
     members: Vec<u32>,
