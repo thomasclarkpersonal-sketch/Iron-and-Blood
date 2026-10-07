@@ -55,8 +55,7 @@ fn two_states_is_stable() {
         "population collapsed: {start_population} -> {end_population} after {YEARS} years"
     );
 
-    let weighted: i128 =
-        world.pops.size.iter().zip(&world.pops.life_needs).map(|(&n, &l)| n as i128 * l.raw() as i128).sum();
-    let coverage = Fixed::from_raw((weighted / end_population as i128) as i64);
+    // The engine's own definition, weighted by the sizes the market saw.
+    let coverage = last.life_needs.mean().expect("people took part in the last market");
     assert!(coverage >= Fixed::ratio(95, 100), "life-needs coverage {coverage} < 0.95 after {YEARS} years");
 }
