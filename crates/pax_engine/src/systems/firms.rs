@@ -22,7 +22,14 @@ use crate::groups::Groups;
 use crate::systems::labor::pool_key;
 use crate::world::World;
 
-pub fn pay_wages_and_dividends(world: &mut World, pools: &Groups, revenue: &[Fixed], input_cost: &[Fixed]) {
+/// Totals paid out by [`pay_wages_and_dividends`] (diagnostics only).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Payouts {
+    pub wages: Fixed,
+    pub dividends: Fixed,
+}
+
+pub fn pay_wages_and_dividends(world: &mut World, pools: &Groups, revenue: &[Fixed], input_cost: &[Fixed]) -> Payouts {
     let defs = world.defs.clone();
     let rules = &defs.rules.firms;
     let profs = defs.professions.len();
@@ -73,6 +80,7 @@ pub fn pay_wages_and_dividends(world: &mut World, pools: &Groups, revenue: &[Fix
 
     distribute(world, pools, &wage_income);
     distribute(world, &owners, &dividend_income);
+    Payouts { wages: wage_income.iter().copied().sum(), dividends: dividend_income.iter().copied().sum() }
 }
 
 /// Credits each group's income to its member POPs pro rata to size.

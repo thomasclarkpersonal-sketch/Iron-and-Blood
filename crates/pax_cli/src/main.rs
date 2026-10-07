@@ -5,6 +5,7 @@
 //! pax_cli record <scenario-dir> [--days N]      # write <scenario-dir>/golden.hashes
 //! pax_cli verify <scenario-dir> [--threads T]   # replay and compare with golden.hashes
 //! pax_cli bench  <scenario-dir> [--days N] [--scale K] [--threads T]
+//! pax_cli report <scenario-dir> [--days N] [--every K]   # economy health indicators
 //! ```
 //!
 //! `verify` is the determinism gate used by CI: any change to simulation
@@ -18,6 +19,8 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::Instant;
 
+mod report;
+
 use pax_data::golden;
 use pax_engine::{Fixed, World, step};
 
@@ -25,7 +28,8 @@ const USAGE: &str = "usage:
   pax_cli run    <scenario-dir> [--days N] [--every K]
   pax_cli record <scenario-dir> [--days N]
   pax_cli verify <scenario-dir> [--threads T]
-  pax_cli bench  <scenario-dir> [--days N] [--scale K] [--threads T]";
+  pax_cli bench  <scenario-dir> [--days N] [--scale K] [--threads T]
+  pax_cli report <scenario-dir> [--days N] [--every K]";
 
 struct Args {
     command: String,
@@ -92,6 +96,7 @@ fn dispatch(args: &Args) -> Result<ExitCode, String> {
         }
         "verify" => verify(scenario.world, &golden_path(&args.scenario)),
         "bench" => bench(scenario.world, args.days.unwrap_or(30), args.scale),
+        "report" => report::run(scenario.world, args.days.unwrap_or(365), args.every),
         other => Err(format!("unknown command '{other}'\n{USAGE}")),
     }
 }

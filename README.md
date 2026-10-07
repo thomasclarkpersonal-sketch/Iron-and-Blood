@@ -36,6 +36,7 @@ See [docs/MILESTONE_1.md](docs/MILESTONE_1.md) for acceptance criteria and open 
 cargo test                                                              # unit, conservation and determinism tests
 cargo run --release -p pax_cli -- run scenarios/mini_valley --days 365  # watch prices and volumes
 cargo run --release -p pax_cli -- verify scenarios/mini_valley          # determinism gate
+cargo run --release -p pax_cli -- report scenarios/mini_valley --days 1800  # GDP, prices, unemployment, wage share
 cargo run --release -p pax_cli -- bench scenarios/mini_valley --scale 170000 --threads 8
 ```
 

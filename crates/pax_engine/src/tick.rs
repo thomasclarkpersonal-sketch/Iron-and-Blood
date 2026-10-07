@@ -14,6 +14,7 @@
 //! step 4 when they are implemented.
 
 use crate::fixed::Fixed;
+use crate::systems::firms::Payouts;
 use crate::systems::labor::LabourReport;
 use crate::systems::market::GoodReport;
 use crate::systems::{demographics, firms, labor, market, production};
@@ -29,6 +30,13 @@ pub struct DayReport {
     pub iterations: Vec<u32>,
     /// Employment per labour pool (see [`LabourReport`]).
     pub labour: Vec<LabourReport>,
+    /// Household consumption spending: final demand, i.e. expenditure GDP
+    /// in this closed economy without government or investment.
+    pub household_spending: Fixed,
+    /// Spending by producers on input goods (intermediate consumption).
+    pub input_spending: Fixed,
+    /// Wages and dividends paid out today.
+    pub payouts: Payouts,
     pub total_money: Fixed,
 }
 
@@ -45,7 +53,7 @@ pub fn step(world: &mut World) -> DayReport {
     let labour = labor::assign_employment(world, &pools);
     production::produce(world);
     let outcome = market::clear_markets(world);
-    firms::pay_wages_and_dividends(world, &pools, &outcome.revenue, &outcome.input_cost);
+    let payouts = firms::pay_wages_and_dividends(world, &pools, &outcome.revenue, &outcome.input_cost);
     if demographics::is_month_end(world) {
         demographics::update_population(world);
     }
@@ -54,7 +62,16 @@ pub fn step(world: &mut World) -> DayReport {
     assert_eq!(money_before, money_after, "money not conserved on day {}", world.day);
     let day = world.day;
     world.day += 1;
-    DayReport { day, goods: outcome.goods, iterations: outcome.iterations, labour, total_money: money_after }
+    DayReport {
+        day,
+        input_spending: outcome.input_cost.iter().copied().sum(),
+        household_spending: outcome.household_spending,
+        goods: outcome.goods,
+        iterations: outcome.iterations,
+        labour,
+        payouts,
+        total_money: money_after,
+    }
 }
 
 /// Runs `days` ticks and returns the state hash after each one.
