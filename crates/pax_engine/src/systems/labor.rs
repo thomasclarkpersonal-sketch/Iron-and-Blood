@@ -30,8 +30,33 @@ pub fn pop_pools(world: &World) -> Groups {
     Groups::build(pool_count(world), &keys)
 }
 
-/// Sets `producers.employed` for every producer.
-pub fn assign_employment(world: &mut World, pools: &Groups) {
+/// Employment in one labour pool `(province, profession)` on one day.
+///
+/// Diagnostics only: nothing here is simulation state. `jobs` is the pool's
+/// total producer capacity; a pool with `jobs == 0` has no employer at all
+/// (e.g. owner professions), which reports may want to exclude from
+/// unemployment figures.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LabourReport {
+    pub province: u32,
+    pub profession: u16,
+    /// People in the pool (`Σ size` of its POPs).
+    pub workforce: u64,
+    /// Total capacity of the producers hiring from this pool.
+    pub jobs: u64,
+    /// People employed: `min(workforce, jobs)`.
+    pub employed: u64,
+}
+
+impl LabourReport {
+    pub fn unemployed(&self) -> u64 {
+        self.workforce - self.employed
+    }
+}
+
+/// Sets `producers.employed` for every producer, and reports employment for
+/// every labour pool that has people or jobs, in `(province, profession)` order.
+pub fn assign_employment(world: &mut World, pools: &Groups) -> Vec<LabourReport> {
     let producer_keys: Vec<usize> = (0..world.producers.len())
         .map(|i| {
             let def = &world.defs.producer_types[world.producers.kind[i] as usize];
@@ -39,13 +64,24 @@ pub fn assign_employment(world: &mut World, pools: &Groups) {
         })
         .collect();
     let by_pool = Groups::build(pool_count(world), &producer_keys);
+    let professions = world.defs.professions.len();
+    let mut report = Vec::new();
 
     for pool in 0..by_pool.key_count() {
         let employers = by_pool.members(pool);
+        let supply: u64 = pools.members(pool).iter().map(|&r| world.pops.size[r as usize] as u64).sum();
         if employers.is_empty() {
+            if supply > 0 {
+                report.push(LabourReport {
+                    province: (pool / professions) as u32,
+                    profession: (pool % professions) as u16,
+                    workforce: supply,
+                    jobs: 0,
+                    employed: 0,
+                });
+            }
             continue;
         }
-        let supply: u64 = pools.members(pool).iter().map(|&r| world.pops.size[r as usize] as u64).sum();
         let caps: Vec<i64> = employers.iter().map(|&r| world.producers.capacity[r as usize] as i64).collect();
         let demand: i64 = caps.iter().sum();
         let hired: Vec<i64> = if demand as u64 <= supply {
@@ -53,8 +89,18 @@ pub fn assign_employment(world: &mut World, pools: &Groups) {
         } else {
             allocate_raw(supply as i64, &caps).expect("demand > supply >= 0 implies positive weights")
         };
+        let mut employed = 0u64;
         for (&r, h) in employers.iter().zip(hired) {
             world.producers.employed[r as usize] = h as u32;
+            employed += h as u64;
         }
+        report.push(LabourReport {
+            province: (pool / professions) as u32,
+            profession: (pool % professions) as u16,
+            workforce: supply,
+            jobs: demand as u64,
+            employed,
+        });
     }
+    report
 }

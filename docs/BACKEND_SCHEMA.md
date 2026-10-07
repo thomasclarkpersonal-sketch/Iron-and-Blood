@@ -78,7 +78,7 @@ Orders and offers are **not** stored in state: they exist only during the market
 
 All systems are plain functions over `&mut World`, called by `tick::step` in the order given in [ARCHITECTURE.md](ARCHITECTURE.md#-the-game-loop).
 
-1. **`labor::assign_employment`.** Labour pool = `(province, profession)`. If total capacity exceeds the pool, employment is split pro rata to capacity (largest remainder).
+1. **`labor::assign_employment`.** Labour pool = `(province, profession)`. If total capacity exceeds the pool, employment is split pro rata to capacity (largest remainder). It returns a `LabourReport` per non-empty pool (workforce, jobs, employed), exposed as `DayReport::labour` for diagnostics. It is not state.
 2. **`production::produce`.** `output = min(Eπ, minⱼ stockⱼ/aⱼ, T·Eπ − unsold)`.
 3. **`market::clear_markets`.** Runs four phases:
    - **Map:** POPs are summed in parallel into `(market, profession, regime)` aggregates.
