@@ -32,15 +32,18 @@ fn cache_does_not_affect_equality_or_results() {
     assert_eq!(a.state_hash(), b.state_hash());
 }
 
-#[cfg(debug_assertions)]
 #[test]
-#[should_panic(expected = "stale POP layout cache")]
-fn debug_builds_catch_a_missed_invalidation() {
+fn cache_rebuilds_itself_when_inputs_change_without_invalidation() {
     let mut world = random_world(9);
     world.pop_layout();
     let last = world.pops.len() - 1;
     let provinces = world.geography.province_count() as u32;
     assert!(provinces >= 2, "seed must give at least two provinces");
+    // A system "forgets" to invalidate after moving a POP.
     world.pops.province[last] = (world.pops.province[last] + 1) % provinces;
-    world.pop_layout();
+    assert_eq!(*world.pop_layout(), PopLayout::build(&world), "stale layout served after a province change");
+    // Same for the province -> market map.
+    world.geography.province_market[0] =
+        (world.geography.province_market[0] + 1) % world.geography.market_count() as u32;
+    assert_eq!(*world.pop_layout(), PopLayout::build(&world), "stale layout served after a market map change");
 }

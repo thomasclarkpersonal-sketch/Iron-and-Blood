@@ -140,7 +140,9 @@ To change a decision, edit its entry in the same pull request as the code. Say w
 - **Merging:** cash adds up. Intensive attributes become size-weighted averages, computed in `Fixed` with one rounding.
 - **Promotion and migration are deterministic fractional flows** (`ΔN = ⌊N × rate⌋`), not dice rolls. The counter-based RNG (D3) is available where genuine randomness is wanted, e.g. rebellions.
 - **POP identity** is `(province, profession, culture, religion)`. Culture and religion columns arrive in M2. Lookups by identity use a sorted index, never a `HashMap`.
-- **Derived values are never stored.** Nation, market and state come from the province; storing `nation_id` on POPs would go stale on conquest.
+- **Derived values are never stored as state.** Nation, market and state come from the province; storing `nation_id` on POPs would go stale on conquest.
+  - **Exception: self-validating caches.** For performance, derived data may live in a cache *outside* state, under three conditions: it's excluded from equality and `World::state_hash`; it fingerprints all of its inputs on every use and rebuilds on mismatch; and debug builds check it against a fresh build.
+  - The only such cache is `World::layout` (`layout.rs`). Its inputs are the POP row count, `pops.province`, `pops.profession`, `geography.province_market` and the number of professions.
 
 ## D8. ECS: hand-rolled Struct-of-Arrays
 
@@ -194,7 +196,7 @@ The engine does not care, by construction.
 
 | Target | Budget | Measured |
 |---|---|---|
-| M1: 1M POP rows, 1 market, 4 goods, 8 threads | ≤ 100 ms/day | **45 ms/day** (`pax_cli bench … --scale 170000 --threads 8`) |
+| M1: 1M POP rows, 1 market, 4 goods, 8 threads | ≤ 100 ms/day | **≈37 ms/day** after T4 (was 45; `pax_cli bench … --scale 170000 --threads 8`) |
 | Long-term: 2M POP rows, ~3,000 markets, ~50 goods, 8-core desktop | ≤ 100 ms/day | Not yet measured; see risks in [MILESTONE_1.md](MILESTONE_1.md) |
 
 At 100 ms/day, the fastest game speed runs at about 10 in-game days per second. CI fails a PR that makes the tick more than 20% slower. The `Benchmark regression` job times the PR's base and head on the same runner (`scripts/bench-compare.sh`), so runner speed cancels out.

@@ -19,8 +19,7 @@
 use crate::alloc::allocate_raw;
 use crate::fixed::Fixed;
 use crate::groups::Groups;
-use crate::layout::PopLayout;
-use crate::systems::labor::pool_key;
+use crate::layout::{PopLayout, owner_key, pool_key};
 use crate::world::World;
 
 /// Totals paid out by [`pay_wages_and_dividends`] (diagnostics only).
@@ -38,7 +37,6 @@ pub fn pay_wages_and_dividends(
 ) -> Payouts {
     let defs = world.defs.clone();
     let rules = &defs.rules.firms;
-    let profs = defs.professions.len();
     let (pools, owners) = (&layout.labour, &layout.owners);
 
     let mut wage_income = vec![Fixed::ZERO; pools.key_count()];
@@ -48,7 +46,7 @@ pub fn pay_wages_and_dividends(
         let def = &defs.producer_types[world.producers.kind[i] as usize];
         let market = world.market_of_province(world.producers.province[i]);
         let wage_pool = pool_key(world, world.producers.province[i], def.worker);
-        let owner_pool = market * profs + def.owner;
+        let owner_pool = owner_key(world, market, def.owner);
         let has_owners = owners.members(owner_pool).iter().any(|&r| world.pops.size[r as usize] > 0);
 
         let p = &mut world.producers;

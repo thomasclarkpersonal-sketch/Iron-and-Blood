@@ -163,17 +163,18 @@ impl World {
         self.pops.len() - 1
     }
 
-    /// The cached POP groupings, rebuilt if the layout changed since last use.
+    /// The cached POP groupings, rebuilt whenever their inputs changed.
     ///
-    /// # Panics
-    /// In debug builds, if the cache is stale, i.e. some code changed POP
-    /// provinces or professions without calling [`World::invalidate_pop_layout`].
+    /// Each call fingerprints the inputs (`layout::fingerprint`, O(N), ~1 ms per
+    /// 1M rows) and rebuilds on a mismatch, so callers never see stale data even
+    /// if a system forgot [`World::invalidate_pop_layout`] (DECISIONS.md D7).
+    /// Debug builds also compare a reused cache with a fresh build. That check
+    /// is deliberate, so debug-build timings are not representative.
     pub fn pop_layout(&mut self) -> Arc<PopLayout> {
-        if let Some(cached) = &self.layout.0 {
-            debug_assert!(
-                **cached == PopLayout::build(self),
-                "stale POP layout cache: call World::invalidate_pop_layout after changing POP province/profession"
-            );
+        if let Some(cached) = &self.layout.0
+            && cached.fingerprint == crate::layout::fingerprint(self)
+        {
+            debug_assert!(**cached == PopLayout::build(self), "POP layout fingerprint collision");
             return cached.clone();
         }
         let fresh = Arc::new(PopLayout::build(self));
@@ -181,8 +182,8 @@ impl World {
         fresh
     }
 
-    /// Marks the cached POP groupings stale. Call after adding POP rows or
-    /// changing any POP's `province` or `profession`.
+    /// Drops the cached POP groupings. Optional: [`World::pop_layout`] detects
+    /// changed inputs by itself; this just skips one fingerprint comparison.
     pub fn invalidate_pop_layout(&mut self) {
         self.layout.0 = None;
     }
