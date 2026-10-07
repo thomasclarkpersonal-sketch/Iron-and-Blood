@@ -149,6 +149,6 @@ To have Claude draft a feature, open an issue with the *Feature request* templat
 
 ## 8. Where the design is going
 
-[MILESTONE_1.md](MILESTONE_1.md) has the M2 preview and its progress, and DECISIONS.md D15–D21 cover what M2 has added so far.
+[MILESTONE_2.md](MILESTONE_2.md) has M2's status, the measured state of the economy and the next tasks. DECISIONS.md D15–D21 cover what M2 has added so far.
 
-Open design questions are in [TRADE.md](TRADE.md) (inter-market trade) and [INVESTMENT.md](INVESTMENT.md) (capacity growth). Read those before working on either area.
+Open design questions are in proposal PRs: trade ([#18](https://github.com/thomasclarkpersonal-sketch/Iron-and-Blood/pull/18)), investment ([#21](https://github.com/thomasclarkpersonal-sketch/Iron-and-Blood/pull/21)) and rebellions ([#28](https://github.com/thomasclarkpersonal-sketch/Iron-and-Blood/pull/28)). Read those before working on any of these areas.

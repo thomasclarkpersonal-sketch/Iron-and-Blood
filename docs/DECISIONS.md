@@ -304,7 +304,7 @@ The state → national → sphere → global roll-up in the old ECONOMY_SYSTEM w
 - **When:** at month end, right after labour mobility (D18), on the workforce as it stands then.
 - **Rule:** for each market and worker profession, a province whose workforce exceeds its jobs sends `⌊surplus × migration_rate⌋` people to provinces of the same market with vacancies for that profession. The largest vacancy goes first, then the lowest province; no destination goes beyond its vacancies.
 - **Migrants keep their profession** and move with their cash under the D7 split rules, into the destination's existing row or a new one. People and money are conserved, and tested.
-- **Never across markets.** Moving between states, or to colonies, needs friction (`τ`, D14) and is left for after trade (TRADE.md).
+- **Never across markets.** Moving between states, or to colonies, needs friction (`τ`, D14) and is left for after trade (D14; proposal in [#18](https://github.com/thomasclarkpersonal-sketch/Iron-and-Blood/pull/18)).
 - **Tuning:** `demographics.migration_rate` (0.05 in `data/`, 0 in `mini_valley`'s frozen definitions). In `two_states` each profession lives in only one province per state, so results there are unchanged.
 
 ## D21. Commands and command logs
