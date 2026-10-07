@@ -116,3 +116,42 @@ fn life_needs_summary_matches_the_market_snapshot() {
         }
     }
 }
+
+/// The opt-in adaptive step (D1 refinement under review) must keep every D1
+/// guarantee: band, conservation, determinism.
+#[test]
+fn adaptive_step_keeps_market_guarantees() {
+    use std::sync::Arc;
+    for seed in SEEDS.take(60) {
+        let mut world = random_world(seed);
+        let mut defs = (*world.defs).clone();
+        defs.rules.market.adaptive_step = true;
+        world.defs = Arc::new(defs);
+        let rules = world.defs.rules.market.clone();
+        let twin = world.clone();
+        let mut hashes = Vec::new();
+        for day in 0..DAYS {
+            let opening = world.markets.price.clone();
+            let report = step(&mut world);
+            hashes.push(world.state_hash());
+            for (k, (&open, &now)) in opening.iter().zip(&world.markets.price).enumerate() {
+                let band = open.mul(rules.max_daily_change);
+                assert!(
+                    now >= (open - band).max(rules.price_floor) && now <= (open + band).min(rules.price_ceiling),
+                    "seed {seed} day {day} good {k}"
+                );
+            }
+            for g in &report.goods {
+                assert!(g.traded <= g.demand.min(g.supply), "seed {seed} day {day}");
+            }
+        }
+        let mut again = twin;
+        let replay: Vec<u64> = (0..DAYS)
+            .map(|_| {
+                step(&mut again);
+                again.state_hash()
+            })
+            .collect();
+        assert_eq!(hashes, replay, "seed {seed}: adaptive mode must be deterministic");
+    }
+}

@@ -58,6 +58,16 @@ To change a decision, edit its entry in the same pull request as the code. Say w
 
 **Why it scales.** LES demand (D2) is linear in POP size and budget, so a market needs only `(Σ size, Σ budget)` per profession and regime to evaluate demand at any trial price. Discovery never touches the POP table.
 
+**Opt-in adaptive step (under review):** `market.adaptive_step = true` in `rules.toml` replaces the decaying step with a per-good adaptive one: ×1.25 while a good's excess demand keeps its sign, ×½ when it flips, starting at `step`, capped at 1. Measured:
+
+| Case | Iterations (current → adaptive) | Tick time |
+|---|---|---|
+| Steady state, `mini_valley` | 2.6 → 1.3 | — |
+| Steady state, `two_states` | 9.1 → 2.8 | — |
+| Cold start, 3,000 markets | 42.7 → 8.2 | −34% |
+
+5-year GDP is unchanged and prices end within 2.5%. It is off by default, so results stay unchanged, until the maintainer decides to adopt it.
+
 **Code:** `crates/pax_engine/src/systems/market.rs`. **Docs:** [ECONOMY_SYSTEM.md](ECONOMY_SYSTEM.md).
 
 ## D2. Consumer demand: Linear Expenditure System (Stone-Geary)

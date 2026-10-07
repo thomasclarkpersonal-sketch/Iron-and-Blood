@@ -42,6 +42,7 @@ pub fn rules() -> Rules {
             step: d("0.5"),
             step_decay_iterations: 8,
             tolerance: d("0.001"),
+            adaptive_step: false,
             max_daily_change: d("0.2"),
             min_stock: d("0.01"),
             price_floor: d("0.001"),

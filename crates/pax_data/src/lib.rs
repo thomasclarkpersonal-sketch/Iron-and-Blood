@@ -290,6 +290,7 @@ pub fn parse_defs(src: &DefSources<'_>) -> Result<Defs, LoadError> {
             step: m.step.0,
             step_decay_iterations: m.step_decay_iterations,
             tolerance: m.tolerance.0,
+            adaptive_step: m.adaptive_step,
             max_daily_change: m.max_daily_change.0,
             min_stock: m.min_stock.0,
             price_floor: m.price_floor.0,

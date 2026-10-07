@@ -122,6 +122,9 @@ pub struct MarketRulesEntry {
     pub step: Dec,
     pub step_decay_iterations: u32,
     pub tolerance: Dec,
+    /// Opt-in adaptive per-good step (default off).
+    #[serde(default)]
+    pub adaptive_step: bool,
     pub max_daily_change: Dec,
     pub min_stock: Dec,
     pub price_floor: Dec,
