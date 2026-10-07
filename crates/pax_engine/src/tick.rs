@@ -14,6 +14,7 @@
 //! step 4 when they are implemented.
 
 use crate::fixed::Fixed;
+use crate::systems::labor::LabourReport;
 use crate::systems::market::GoodReport;
 use crate::systems::{demographics, firms, labor, market, production};
 use crate::world::World;
@@ -26,6 +27,8 @@ pub struct DayReport {
     /// Row-major `[market * goods + good]`.
     pub goods: Vec<GoodReport>,
     pub iterations: Vec<u32>,
+    /// Employment per labour pool (see [`LabourReport`]).
+    pub labour: Vec<LabourReport>,
     pub total_money: Fixed,
 }
 
@@ -39,7 +42,7 @@ pub fn step(world: &mut World) -> DayReport {
     let money_before = world.total_money();
     let pools = labor::pop_pools(world);
 
-    labor::assign_employment(world, &pools);
+    let labour = labor::assign_employment(world, &pools);
     production::produce(world);
     let outcome = market::clear_markets(world);
     firms::pay_wages_and_dividends(world, &pools, &outcome.revenue, &outcome.input_cost);
@@ -51,7 +54,7 @@ pub fn step(world: &mut World) -> DayReport {
     assert_eq!(money_before, money_after, "money not conserved on day {}", world.day);
     let day = world.day;
     world.day += 1;
-    DayReport { day, goods: outcome.goods, iterations: outcome.iterations, total_money: money_after }
+    DayReport { day, goods: outcome.goods, iterations: outcome.iterations, labour, total_money: money_after }
 }
 
 /// Runs `days` ticks and returns the state hash after each one.

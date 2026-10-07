@@ -48,7 +48,7 @@ Each task is sized for one developer. All must keep `cargo test`, `clippy -D war
 | T4 | **Group caching.** `labor::pop_pools` and the owner groups are rebuilt every tick. Cache them in `World` and invalidate when rows or provinces change. | Profile first: `cargo build --release` then `perf record`. |
 | T5 | **Per-market locality.** Settlement keeps a `markets × goods` accumulator per rayon job. With ~3,000 markets that is too large. Keep POP rows sorted by market and reduce per market range. | Required for the D13 long-term target. |
 | T6 | ✅ **Heir lookup.** `demographics::update_population` scanned all POPs for each extinct POP (O(N²) worst case). | Done: one O(N) pass picks each province's heir (sizes are fixed while estates settle). Results are identical; golden hashes are unchanged. Tests in `tests/demographics.rs` (20,000 simultaneous extinctions, ties, empty province). |
-| T7 | **Unemployment visibility.** Expose employed/unemployed per labour pool in `DayReport`. | Needed by T3 and later by politics. |
+| T7 | ✅ **Unemployment visibility.** Expose employed/unemployed per labour pool in `DayReport`. | Done: `DayReport::labour: Vec<LabourReport>` (province, profession, workforce, jobs, employed, `unemployed()`). Diagnostics only; hashes unchanged. Tested in `tests/labour_report.rs`. |
 | T8 | ✅ **Property-test the market.** Rationing never gives a buyer more than its demand; sellers never deliver more than they offered; prices respect `max_daily_change`. | Done: `tests/market_properties.rs` (150 random worlds × 60 days), plus a per-seller delivery assertion in settlement. The random-world generator is shared in `tests/common/`. |
 
 ## Known risks and limitations
