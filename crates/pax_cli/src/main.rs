@@ -21,8 +21,8 @@ use std::time::Instant;
 
 mod report;
 
-use pax_data::golden;
-use pax_engine::{Fixed, World, step};
+use pax_data::{CommandLog, golden};
+use pax_engine::{DayReport, Fixed, World, step};
 
 const USAGE: &str = "usage:
   pax_cli run    <scenario-dir> [--days N] [--every K]
@@ -86,19 +86,19 @@ fn main() -> ExitCode {
 fn dispatch(args: &Args) -> Result<ExitCode, String> {
     let scenario = pax_data::load_scenario(&args.scenario).map_err(|e| e.to_string())?;
     match args.command.as_str() {
-        "run" => run(scenario.world, args.days.unwrap_or(365), args.every),
+        "run" => run(scenario.world, &scenario.commands, args.days.unwrap_or(365), args.every),
         "record" => {
             let days = args.days.unwrap_or(golden::DEFAULT_DAYS);
             let mut world = scenario.world;
-            let hashes = pax_engine::tick::run(&mut world, days);
+            let hashes = pax_data::run_logged(&mut world, &scenario.commands, days);
             let path = golden_path(&args.scenario);
             golden::write(&path, &scenario.name, &hashes).map_err(|e| format!("{}: {e}", path.display()))?;
             println!("recorded {days} day hashes to {}", path.display());
             Ok(ExitCode::SUCCESS)
         }
-        "verify" => verify(scenario.world, &golden_path(&args.scenario)),
+        "verify" => verify(scenario.world, &scenario.commands, &golden_path(&args.scenario)),
         "bench" => bench(scenario.world, args.days.unwrap_or(30), args.scale, args.regions),
-        "report" => report::run(scenario.world, args.days.unwrap_or(365), args.every),
+        "report" => report::run(scenario.world, &scenario.commands, args.days.unwrap_or(365), args.every),
         other => Err(format!("unknown command '{other}'\n{USAGE}")),
     }
 }
@@ -107,7 +107,7 @@ fn golden_path(scenario: &Path) -> PathBuf {
     scenario.join("golden.hashes")
 }
 
-fn run(mut world: World, days: u64, every: u64) -> Result<ExitCode, String> {
+fn run(mut world: World, log: &CommandLog, days: u64, every: u64) -> Result<ExitCode, String> {
     let goods: Vec<String> = world.defs.goods.iter().map(|g| g.key.clone()).collect();
     print!("{:>5} {:>10} {:>14}", "day", "population", "money");
     for g in &goods {
@@ -115,7 +115,7 @@ fn run(mut world: World, days: u64, every: u64) -> Result<ExitCode, String> {
     }
     println!();
     for _ in 0..days {
-        let report = step(&mut world);
+        let report = tick(&mut world, log);
         if !is_report_day(report.day, every, days) {
             continue;
         }
@@ -129,10 +129,10 @@ fn run(mut world: World, days: u64, every: u64) -> Result<ExitCode, String> {
     Ok(ExitCode::SUCCESS)
 }
 
-fn verify(mut world: World, path: &Path) -> Result<ExitCode, String> {
+fn verify(mut world: World, log: &CommandLog, path: &Path) -> Result<ExitCode, String> {
     let expected = golden::read(path).map_err(|e| format!("{}: {e} (run `pax_cli record` first)", path.display()))?;
     for (day, &want) in expected.iter().enumerate() {
-        step(&mut world);
+        tick(&mut world, log);
         let got = world.state_hash();
         if got != want {
             eprintln!("DESYNC on day {day}: expected {want:016x}, got {got:016x}");
@@ -217,6 +217,17 @@ fn replicate(base: &World, scale: u32, regions: u32) -> World {
         }
     }
     world
+}
+
+/// Advances one day, applying the command log's commands for that day (D21).
+/// A rejected command is reported on stderr, and the day still runs.
+pub(crate) fn tick(world: &mut World, log: &CommandLog) -> DayReport {
+    let day = world.day;
+    let (report, results) = pax_engine::tick::step_with(world, log.for_day(day));
+    for e in results.into_iter().filter_map(Result::err) {
+        eprintln!("warning: command on day {day} rejected: {e}");
+    }
+    report
 }
 
 /// True if 0-based `day` ends a reporting period of `every` days, or is the last

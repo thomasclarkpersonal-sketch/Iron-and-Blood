@@ -27,7 +27,7 @@ flowchart TD
 
 ## 🔄 The Game Loop
 
-One tick is one day. Systems run in a fixed order (D4). The order is part of the contract, because changing it changes results.
+One tick is one day. Commands are applied first, in order (D21). Then systems run in a fixed order (D4). The order is part of the contract, because changing it changes results.
 
 | # | System | Cadence | Module |
 |---|--------|---------|--------|

@@ -2,6 +2,8 @@
 //!
 //! Order matters and is part of the design contract (docs/ARCHITECTURE.md):
 //!
+//! Commands (D21) are applied first, in order, before any system.
+//!
 //! | # | System | Cadence |
 //! |---|--------|---------|
 //! | 1 | labour: assign employment | daily |
@@ -16,6 +18,7 @@
 //! All month-end systems run on the last day of each month (D4); promotion
 //! between strata will join step 5 when implemented.
 
+use crate::command::{Command, CommandError};
 use crate::fixed::Fixed;
 use crate::systems::firms::Payouts;
 use crate::systems::labor::LabourReport;
@@ -62,6 +65,18 @@ pub struct DayReport {
 /// exactly conserved (DECISIONS.md D5); a failure here is always a bug in a
 /// system, and continuing would corrupt every later tick.
 pub fn step(world: &mut World) -> DayReport {
+    step_with(world, &[]).0
+}
+
+/// Advances the world by one day after applying `commands` in order at the
+/// start of the tick (D10, D21). Returns the day's report and one result per
+/// command; a rejected command changes nothing and the day still runs.
+pub fn step_with(world: &mut World, commands: &[Command]) -> (DayReport, Vec<Result<(), CommandError>>) {
+    let results: Vec<Result<(), CommandError>> = commands.iter().map(|&c| world.apply(c)).collect();
+    (step_systems(world), results)
+}
+
+fn step_systems(world: &mut World) -> DayReport {
     let money_before = world.total_money();
     let layout = world.pop_layout();
 
