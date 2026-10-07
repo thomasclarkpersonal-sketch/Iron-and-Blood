@@ -87,3 +87,27 @@ fn buyers_never_overspend_and_needs_stay_in_range() {
         }
     }
 }
+
+#[test]
+fn life_needs_summary_matches_the_market_snapshot() {
+    for seed in SEEDS.take(40) {
+        let mut world = random_world(seed);
+        for day in 0..DAYS {
+            // Sizes as the market sees them (demographics may change them after).
+            let sizes = world.pops.size.clone();
+            let report = step(&mut world);
+            let (mut people, mut deprived, mut weighted) = (0u64, 0u64, 0i128);
+            for (&n, &life) in sizes.iter().zip(&world.pops.life_needs) {
+                if n > 0 {
+                    people += n as u64;
+                    weighted += n as i128 * life.raw() as i128;
+                    if life < Fixed::ONE {
+                        deprived += n as u64;
+                    }
+                }
+            }
+            let s = report.life_needs;
+            assert_eq!((s.people, s.deprived, s.weighted_raw), (people, deprived, weighted), "seed {seed} day {day}");
+        }
+    }
+}

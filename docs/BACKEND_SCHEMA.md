@@ -105,6 +105,7 @@ All systems are plain functions over `&mut World`, called by `tick::step` in the
 | `household_spending` | POP consumption spending (final demand; expenditure GDP in a closed economy) |
 | `input_spending` | Producer spending on inputs (intermediate consumption) |
 | `payouts` | Wages and dividends paid that day |
+| `life_needs` | Life-needs coverage at the market: people, deprived, weighted mean (`LifeNeedsSummary`) |
 | `total_money` | Outside money after the day (asserted unchanged) |
 
 ## 🔌 API Boundary (M3)

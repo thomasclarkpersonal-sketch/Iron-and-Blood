@@ -213,8 +213,43 @@ impl World {
         p.len() - 1
     }
 
+    /// Reorders POP rows so they are grouped by market, keeping the existing order
+    /// within each market (stable).
+    ///
+    /// The market's parallel passes keep per-job sums only for the markets a job
+    /// touches (`MarketRuns`), so grouped rows keep those sums tiny. Correctness
+    /// never depends on the order, only speed. Row order is state, so this changes
+    /// the state hash unless the rows were already grouped. Call it once when
+    /// building a world (the loader does), not mid-game.
+    pub fn group_pops_by_market(&mut self) {
+        let market: Vec<u32> = self.pops.province.iter().map(|&p| self.geography.province_market[p as usize]).collect();
+        let mut order: Vec<usize> = (0..self.pops.len()).collect();
+        order.sort_by_key(|&i| market[i]); // stable
+        if order.iter().enumerate().all(|(k, &i)| k == i) {
+            return;
+        }
+        // Exhaustive destructuring: adding a column to `Pops` is a compile error
+        // here until it is permuted too.
+        let Pops { size, cash, profession, province, life_needs } = &mut self.pops;
+        fn permute<T: Copy>(column: &mut Vec<T>, order: &[usize]) {
+            *column = order.iter().map(|&i| column[i]).collect();
+        }
+        permute(size, &order);
+        permute(cash, &order);
+        permute(profession, &order);
+        permute(province, &order);
+        permute(life_needs, &order);
+        self.invalidate_pop_layout();
+    }
+
     pub fn market_of_province(&self, province: u32) -> usize {
         self.geography.province_market[province as usize] as usize
+    }
+
+    /// All prices of one market, indexed by good.
+    pub fn prices(&self, market: usize) -> &[Fixed] {
+        let goods = self.defs.good_count();
+        &self.markets.price[market * goods..(market + 1) * goods]
     }
 
     pub fn price(&self, market: usize, good: GoodId) -> Fixed {

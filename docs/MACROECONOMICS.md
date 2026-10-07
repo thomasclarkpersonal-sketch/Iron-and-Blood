@@ -63,7 +63,7 @@ A realistic economy needs realistic wages. If a factory has a bad day it should 
 
 - **Wages are sticky** (D6). The target wage is `labor_share × smoothed value added / workers`, and the actual wage closes only `1/wage_stickiness_days` of the gap per day.
 - **Unprofitable producers stop buying inputs** (shutdown rule) and **stop overproducing** (inventory targeting), instead of burning cash.
-- **Liquidity rule:** a producer pays wages only from cash above one day of missing inputs, so it can always keep producing; workers absorb a shortfall pro rata, and there is no debt in M1.
-- **Wage floor:** target wages never fall below 1.5× a worker's subsistence cost, which anchors prices to the cost of labour.
+- **Liquidity rule:** a producer pays wages only from cash above a restart reserve (the inputs still missing for one day of output), which it keeps even while shut down. It can therefore always resume producing; workers absorb a shortfall pro rata, and there is no debt in M1.
+- **Wage floor:** target wages never fall below `firms.subsistence_wage_multiple` × a worker's subsistence cost, which anchors prices to the cost of labour.
 - *M2:* bank loans let a producer bridge losses before it cuts wages, and bankruptcy hands its remaining cash to creditors, then owners.
 - *M2:* search-and-matching style labour flows (promotion/demotion, migration toward higher wages) as deterministic fractional flows (D7).

@@ -40,7 +40,7 @@ To change a decision, edit its entry in the same pull request as the code. Say w
    - Stop when every good is settled (`|zᵢ| ≤ tolerance`, or pinned at a band edge with excess demand pushing outward), or after `max_iterations`.
    - Before the band confinement, unreachable goods kept every market iterating to the cap.
 3. **Limit:** the executed price may move at most `max_daily_change` (default ±10%) from yesterday's. If a market holds **no stock at all** of a good, its price is held, since there is nothing to discover from, and the scarcity is reported as unmet demand.
-   - Stock below `min_stock` (0.01 units) counts as none and is not offered. Before this rule, rounding dust of 10⁻⁶ units let discovery push a price to the ceiling against almost nothing, which killed a whole supply chain in `two_states`.
+   - Stock below `market.min_stock` (`rules.toml`) counts as none and is not offered. Before this rule, rounding dust of 10⁻⁶ units let discovery push a price to the ceiling against almost nothing, which killed a whole supply chain in `two_states`.
 4. **Settle:** if `D > S`, every buyer receives the same fraction `S/D`. No buyer is favoured by queue position, nation rank or entity order.
 
 **Supply** is price-responsive: `S(p) = stock × min(1, p/r)`, with a cost-plus reservation price `r = Σ aⱼpⱼ + (w/π)/labor_share` (see D6).
@@ -132,10 +132,11 @@ To change a decision, edit its entry in the same pull request as the code. Say w
 - **Inventory targeting:** produce at most up to `target_stock_days` of output in stock.
 - **Pricing:** cost-plus reservation price (D1).
 - **Wages** are sticky and track value added: target `w* = labor_share × max(V̄, 0)/E`, where `V̄` is the smoothed (revenue − input cost). The wage closes `1/wage_stickiness_days` of the gap per day.
-- **Wage floor:** the target wage is never below `subsistence_wage_multiple` (1.5) × a worker's daily subsistence cost `Σ γ p`.
+- **Wage floor:** the target wage is never below `firms.subsistence_wage_multiple` (`rules.toml`) × a worker's daily subsistence cost `Σ γ p` (`ProfessionDef::subsistence_cost`).
   - This is a classical subsistence wage. It anchors prices to the cost of labour.
   - Without it, in a chain whose buyer buys a fixed quantity, wages, reservation prices and prices chased each other down to the technical floor (seen in `two_states`).
-- **Liquidity rule:** wages are paid only from cash above one day of missing inputs at current prices, into the labour pool `(province, profession)`, and split by POP size.
+- **Liquidity rule:** wages are paid only from cash above a **restart reserve**: the cost of the inputs still missing for one day of output at today's prices (`production::input_requirements`). It goes into the labour pool `(province, profession)` and is split by POP size.
+  - The reserve is kept **even while the producer is shut down** (the market then orders nothing: `planned_inputs` is empty under the shutdown rule). That way the producer can restart when prices recover.
   - A struggling producer can therefore always buy inputs, produce and sell. Its workers absorb the shortfall in pay instead of the firm dying.
   - Paying out the last cash in wages was a permanent trap: no inputs meant no output, no revenue, and no recovery.
 - **Dividends:** cash above `reserve_days × wage bill` is paid out at `dividend_payout_rate` per day to the producer type's **owner profession** in the same market, split by size.

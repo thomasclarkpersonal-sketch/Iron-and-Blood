@@ -13,9 +13,10 @@
 //!   professions that some producer type employs; owner professions are
 //!   outside the labour force.
 //! * **Wage share:** wages ÷ (wages + dividends) paid during the period.
-//! * **Life needs:** mean `life_needs` from the period's last market day, weighted
-//!   by POP sizes *at that market* (before any month-end demographics that day),
-//!   and the share of those people whose subsistence was not fully met.
+//! * **Life needs:** `DayReport::life_needs` from the period's last market day:
+//!   mean satisfaction weighted by POP sizes at that market (the engine computes
+//!   it, so the CLI never re-creates the tick's ordering), and the share of
+//!   people whose subsistence was not fully met.
 //!   `population` is the end-of-period population, after demographics.
 //!
 //! If day 1 traded nothing, there is no base basket and the price index and real
@@ -46,8 +47,6 @@ pub fn run(mut world: World, days: u64, every: u64) -> Result<ExitCode, String> 
     let mut base: Option<(Vec<f64>, f64)> = None; // (basket q0, Σ p0 q0)
     let (mut spending, mut wages, mut dividends, mut n) = (0.0, 0.0, 0.0, 0u64);
     for day0 in 0..days {
-        // Sizes as the market saw them: month-end demographics run after the market.
-        let market_sizes = crate::is_report_day(day0, every, days).then(|| world.pops.size.clone());
         let report: DayReport = step(&mut world);
         if base.is_none() {
             let basket: Vec<f64> = report.goods.iter().map(|g| f(g.traded)).collect();
@@ -59,7 +58,9 @@ pub fn run(mut world: World, days: u64, every: u64) -> Result<ExitCode, String> 
         dividends += f(report.payouts.dividends);
         n += 1;
 
-        let Some(market_sizes) = market_sizes else { continue };
+        if !crate::is_report_day(day0, every, days) {
+            continue;
+        }
         let day = report.day + 1;
 
         let (basket, base_value) = base.as_ref().expect("set on day 1");
@@ -80,19 +81,10 @@ pub fn run(mut world: World, days: u64, every: u64) -> Result<ExitCode, String> 
         let wage_share = if wages + dividends > 0.0 { wages / (wages + dividends) * 100.0 } else { 0.0 };
 
         let population = world.population();
-        let (mut weighted_life, mut deprived, mut consumers) = (0.0, 0u64, 0u64);
-        for (&size, &life) in market_sizes.iter().zip(&world.pops.life_needs) {
-            weighted_life += size as f64 * f(life);
-            consumers += size as u64;
-            if life < Fixed::ONE {
-                deprived += size as u64;
-            }
-        }
-        let (life_mean, deprived_pct) = if consumers > 0 {
-            (weighted_life / consumers as f64, deprived as f64 / consumers as f64 * 100.0)
-        } else {
-            (0.0, 0.0)
-        };
+        // The engine weights life needs by the sizes the market saw (DayReport).
+        let life = &report.life_needs;
+        let life_mean = life.mean().map_or(0.0, f);
+        let deprived_pct = if life.people > 0 { life.deprived as f64 / life.people as f64 * 100.0 } else { 0.0 };
 
         println!(
             "{day:>5} {population:>10} {gdp:>12.2} {index:>9} {real_gdp:>12} {unemployment:>8.1} {wage_share:>8.1} {life_mean:>10.3} {deprived_pct:>9.1}"
