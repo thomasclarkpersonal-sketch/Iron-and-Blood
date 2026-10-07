@@ -12,6 +12,8 @@
 use crate::fixed::Fixed;
 use crate::world::World;
 
+/// Applies one month of militancy dynamics to every POP with people (see the
+/// module docs for the formula). Called at month end by `tick::step`.
 pub fn update_militancy(world: &mut World) {
     let rules = world.defs.rules.politics.clone();
     for i in 0..world.pops.len() {

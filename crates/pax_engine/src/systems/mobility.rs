@@ -119,23 +119,9 @@ fn move_people(world: &mut World, rows: &[u32], dest: usize, n: u64) -> u64 {
         let p = &mut world.pops;
         p.size[r] -= m as u32;
         p.cash[r] -= cash;
-        let dest_size = p.size[dest] as i64;
-        p.life_needs[dest] = weighted_mean(p.life_needs[dest], dest_size, p.life_needs[r], m);
-        p.militancy[dest] = weighted_mean(p.militancy[dest], dest_size, p.militancy[r], m);
-        p.size[dest] += m as u32;
-        p.cash[dest] += cash;
+        p.absorb(dest, r, m as u32, cash);
     }
     n
-}
-
-/// Size-weighted mean of two intensive values (D7 merge rule), rounded down.
-fn weighted_mean(a: Fixed, a_size: i64, b: Fixed, b_size: i64) -> Fixed {
-    if a_size + b_size == 0 {
-        return b;
-    }
-    Fixed::from_raw(
-        ((a.raw() as i128 * a_size as i128 + b.raw() as i128 * b_size as i128) / (a_size + b_size) as i128) as i64,
-    )
 }
 
 /// Month-end migration between provinces of the same market (D20).

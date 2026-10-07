@@ -13,8 +13,8 @@
 //! | 6 | politics: militancy (D19) | month end |
 //! | 7 | demographics, then POP row compaction (D7) | month end |
 //!
-//! Weekly systems (promotion, migration) and monthly politics slot in after
-//! step 4 when they are implemented.
+//! All month-end systems run on the last day of each month (D4); promotion
+//! between strata will join step 5 when implemented.
 
 use crate::fixed::Fixed;
 use crate::systems::firms::Payouts;

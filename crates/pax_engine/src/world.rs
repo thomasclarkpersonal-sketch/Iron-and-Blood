@@ -73,6 +73,26 @@ impl Pops {
         self.size.len()
     }
 
+    /// The D7 merge rule, in one place: folds `people` people carrying `cash`
+    /// from row `src` into row `dest`. Sizes and cash add. Intensive attributes
+    /// become size-weighted means, rounded down; if both sides are empty, the
+    /// incoming value is kept.
+    ///
+    /// The caller removes `people` and `cash` from `src` (or drops the row).
+    /// `Pops` is destructured exhaustively here, so adding a column is a compile
+    /// error until its merge rule is written down.
+    pub fn absorb(&mut self, dest: usize, src: usize, people: u32, cash: Fixed) {
+        let Pops { size, cash: cash_column, profession: _, province: _, life_needs, militancy } = self;
+        let (a, b) = (size[dest] as i128, people as i128);
+        let mean = |x: Fixed, y: Fixed| {
+            if a + b == 0 { y } else { Fixed::from_raw(((x.raw() as i128 * a + y.raw() as i128 * b) / (a + b)) as i64) }
+        };
+        life_needs[dest] = mean(life_needs[dest], life_needs[src]);
+        militancy[dest] = mean(militancy[dest], militancy[src]);
+        size[dest] += people;
+        cash_column[dest] += cash;
+    }
+
     pub fn is_empty(&self) -> bool {
         self.size.is_empty()
     }
@@ -277,8 +297,7 @@ impl World {
     /// `(province, profession)` into the first such row, and drops rows that are
     /// empty with no cash. Returns the number of rows removed.
     ///
-    /// Sizes and cash add up exactly; `life_needs` and `militancy` become
-    /// size-weighted means (rounded down). Surviving rows keep their relative
+    /// Merging follows [`Pops::absorb`] (the single D7 merge rule). Surviving rows keep their relative
     /// order, so the result is deterministic. People and money are conserved.
     /// Mobility and migration create rows, and extinctions leave empty ones;
     /// this keeps the table bounded by provinces × professions.
@@ -293,20 +312,8 @@ impl World {
             match first[key] {
                 None => first[key] = Some(i),
                 Some(f) => {
-                    let p = &mut self.pops;
-                    let (fs, is) = (p.size[f] as i128, p.size[i] as i128);
-                    let mean = |a: Fixed, b: Fixed| {
-                        if fs + is == 0 {
-                            a
-                        } else {
-                            Fixed::from_raw(((a.raw() as i128 * fs + b.raw() as i128 * is) / (fs + is)) as i64)
-                        }
-                    };
-                    p.life_needs[f] = mean(p.life_needs[f], p.life_needs[i]);
-                    p.militancy[f] = mean(p.militancy[f], p.militancy[i]);
-                    p.size[f] += p.size[i];
-                    let cash = p.cash[i];
-                    p.cash[f] += cash;
+                    let (people, cash) = (self.pops.size[i], self.pops.cash[i]);
+                    self.pops.absorb(f, i, people, cash);
                     *kept = false;
                 }
             }
