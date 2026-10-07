@@ -100,3 +100,32 @@ cash = -1
     assert!(all.contains("unknown profession 'priest'"), "{all}");
     assert!(all.contains("cash must be >= 0"), "{all}");
 }
+
+#[test]
+fn command_logs_are_validated() {
+    let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two_states");
+    let world = pax_data::load_scenario(&dir).expect("two_states loads").world;
+    let text = r#"
+[[command]]
+day = 1
+type = "set_income_tax"
+nation = "atlantis"
+rate = 0.1
+
+[[command]]
+day = 2
+type = "declare_war"
+nation = "lowland_kingdom"
+rate = 0.1
+
+[[command]]
+day = 3
+type = "set_transfer_rate"
+nation = "lowland_kingdom"
+rate = 2
+"#;
+    let all = pax_data::parse_commands(&world, text).expect_err("must fail").messages.join("\n");
+    assert!(all.contains("unknown nation 'atlantis'"), "{all}");
+    assert!(all.contains("unknown type 'declare_war'"), "{all}");
+    assert!(all.contains("rate must be in [0, 1]"), "{all}");
+}

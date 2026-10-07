@@ -141,7 +141,7 @@ All systems are plain functions over `&mut World`, called by `tick::step` in the
 * Aggregated statistics (population, GDP, prices).
 * The server never sends individual POP data unless the client requests to inspect a single province.
 
-**Client → server (commands):** applied at the start of the next tick, ordered by `(tick, player, sequence)`:
+**Client → server (commands):** applied at the start of the next tick, ordered by `(tick, player, sequence)`. Engine side implemented (`pax_engine::Command`, `tick::step_with`, D21):
 * `ChangeTaxRate { nation, rate: Fixed }` (the rate is sent as `Fixed`'s raw `i64`, never a float)
 * `SubsidizeFactory { producer, enabled: bool }`
 * `MoveArmy { army, target_province }`

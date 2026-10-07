@@ -25,10 +25,10 @@ use pax_engine::defs::{
     Defs, DemographicRules, FirmRules, GoodDef, MarketRules, PoliticsRules, ProducerTypeDef, ProfessionDef, Rules,
 };
 use pax_engine::world::{Geography, NewNation, NewProducer};
-use pax_engine::{Fixed, World};
+use pax_engine::{Command, Fixed, World};
 
 pub use schema::Dec;
-use schema::{GoodsFile, ProductionFile, ProfessionsFile, RulesFile, ScenarioFile};
+use schema::{CommandFile, GoodsFile, ProductionFile, ProfessionsFile, RulesFile, ScenarioFile};
 
 /// All problems found while loading. Validation keeps going after the first
 /// error so modders see every mistake in one run.
@@ -81,10 +81,63 @@ pub fn load_defs(dir: &Path) -> Result<Defs, LoadError> {
     parse_defs(&DefSources { goods: &goods, professions: &professions, production: &production, rules: &rules })
 }
 
-/// A loaded scenario: its display name and the initial world.
+/// A loaded scenario: its display name, the initial world and its command log.
 pub struct Scenario {
     pub name: String,
     pub world: World,
+    /// Commands to apply during the run (empty if the scenario has none).
+    pub commands: CommandLog,
+}
+
+/// Commands keyed by the day at whose start they apply (D21). Within a day,
+/// file order is application order.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct CommandLog {
+    by_day: BTreeMap<u64, Vec<Command>>,
+}
+
+impl CommandLog {
+    /// Commands for `day`, in application order.
+    pub fn for_day(&self, day: u64) -> &[Command] {
+        self.by_day.get(&day).map_or(&[], Vec::as_slice)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.by_day.is_empty()
+    }
+
+    pub fn len(&self) -> usize {
+        self.by_day.values().map(Vec::len).sum()
+    }
+}
+
+/// Parses a command log against `world` (nation keys resolve to its rows).
+pub fn parse_commands(world: &World, text: &str) -> Result<CommandLog, LoadError> {
+    let file: CommandFile = parse("commands.toml", text)?;
+    let mut errors = Errors::default();
+    let mut log = CommandLog::default();
+    for (i, c) in file.command.iter().enumerate() {
+        let ctx = format!("command #{} (day {})", i + 1, c.day);
+        let Some(nation) = world.nations.key.iter().position(|k| *k == c.nation) else {
+            errors.0.push(format!("{ctx}: unknown nation '{}'", c.nation));
+            continue;
+        };
+        let rate = c.rate.0;
+        errors.check(in_range(rate, Fixed::ZERO, Fixed::ONE), || format!("{ctx}: rate must be in [0, 1]"));
+        let command = match c.kind.as_str() {
+            "set_income_tax" => Command::SetIncomeTax { nation, rate },
+            "set_transfer_rate" => Command::SetTransferRate { nation, rate },
+            "set_consumption_rate" => Command::SetConsumptionRate { nation, rate },
+            other => {
+                errors.0.push(format!(
+                    "{ctx}: unknown type '{other}' (expected set_income_tax, set_transfer_rate or set_consumption_rate)"
+                ));
+                continue;
+            }
+        };
+        log.by_day.entry(c.day).or_default().push(command);
+    }
+    errors.finish(log)
 }
 
 /// Loads a scenario directory (containing `scenario.toml`) and its definitions.
@@ -94,7 +147,11 @@ pub fn load_scenario(dir: &Path) -> Result<Scenario, LoadError> {
     let defs_dir: PathBuf = dir.join(&scenario.data);
     let defs = load_defs(&defs_dir)?;
     let world = build_world(Arc::new(defs), &scenario)?;
-    Ok(Scenario { name: scenario.name, world })
+    let commands = match &scenario.commands {
+        Some(file) => parse_commands(&world, &read(&dir.join(file))?)?,
+        None => CommandLog::default(),
+    };
+    Ok(Scenario { name: scenario.name, world, commands })
 }
 
 /// Parses a scenario from text against already-loaded definitions.
@@ -430,4 +487,25 @@ fn build_world(defs: Arc<Defs>, s: &ScenarioFile) -> Result<World, LoadError> {
     // Engine-owned layout step: POP rows grouped by market (stable).
     world.group_pops_by_market();
     Ok(world)
+}
+
+/// Runs `days` ticks applying `log`'s commands, returning the state hash after
+/// each day: the determinism harness for scenarios with command logs (D11, D21).
+///
+/// # Panics
+/// If a logged command is rejected. A logged command is part of the game, so a
+/// rejection means the log and the scenario disagree.
+pub fn run_logged(world: &mut World, log: &CommandLog, days: u64) -> Vec<u64> {
+    (0..days)
+        .map(|_| {
+            let day = world.day;
+            let (_, results) = pax_engine::tick::step_with(world, log.for_day(day));
+            for r in results {
+                if let Err(e) = r {
+                    panic!("command on day {day} rejected: {e}");
+                }
+            }
+            world.state_hash()
+        })
+        .collect()
 }

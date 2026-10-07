@@ -27,7 +27,8 @@
 
 use std::process::ExitCode;
 
-use pax_engine::{DayReport, Fixed, World, step};
+use pax_data::CommandLog;
+use pax_engine::{DayReport, Fixed, World};
 
 fn f(v: Fixed) -> f64 {
     v.raw() as f64 / pax_engine::fixed::SCALE as f64
@@ -38,7 +39,7 @@ fn basket_value(prices: &[Fixed], basket: &[f64]) -> f64 {
     prices.iter().zip(basket).map(|(&p, &q)| f(p) * q).sum()
 }
 
-pub fn run(mut world: World, days: u64, every: u64) -> Result<ExitCode, String> {
+pub fn run(mut world: World, log: &CommandLog, days: u64, every: u64) -> Result<ExitCode, String> {
     let worker_professions = world.defs.worker_professions();
 
     println!(
@@ -59,7 +60,7 @@ pub fn run(mut world: World, days: u64, every: u64) -> Result<ExitCode, String> 
     let mut base: Option<(Vec<f64>, f64)> = None; // (basket q0, Σ p0 q0)
     let (mut spending, mut wages, mut dividends, mut taxes, mut n) = (0.0, 0.0, 0.0, 0.0, 0u64);
     for day0 in 0..days {
-        let report: DayReport = step(&mut world);
+        let report: DayReport = crate::tick(&mut world, log);
         if base.is_none() {
             let basket: Vec<f64> = report.goods.iter().map(|g| f(g.traded)).collect();
             let value = basket_value(&world.markets.price, &basket);
@@ -123,7 +124,7 @@ mod tests {
     fn report_runs_on_reference_scenario() {
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/mini_valley");
         let world = pax_data::load_scenario(&dir).expect("scenario loads").world;
-        assert_eq!(run(world, 40, 20).unwrap(), ExitCode::SUCCESS);
+        assert_eq!(run(world, &CommandLog::default(), 40, 20).unwrap(), ExitCode::SUCCESS);
     }
 
     #[test]

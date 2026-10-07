@@ -13,14 +13,15 @@
 
 use std::path::PathBuf;
 
-use pax_engine::{Fixed, step};
+use pax_engine::Fixed;
 
 const YEARS: u64 = if cfg!(debug_assertions) { 5 } else { 20 };
 
 #[test]
 fn two_states_is_stable() {
     let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two_states");
-    let mut world = pax_data::load_scenario(&dir).expect("two_states loads").world;
+    let scenario = pax_data::load_scenario(&dir).expect("two_states loads");
+    let (mut world, commands) = (scenario.world, scenario.commands);
     let goods = world.defs.good_count();
     let start_population = world.population();
     let rules = world.defs.rules.market.clone();
@@ -29,7 +30,8 @@ fn two_states_is_stable() {
     let mut traded_recently = vec![false; world.geography.market_count() * goods];
     let mut last = None;
     for day in 0..days {
-        let report = step(&mut world);
+        let (report, results) = pax_engine::tick::step_with(&mut world, commands.for_day(day));
+        assert!(results.iter().all(Result::is_ok), "a logged command was rejected on day {day}");
         if day + 30 >= days {
             for (seen, g) in traded_recently.iter_mut().zip(&report.goods) {
                 *seen |= g.traded.is_positive();

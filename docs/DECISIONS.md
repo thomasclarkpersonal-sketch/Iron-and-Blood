@@ -30,6 +30,7 @@ To change a decision, edit its entry in the same pull request as the code. Say w
 | [D18](#d18-labour-mobility) | Labour mobility | Accepted (M2-4) |
 | [D19](#d19-militancy) | Militancy | Accepted (M2-5) |
 | [D20](#d20-migration-within-a-market) | Migration within a market | Accepted (M2-6) |
+| [D21](#d21-commands-and-command-logs) | Commands and command logs | Accepted |
 
 ---
 
@@ -191,7 +192,7 @@ All parsing lives in `pax_data`, so the format can change without touching the e
 **Problem.** AGENTS.md assumed lockstep multiplayer, while BACKEND_SCHEMA described a server pushing state to clients.
 
 **Decision.**
-- The simulation runs in **one authoritative process** (`pax_server`, M3). Clients send commands and receive aggregated state snapshots plus on-demand detail (e.g. one province's POPs). Commands are applied at the start of the next tick, in order of `(tick, player id, sequence)`.
+- The simulation runs in **one authoritative process** (`pax_server`, M3). Clients send commands and receive aggregated state snapshots plus on-demand detail (e.g. one province's POPs). Commands are applied at the start of the next tick, in order of `(tick, player id, sequence)`. The engine side is implemented (D21).
 - Determinism (D3) is kept anyway. It makes save files tiny (initial state + command log), makes desyncs debuggable, and keeps lockstep possible later without a rewrite.
 - The protocol is binary (no JSON on the hot path). **FlatBuffers vs Cap'n Proto is deferred to the start of M3.** Criteria: Godot/web client library support (D12), schema evolution, zero-copy reads.
 
@@ -304,4 +305,20 @@ The state → national → sphere → global roll-up in the old ECONOMY_SYSTEM w
 - **Migrants keep their profession** and move with their cash under the D7 split rules, into the destination's existing row or a new one. People and money are conserved, and tested.
 - **Never across markets.** Moving between states, or to colonies, needs friction (`τ`, D14) and is left for after trade (TRADE.md).
 - **Tuning:** `demographics.migration_rate` (0.05 in `data/`, 0 in `mini_valley`'s frozen definitions). In `two_states` each profession lives in only one province per state, so results there are unchanged.
+
+## D21. Commands and command logs
+
+**Accepted.** The first concrete step of D10's network and save model.
+
+- **`pax_engine::Command`** is the only way the outside world changes state during a game.
+  - Commands so far: `SetIncomeTax`, `SetTransferRate`, `SetConsumptionRate`.
+  - Rates are `Fixed` (D3); a command never carries a float.
+- **Validation first:** `World::apply` validates and then applies. A rejected command (`CommandError`: unknown nation, rate outside [0, 1], consumption without a basket) changes nothing.
+- **Timing:** `tick::step_with(world, commands)` applies commands at the **start** of a tick, in the given order, before any system (D4).
+  - With several players, the order is `(tick, player, sequence)` (D10). The server will build that order; the engine only sees an ordered slice.
+- **Command logs:** a game is its initial state plus its command log.
+  - A scenario may name a `commands` file (`[[command]]` entries with `day`, `type`, `nation`, `rate`; see DATA_FORMAT.md).
+  - `pax_data::run_logged` replays it, and `pax_cli` applies it in `run`, `report`, `record` and `verify`. Golden hashes therefore pin the commands too.
+  - `two_states` replays a two-command policy timeline.
+- **Save files** become "scenario + command log + day". Writing them is a later step; no binary format has been chosen (D10).
 
