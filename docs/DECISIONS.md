@@ -197,7 +197,7 @@ The engine does not care, by construction.
 | M1: 1M POP rows, 1 market, 4 goods, 8 threads | ≤ 100 ms/day | **45 ms/day** (`pax_cli bench … --scale 170000 --threads 8`) |
 | Long-term: 2M POP rows, ~3,000 markets, ~50 goods, 8-core desktop | ≤ 100 ms/day | Not yet measured; see risks in [MILESTONE_1.md](MILESTONE_1.md) |
 
-At 100 ms/day, the fastest game speed runs at about 10 in-game days per second. CI should fail a PR that regresses `bench` by more than 20% (M1 task).
+At 100 ms/day, the fastest game speed runs at about 10 in-game days per second. CI fails a PR that makes the tick more than 20% slower. The `Benchmark regression` job times the PR's base and head on the same runner (`scripts/bench-compare.sh`), so runner speed cancels out.
 
 ## D14. Market hierarchy and inter-market trade
 

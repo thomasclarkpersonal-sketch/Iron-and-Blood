@@ -25,7 +25,7 @@ CI runs the same commands, and also the determinism gate on Windows and macOS.
 
 | Workflow | Runs on | What it does |
 |---|---|---|
-| `ci.yml` | every PR and push to `main` | fmt, clippy, rustdoc, debug and release tests, the determinism gate (Linux at 1 and 4 threads, plus Windows and macOS), and a 1M-POP benchmark smoke run |
+| `ci.yml` | every PR and push to `main` | fmt, clippy, rustdoc, debug and release tests, the determinism gate (Linux at 1 and 4 threads, plus Windows and macOS), and on PRs a benchmark regression gate (head vs base, fails above +20%) |
 | `critic.yml` | selected PRs | AI architectural review with [`/critic`](.claude/commands/critic.md), posted as a PR comment. **CRITICAL findings fail the `Critic` check and block the merge** |
 | `claude.yml` | a comment, issue or review mentioning `@claude` | Claude answers questions or investigates on request (read-only repo access) |
 | `claude-feature.yml` | label `claude-plan` / `claude-implement` on an issue | Claude plans a feature, then writes docs, code and tests on `claude/issue-<n>` ([guide](docs/CLAUDE_FEATURE_PIPELINE.md)) |
