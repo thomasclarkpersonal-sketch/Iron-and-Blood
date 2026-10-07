@@ -113,6 +113,8 @@ pub fn random_world(seed: u64) -> World {
             treasury: r.fixed(1_000_000_000),
             income_tax_rate: r.fixed(500_000),
             transfer_rate: r.fixed(200_000),
+            consumption_rate: r.fixed(200_000),
+            basket: (0..world.defs.good_count()).map(|_| r.fixed(1_000_000) + Fixed::EPSILON).collect(),
         });
     }
     for _ in 0..(1 + r.below(30)) {

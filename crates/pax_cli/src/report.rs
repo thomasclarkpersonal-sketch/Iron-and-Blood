@@ -4,8 +4,8 @@
 //! allowed outside simulation state (DECISIONS.md D3). Each row summarises one
 //! period of `--every` days:
 //!
-//! * **GDP:** mean daily household consumption spending. In this closed economy
-//!   without government or investment, final demand equals expenditure GDP.
+//! * **GDP:** mean daily final demand: household consumption plus government
+//!   consumption (C + G). Expenditure GDP of this closed economy without investment.
 //! * **Price index:** Laspeyres index of end-of-period prices, using the basket
 //!   traded on day 1 and day-1 prices = 100: `Σ pₜ q₀ / Σ p₀ q₀ × 100`.
 //! * **Real GDP:** GDP deflated by the price index, in day-1 prices.
@@ -54,7 +54,7 @@ pub fn run(mut world: World, days: u64, every: u64) -> Result<ExitCode, String> 
             let value = basket_value(&world.markets.price, &basket);
             base = Some((basket, value));
         }
-        spending += f(report.household_spending);
+        spending += f(report.household_spending) + f(report.government_spending);
         wages += f(report.payouts.wages);
         dividends += f(report.payouts.dividends);
         taxes += f(report.payouts.taxes);

@@ -188,6 +188,8 @@ fn replicate(base: &World, scale: u32, regions: u32) -> World {
                 treasury: n.treasury[k],
                 income_tax_rate: n.income_tax_rate[k],
                 transfer_rate: n.transfer_rate[k],
+                consumption_rate: n.consumption_rate[k],
+                basket: n.basket[k * base.defs.good_count()..(k + 1) * base.defs.good_count()].to_vec(),
             });
         }
     }

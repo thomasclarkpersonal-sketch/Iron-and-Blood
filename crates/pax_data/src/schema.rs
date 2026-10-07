@@ -175,6 +175,11 @@ pub struct NationEntry {
     pub income_tax_rate: Dec,
     #[serde(default)]
     pub transfer_rate: Dec,
+    #[serde(default)]
+    pub consumption_rate: Dec,
+    /// Government basket: relative weights by good (normalised at load).
+    #[serde(default)]
+    pub basket: BTreeMap<String, Dec>,
 }
 
 #[derive(Deserialize)]
