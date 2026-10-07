@@ -131,6 +131,20 @@ The critic is an AI reviewer and can be wrong. If a team member believes a findi
    - If the critic misreads a rule, fix the wording in `.claude/commands/critic.md` or `docs/DECISIONS.md` so it doesn't happen again.
 3. Do **not** remove the `critic` label to dodge a review. On a small PR, the next push would then skip the check and unblock the merge. Treat that as a process violation.
 
+## PRs that change `critic.yml` or `claude.yml`
+
+For safety, the Claude action refuses to run a workflow whose file differs from the version on `main`. A PR that edits `critic.yml` therefore gets no review, and the `Critic` check fails closed. This is intentional: otherwise, editing the workflow would be a way to skip review. An admin reviews such PRs by hand and merges them with the ruleset bypass.
+
+## Troubleshooting
+
+If the `Critic` check fails with "The critic produced no report", open the job and read the **Explain critic failure** step, which shows Claude's error message.
+
+| Message | Fix |
+|---|---|
+| Invalid API key / authentication error / OAuth token expired | Regenerate with `claude setup-token`, then `gh secret set CLAUDE_CODE_OAUTH_TOKEN` |
+| Rate limit / usage limit | The subscription's usage limit was hit. Re-run later, or switch to an API key (step 5) |
+| Model not available | Change `--model` in `critic.yml` |
+
 ## Tuning
 
 These values are at the top of `.github/workflows/critic.yml`:
