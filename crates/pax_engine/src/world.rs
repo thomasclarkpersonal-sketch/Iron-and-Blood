@@ -273,6 +273,68 @@ impl World {
         p.len() - 1
     }
 
+    /// Compacts the POP table (D7): merges rows that share an identity
+    /// `(province, profession)` into the first such row, and drops rows that are
+    /// empty with no cash. Returns the number of rows removed.
+    ///
+    /// Sizes and cash add up exactly; `life_needs` and `militancy` become
+    /// size-weighted means (rounded down). Surviving rows keep their relative
+    /// order, so the result is deterministic. People and money are conserved.
+    /// Mobility and migration create rows, and extinctions leave empty ones;
+    /// this keeps the table bounded by provinces × professions.
+    pub fn compact_pops(&mut self) -> usize {
+        let profs = self.defs.professions.len();
+        let n = self.pops.len();
+        // First row of each identity, in row order (dense key, no HashMap: D3).
+        let mut first: Vec<Option<usize>> = vec![None; self.geography.province_count() * profs];
+        let mut keep = vec![true; n];
+        for (i, kept) in keep.iter_mut().enumerate() {
+            let key = self.pops.province[i] as usize * profs + self.pops.profession[i] as usize;
+            match first[key] {
+                None => first[key] = Some(i),
+                Some(f) => {
+                    let p = &mut self.pops;
+                    let (fs, is) = (p.size[f] as i128, p.size[i] as i128);
+                    let mean = |a: Fixed, b: Fixed| {
+                        if fs + is == 0 {
+                            a
+                        } else {
+                            Fixed::from_raw(((a.raw() as i128 * fs + b.raw() as i128 * is) / (fs + is)) as i64)
+                        }
+                    };
+                    p.life_needs[f] = mean(p.life_needs[f], p.life_needs[i]);
+                    p.militancy[f] = mean(p.militancy[f], p.militancy[i]);
+                    p.size[f] += p.size[i];
+                    let cash = p.cash[i];
+                    p.cash[f] += cash;
+                    *kept = false;
+                }
+            }
+        }
+        for (i, kept) in keep.iter_mut().enumerate() {
+            if *kept && self.pops.size[i] == 0 && self.pops.cash[i].is_zero() {
+                *kept = false;
+            }
+        }
+        let removed = keep.iter().filter(|&&k| !k).count();
+        if removed == 0 {
+            return 0;
+        }
+        let order: Vec<usize> = (0..n).filter(|&i| keep[i]).collect();
+        let Pops { size, cash, profession, province, life_needs, militancy } = &mut self.pops;
+        fn select<T: Copy>(column: &mut Vec<T>, order: &[usize]) {
+            *column = order.iter().map(|&i| column[i]).collect();
+        }
+        select(size, &order);
+        select(cash, &order);
+        select(profession, &order);
+        select(province, &order);
+        select(life_needs, &order);
+        select(militancy, &order);
+        self.invalidate_pop_layout();
+        removed
+    }
+
     /// Reorders POP rows so they are grouped by market, keeping the existing order
     /// within each market (stable).
     ///
