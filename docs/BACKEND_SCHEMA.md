@@ -40,6 +40,8 @@ There is no ECS framework (D8). Each table below is a set of equally long column
 | `market_keys` | `Vec<String>` | |
 
 ### `Pops`
+Rows are stored grouped by market: the loader sorts them stably. The market's parallel passes rely on this for small per-job accumulators. Correctness does not depend on it, only speed.
+
 | Column | Type | Notes |
 |---|---|---|
 | `size` | `u32` | People |

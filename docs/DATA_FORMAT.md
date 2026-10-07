@@ -91,6 +91,7 @@ province = "riverside"
 profession = "farmer"
 size = 60000                # people
 cash = 6000                 # total holdings of the POP, not per capita (D7)
+# POP rows are stored grouped by market (stable sort at load); file order is kept within a market.
 
 [[producer]]
 type = "farm"               # producer_type key
