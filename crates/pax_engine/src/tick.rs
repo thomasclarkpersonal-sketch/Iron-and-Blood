@@ -42,6 +42,8 @@ pub struct DayReport {
     pub life_needs: LifeNeedsSummary,
     /// Paid from treasuries to POPs today (D15).
     pub transfers: Fixed,
+    /// Paid from treasuries for government consumption today (D16).
+    pub government_spending: Fixed,
     pub total_money: Fixed,
 }
 
@@ -74,6 +76,7 @@ pub fn step(world: &mut World) -> DayReport {
         household_spending: outcome.household_spending,
         life_needs: outcome.life_needs,
         transfers,
+        government_spending: outcome.government_spending,
         goods: outcome.goods,
         iterations: outcome.iterations,
         labour,

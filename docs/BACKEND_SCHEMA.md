@@ -71,6 +71,8 @@ Rows are stored grouped by market: the loader sorts them stably. The market's pa
 | `treasury` | `Fixed` | Outside money held by the state (D5 invariant) |
 | `income_tax_rate` | `Fixed` | Withheld from wages and dividends, in [0, 1] |
 | `transfer_rate` | `Fixed` | Share of the treasury paid to the nation's POPs each day, in [0, 1] |
+| `consumption_rate` | `Fixed` | Share of the treasury spent on goods each day, in [0, 1] (D16) |
+| `basket` | `Fixed` | Row-major `[nation × good]` spending shares; each consuming row sums to exactly 1 |
 
 `Geography::market_nation` maps each market to its nation (`None` means stateless).
 
@@ -117,6 +119,7 @@ All systems are plain functions over `&mut World`, called by `tick::step` in the
 | `input_spending` | Producer spending on inputs (intermediate consumption) |
 | `payouts` | Gross wages and dividends paid that day, and the income tax withheld from them |
 | `transfers` | Paid from treasuries to POPs that day |
+| `government_spending` | Paid from treasuries for goods that day (D16) |
 | `life_needs` | Life-needs coverage at the market: people, deprived, weighted mean (`LifeNeedsSummary`) |
 | `total_money` | Outside money after the day (asserted unchanged) |
 

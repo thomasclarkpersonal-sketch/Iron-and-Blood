@@ -9,7 +9,6 @@
 //! The treasury is debited exactly what its POPs are credited, so total money is
 //! unchanged. A nation with no living POPs keeps its money.
 
-use crate::alloc::allocate_raw;
 use crate::fixed::Fixed;
 use crate::layout::PopLayout;
 use crate::world::World;
@@ -22,14 +21,10 @@ pub fn pay_transfers(world: &mut World, layout: &PopLayout) -> Fixed {
         if !amount.is_positive() {
             continue;
         }
-        let rows = layout.nation.members(n);
-        let sizes: Vec<i64> = rows.iter().map(|&r| world.pops.size[r as usize] as i64).collect();
-        let Some(shares) = allocate_raw(amount.raw(), &sizes) else { continue };
-        world.nations.treasury[n] -= amount;
-        for (&r, share) in rows.iter().zip(shares) {
-            world.pops.cash[r as usize] += Fixed::from_raw(share);
+        if world.credit_pops_by_size(layout.nation.members(n), amount) {
+            world.nations.treasury[n] -= amount;
+            total += amount;
         }
-        total += amount;
     }
     total
 }

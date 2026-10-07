@@ -35,7 +35,7 @@
 
 use rayon::prelude::*;
 
-use crate::alloc::allocate;
+use crate::alloc::{allocate, allocate_raw};
 use crate::defs::{Defs, MarketRules, ProfessionDef};
 use crate::fixed::Fixed;
 use crate::groups::Groups;
@@ -69,6 +69,8 @@ pub struct MarketOutcome {
     pub input_spending: Fixed,
     /// Life-needs coverage at this market, weighted by the sizes the market saw.
     pub life_needs: LifeNeedsSummary,
+    /// Paid from treasuries for government consumption (D16).
+    pub government_spending: Fixed,
 }
 
 /// Life-needs coverage across all POPs at today's market (diagnostics).
@@ -99,17 +101,28 @@ impl LifeNeedsSummary {
     }
 }
 
-/// A producer's input purchase order: `D(p) = min(need, budget / p)`.
+/// Who places a [`BuyOrder`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Buyer {
+    /// A producer buying inputs; goods go to its input stock.
+    Producer(usize),
+    /// A nation's government consumption (D16); goods are consumed and paid
+    /// from the treasury.
+    Nation(usize),
+}
+
+/// A non-household purchase order: `D(p) = min(need, budget / p)`.
+/// Government orders have unbounded `need`, i.e. unit-elastic demand.
 #[derive(Clone, Copy, Debug)]
-struct InputOrder {
-    producer: usize,
+struct BuyOrder {
+    buyer: Buyer,
     market: usize,
     good: usize,
     need: Fixed,
     budget: Fixed,
 }
 
-impl InputOrder {
+impl BuyOrder {
     fn demand(&self, price: Fixed) -> Fixed {
         self.need.min(self.budget.div(price))
     }
@@ -199,6 +212,7 @@ pub fn clear_markets(world: &mut World, layout: &PopLayout) -> MarketOutcome {
     // with per-market ranges: discovery reads a slice instead of filtering every
     // list once per market, which was O(markets × producers).
     let mut orders = input_orders(world);
+    orders.extend(government_orders(world, layout));
     orders.sort_by_key(|o| o.market);
     let mut offers = sell_offers(world);
     offers.sort_by_key(|o| o.market);
@@ -302,7 +316,7 @@ impl<T: Copy + Default> MarketRuns<T> {
 /// **Shutdown rule:** a producer whose output price does not cover the cost of
 /// the inputs per unit (`p_out ≤ Σⱼ aⱼ pⱼ`) places no orders, so it stops
 /// turning money into loss-making output; it resumes when prices recover.
-fn input_orders(world: &World) -> Vec<InputOrder> {
+fn input_orders(world: &World) -> Vec<BuyOrder> {
     let p = &world.producers;
     let mut orders = Vec::new();
     for i in 0..p.len() {
@@ -317,7 +331,45 @@ fn input_orders(world: &World) -> Vec<InputOrder> {
         let Some(budgets) = allocate(p.cash[i].mul(def.input_spend_rate), &costs) else { continue };
         for (&(good, need), budget) in plan.iter().zip(budgets) {
             if need.is_positive() && budget.is_positive() {
-                orders.push(InputOrder { producer: i, market, good, need, budget });
+                orders.push(BuyOrder { buyer: Buyer::Producer(i), market, good, need, budget });
+            }
+        }
+    }
+    orders
+}
+
+/// Government consumption orders (D16). Each nation spends
+/// `treasury × consumption_rate` per day, split across its markets in proportion
+/// to their population and across goods by its basket (largest remainder both
+/// times, so the parts sum exactly to the budget). Each order buys `budget / p`
+/// (unit-elastic), and the goods are consumed.
+fn government_orders(world: &World, layout: &PopLayout) -> Vec<BuyOrder> {
+    let nations = &world.nations;
+    if nations.is_empty() {
+        return Vec::new();
+    }
+    let goods = world.defs.good_count();
+    let markets = world.geography.market_count();
+    let mut market_population = vec![0i64; markets];
+    for (i, &m) in layout.market.iter().enumerate() {
+        market_population[m as usize] += world.pops.size[i] as i64;
+    }
+    let mut orders = Vec::new();
+    for n in 0..nations.len() {
+        let budget = nations.treasury[n].mul(nations.consumption_rate[n]);
+        if !budget.is_positive() {
+            continue;
+        }
+        let own: Vec<usize> = (0..markets).filter(|&m| world.geography.nation_of_market(m) == Some(n)).collect();
+        let weights: Vec<i64> = own.iter().map(|&m| market_population[m]).collect();
+        let Some(per_market) = allocate_raw(budget.raw(), &weights) else { continue };
+        let basket = &nations.basket[n * goods..(n + 1) * goods];
+        for (&market, share) in own.iter().zip(per_market) {
+            let Some(per_good) = allocate(Fixed::from_raw(share), basket) else { continue };
+            for (good, budget) in per_good.into_iter().enumerate() {
+                if budget.is_positive() {
+                    orders.push(BuyOrder { buyer: Buyer::Nation(n), market, good, need: Fixed::MAX, budget });
+                }
             }
         }
     }
@@ -401,7 +453,7 @@ fn market_demand(
     defs: &Defs,
     prices: &[Fixed],
     consumers: &[ConsumerAggregate],
-    orders: &[InputOrder],
+    orders: &[BuyOrder],
     scratch: &mut [Fixed],
 ) -> Vec<Fixed> {
     let mut demand = vec![Fixed::ZERO; prices.len()];
@@ -454,7 +506,7 @@ fn discover_prices(
     defs: &Defs,
     opening: &[Fixed],
     consumers: &[ConsumerAggregate],
-    orders: &[InputOrder],
+    orders: &[BuyOrder],
     offers: &[SellOffer],
 ) -> (Vec<Fixed>, u32) {
     let rules: &MarketRules = &defs.rules.market;
@@ -509,7 +561,7 @@ fn discover_prices(
 fn settle(
     world: &mut World,
     pop_market: &[u32],
-    orders: &[InputOrder],
+    orders: &[BuyOrder],
     offers: &[SellOffer],
     iterations: Vec<u32>,
 ) -> MarketOutcome {
@@ -617,19 +669,29 @@ fn settle(
     }
     let household_spending: Fixed = paid.iter().copied().sum();
 
-    // Producers buy inputs.
+    // Producers buy inputs; governments buy for consumption (D16).
     let producers = &mut world.producers;
     let mut input_cost = vec![Fixed::ZERO; producers.len()];
+    let mut government_spending = Fixed::ZERO;
     for o in orders {
         let k = o.market * goods + o.good;
         let wanted = o.demand(prices[k]);
         let q = wanted.mul(ration[k]);
-        assert!(q <= wanted, "market-good {k}: producer {} received {q} > demanded {wanted}", o.producer);
+        assert!(q <= wanted, "market-good {k}: {:?} received {q} > demanded {wanted}", o.buyer);
         let cost = q.mul(prices[k]);
-        producers.cash[o.producer] -= cost;
-        assert!(!producers.cash[o.producer].is_negative(), "producer {} overspent", o.producer);
-        producers.input_stock[o.producer * goods + o.good] += q;
-        input_cost[o.producer] += cost;
+        match o.buyer {
+            Buyer::Producer(i) => {
+                producers.cash[i] -= cost;
+                assert!(!producers.cash[i].is_negative(), "producer {i} overspent");
+                producers.input_stock[i * goods + o.good] += q;
+                input_cost[i] += cost;
+            }
+            Buyer::Nation(n) => {
+                world.nations.treasury[n] -= cost;
+                assert!(!world.nations.treasury[n].is_negative(), "nation {n} overspent");
+                government_spending += cost;
+            }
+        }
         bought[k] += q;
         paid[k] += cost;
     }
@@ -667,7 +729,16 @@ fn settle(
         })
         .collect();
     let input_spending = input_cost.iter().copied().sum();
-    MarketOutcome { revenue, input_cost, household_spending, input_spending, life_needs, goods: reports, iterations }
+    MarketOutcome {
+        revenue,
+        input_cost,
+        household_spending,
+        input_spending,
+        life_needs,
+        government_spending,
+        goods: reports,
+        iterations,
+    }
 }
 
 #[cfg(test)]

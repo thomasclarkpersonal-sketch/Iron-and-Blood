@@ -301,6 +301,7 @@ pub fn parse_defs(src: &DefSources<'_>) -> Result<Defs, LoadError> {
 
 fn build_world(defs: Arc<Defs>, s: &ScenarioFile) -> Result<World, LoadError> {
     let mut errors = Errors::default();
+    let good_ix: BTreeMap<String, usize> = defs.goods.iter().enumerate().map(|(i, g)| (g.key.clone(), i)).collect();
     let nation_ix = index("nation", s.nation.iter().map(|n| n.key.as_str()), &mut errors);
     let market_ix = index("market", s.market.iter().map(|m| m.key.as_str()), &mut errors);
     let province_ix = index("province", s.province.iter().map(|p| p.key.as_str()), &mut errors);
@@ -334,14 +335,29 @@ fn build_world(defs: Arc<Defs>, s: &ScenarioFile) -> Result<World, LoadError> {
         .map(|n| {
             let ctx = format!("nation '{}'", n.key);
             errors.check(!n.treasury.0.is_negative(), || format!("{ctx}: treasury must be >= 0"));
-            for (name, v) in [("income_tax_rate", n.income_tax_rate.0), ("transfer_rate", n.transfer_rate.0)] {
+            for (name, v) in [
+                ("income_tax_rate", n.income_tax_rate.0),
+                ("transfer_rate", n.transfer_rate.0),
+                ("consumption_rate", n.consumption_rate.0),
+            ] {
                 errors.check(in_range(v, Fixed::ZERO, Fixed::ONE), || format!("{ctx}: {name} must be in [0, 1]"));
             }
+            let mut basket = vec![Fixed::ZERO; defs.good_count()];
+            for (good, w) in &n.basket {
+                let g = lookup(&good_ix, "good", good, &format!("{ctx} basket"), &mut errors);
+                errors.check(!w.0.is_negative(), || format!("{ctx}: basket.{good} must be >= 0"));
+                basket[g] = w.0.max(Fixed::ZERO);
+            }
+            errors.check(n.consumption_rate.0.is_zero() || basket.iter().any(|w| w.is_positive()), || {
+                format!("{ctx}: consumption_rate > 0 needs a basket with a positive weight")
+            });
             NewNation {
                 key: n.key.clone(),
                 treasury: n.treasury.0,
                 income_tax_rate: n.income_tax_rate.0,
                 transfer_rate: n.transfer_rate.0,
+                consumption_rate: n.consumption_rate.0,
+                basket,
             }
         })
         .collect();

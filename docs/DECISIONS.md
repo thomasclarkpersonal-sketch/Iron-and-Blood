@@ -26,6 +26,7 @@ To change a decision, edit its entry in the same pull request as the code. Say w
 | [D13](#d13-performance-budget) | Performance budget | Accepted |
 | [D14](#d14-market-hierarchy-and-inter-market-trade) | Market hierarchy | Accepted (principle), M2 |
 | [D15](#d15-nations-treasuries-income-tax-and-transfers) | Nations and fiscal policy | Accepted (M2-1) |
+| [D16](#d16-government-consumption) | Government consumption | Accepted (M2-2) |
 
 ---
 
@@ -98,7 +99,7 @@ To change a decision, edit its entry in the same pull request as the code. Say w
 |---|---|---|
 | 1 | Labour: assign employment | daily |
 | 2 | Production | daily |
-| 3 | Market: orders → price discovery → settlement | daily |
+| 3 | Market: orders (households, producers' inputs, governments D16) → price discovery → settlement | daily |
 | 4 | Firms: wages, dividends (income tax withheld, D15) | daily |
 | 4b | Government: transfers from treasuries to POPs (D15) | daily |
 | 5 | *(M2)* Promotion/demotion, migration | weekly (day 7, 14, …) |
@@ -240,4 +241,19 @@ The state → national → sphere → global roll-up in the old ECONOMY_SYSTEM w
 - **Rates are state, not definitions.** They live in the `Nations` table and in the state hash, because players will change them. Commands (D10) will set them at the start of a tick.
 - **Tick order:** taxes are withheld inside the firms system; transfers run right after it, before demographics.
 - **Out of scope for M2-1:** progressive brackets (by profession or income), tariffs (with D14), bonds and debt (inside money, D5), and laws constraining rates (politics).
+
+## D16. Government consumption
+
+**Accepted (M2-2).** Treasuries buy goods as well as redistributing money.
+
+- **Policy:** each nation has a `consumption_rate` (share of the treasury spent per day) and a `basket` (weights by good, normalised to sum to exactly 1). Both are policy state in the `Nations` table.
+- **Orders:** the daily budget `treasury × consumption_rate` is split exactly (largest remainder):
+  - across the nation's markets, in proportion to their population;
+  - within each market, across goods by the basket.
+
+  Each part becomes a `BuyOrder` with buyer `Nation(n)` and demand `budget / p`. That is unit-elastic: spending is fixed and the quantity adjusts to the price.
+- **Same market rules as everyone else:** government orders enter price discovery (D1) and are rationed pro rata with every other buyer. No priority for the state.
+- **Settlement:** the treasury pays `q × p` to the sellers through the normal receipts split. The goods are consumed, standing in for administration and public works. Money is conserved; goods leave the economy.
+- **Reporting:** `DayReport::government_spending`. `pax_cli report` counts it in GDP (C + G).
+- **Later (M2+):** state-employed POPs (bureaucrats, soldiers) and military upkeep (MILITARY_SYSTEM.md) will replace the abstract basket with real demand.
 

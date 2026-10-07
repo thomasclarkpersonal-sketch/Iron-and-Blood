@@ -126,6 +126,12 @@ pub struct Nations {
     /// Share of the treasury paid out each day as transfers to the nation's
     /// POPs, split by size, in `[0, 1]`.
     pub transfer_rate: Vec<Fixed>,
+    /// Share of the treasury spent on goods each day (D16), in `[0, 1]`.
+    pub consumption_rate: Vec<Fixed>,
+    /// Government basket, row-major `[nation * goods + good]`: the share of the
+    /// consumption budget spent on each good. Each row sums to exactly 1 when the
+    /// nation consumes, and is all zero otherwise.
+    pub basket: Vec<Fixed>,
 }
 
 impl Nations {
@@ -145,6 +151,9 @@ pub struct NewNation {
     pub treasury: Fixed,
     pub income_tax_rate: Fixed,
     pub transfer_rate: Fixed,
+    pub consumption_rate: Fixed,
+    /// Basket weights by good; normalised to sum to exactly 1 on insertion.
+    pub basket: Vec<Fixed>,
 }
 
 /// Complete mutable simulation state plus a handle to the static definitions.
@@ -289,6 +298,21 @@ impl World {
         self.invalidate_pop_layout();
     }
 
+    /// Credits `amount` to the POP `rows` pro rata to their size, split exactly
+    /// (largest remainder, D5). Returns `false`, crediting nothing, if none of
+    /// the rows has people; the caller then keeps the money.
+    ///
+    /// The single "pay a group of POPs" primitive, used for wages, dividends and
+    /// government transfers.
+    pub fn credit_pops_by_size(&mut self, rows: &[u32], amount: Fixed) -> bool {
+        let sizes: Vec<i64> = rows.iter().map(|&r| self.pops.size[r as usize] as i64).collect();
+        let Some(shares) = crate::alloc::allocate_raw(amount.raw(), &sizes) else { return false };
+        for (&r, s) in rows.iter().zip(shares) {
+            self.pops.cash[r as usize] += Fixed::from_raw(s);
+        }
+        true
+    }
+
     /// Checks the market→nation invariant documented on
     /// [`Geography::market_nation`].
     ///
@@ -319,15 +343,24 @@ impl World {
     /// Adds a nation. Assign it markets through `geography.market_nation`.
     pub fn push_nation(&mut self, new: NewNation) -> usize {
         assert!(!new.treasury.is_negative(), "negative treasury");
-        for rate in [new.income_tax_rate, new.transfer_rate] {
+        for rate in [new.income_tax_rate, new.transfer_rate, new.consumption_rate] {
             assert!(rate >= Fixed::ZERO && rate <= Fixed::ONE, "nation rate outside [0, 1]");
         }
+        let goods = self.defs.good_count();
+        assert_eq!(new.basket.len(), goods, "basket must have one weight per good");
+        let basket = crate::alloc::allocate(Fixed::ONE, &new.basket).unwrap_or_else(|| vec![Fixed::ZERO; goods]);
+        assert!(
+            new.consumption_rate.is_zero() || basket.iter().any(|w| w.is_positive()),
+            "a consuming nation needs a basket"
+        );
         self.invalidate_pop_layout();
         let n = &mut self.nations;
         n.key.push(new.key);
         n.treasury.push(new.treasury);
         n.income_tax_rate.push(new.income_tax_rate);
         n.transfer_rate.push(new.transfer_rate);
+        n.consumption_rate.push(new.consumption_rate);
+        n.basket.extend(basket);
         n.len() - 1
     }
 
@@ -388,6 +421,8 @@ impl World {
             h.fixeds(&n.treasury);
             h.fixeds(&n.income_tax_rate);
             h.fixeds(&n.transfer_rate);
+            h.fixeds(&n.consumption_rate);
+            h.fixeds(&n.basket);
         }
         h.finish()
     }
