@@ -73,6 +73,26 @@ impl Pops {
         self.size.len()
     }
 
+    /// The D7 merge rule, in one place: folds `people` people carrying `cash`
+    /// from row `src` into row `dest`. Sizes and cash add. Intensive attributes
+    /// become size-weighted means, rounded down; if both sides are empty, the
+    /// incoming value is kept.
+    ///
+    /// The caller removes `people` and `cash` from `src` (or drops the row).
+    /// `Pops` is destructured exhaustively here, so adding a column is a compile
+    /// error until its merge rule is written down.
+    pub fn absorb(&mut self, dest: usize, src: usize, people: u32, cash: Fixed) {
+        let Pops { size, cash: cash_column, profession: _, province: _, life_needs, militancy } = self;
+        let (a, b) = (size[dest] as i128, people as i128);
+        let mean = |x: Fixed, y: Fixed| {
+            if a + b == 0 { y } else { Fixed::from_raw(((x.raw() as i128 * a + y.raw() as i128 * b) / (a + b)) as i64) }
+        };
+        life_needs[dest] = mean(life_needs[dest], life_needs[src]);
+        militancy[dest] = mean(militancy[dest], militancy[src]);
+        size[dest] += people;
+        cash_column[dest] += cash;
+    }
+
     pub fn is_empty(&self) -> bool {
         self.size.is_empty()
     }
@@ -271,6 +291,55 @@ impl World {
         p.output_stock.push(new.output_stock);
         p.input_stock.extend(std::iter::repeat_n(Fixed::ZERO, goods));
         p.len() - 1
+    }
+
+    /// Compacts the POP table (D7): merges rows that share an identity
+    /// `(province, profession)` into the first such row, and drops rows that are
+    /// empty with no cash. Returns the number of rows removed.
+    ///
+    /// Merging follows [`Pops::absorb`] (the single D7 merge rule). Surviving rows keep their relative
+    /// order, so the result is deterministic. People and money are conserved.
+    /// Mobility and migration create rows, and extinctions leave empty ones;
+    /// this keeps the table bounded by provinces × professions.
+    pub fn compact_pops(&mut self) -> usize {
+        let profs = self.defs.professions.len();
+        let n = self.pops.len();
+        // First row of each identity, in row order (dense key, no HashMap: D3).
+        let mut first: Vec<Option<usize>> = vec![None; self.geography.province_count() * profs];
+        let mut keep = vec![true; n];
+        for (i, kept) in keep.iter_mut().enumerate() {
+            let key = self.pops.province[i] as usize * profs + self.pops.profession[i] as usize;
+            match first[key] {
+                None => first[key] = Some(i),
+                Some(f) => {
+                    let (people, cash) = (self.pops.size[i], self.pops.cash[i]);
+                    self.pops.absorb(f, i, people, cash);
+                    *kept = false;
+                }
+            }
+        }
+        for (i, kept) in keep.iter_mut().enumerate() {
+            if *kept && self.pops.size[i] == 0 && self.pops.cash[i].is_zero() {
+                *kept = false;
+            }
+        }
+        let removed = keep.iter().filter(|&&k| !k).count();
+        if removed == 0 {
+            return 0;
+        }
+        let order: Vec<usize> = (0..n).filter(|&i| keep[i]).collect();
+        let Pops { size, cash, profession, province, life_needs, militancy } = &mut self.pops;
+        fn select<T: Copy>(column: &mut Vec<T>, order: &[usize]) {
+            *column = order.iter().map(|&i| column[i]).collect();
+        }
+        select(size, &order);
+        select(cash, &order);
+        select(profession, &order);
+        select(province, &order);
+        select(life_needs, &order);
+        select(militancy, &order);
+        self.invalidate_pop_layout();
+        removed
     }
 
     /// Reorders POP rows so they are grouped by market, keeping the existing order

@@ -38,7 +38,7 @@ One tick is one day. Systems run in a fixed order (D4). The order is part of the
 | 4b | **Government:** transfers from treasuries to POPs | daily | `systems/government.rs` |
 | 5 | **Labour mobility:** unemployed workers move to vacancies in their province (D18), then migrate to other provinces of their market (D20) | month end | `systems/mobility.rs` |
 | 6 | **Politics:** militancy (D19) | month end | `systems/politics.rs` |
-| 7 | **Demographics:** births/deaths from life-needs satisfaction | month end | `systems/demographics.rs` |
+| 7 | **Demographics:** births/deaths from life-needs satisfaction, then POP row compaction (D7) | month end | `systems/demographics.rs`, `World::compact_pops` |
 
 Consumption, production and pricing all run daily: an economy where buyers appear only once a week cannot clear daily markets. Slow structural changes (mobility, demographics, politics) are batched.
 

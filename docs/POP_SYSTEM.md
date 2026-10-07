@@ -66,10 +66,11 @@ If a market is short, every buyer receives the same fraction of what it asked fo
 ## 🔀 Labour Mobility (D18)
 Each month, within a province, unemployed workers move to professions with vacancies (D18). Then surplus workers migrate to provinces of the same market that have vacancies in their profession (D20). Both take their share of cash with them. Migration across markets and promotion to higher strata come later.
 
-## 🧮 Merging and Splitting (M2)
+## 🧮 Merging and Splitting
 
 Merging and splitting keep the number of POP rows bounded:
 
 *   **Splitting:** when `⌊N × rate⌋` people promote, migrate or are conscripted, they move to the POP with the target identity. A new row is created only if none exists; lookup goes through a sorted identity index, never a `HashMap` (D3). They take cash in proportion to their share of the POP, split by largest remainder.
 *   **Merging:** below a size threshold (e.g. 50 people) a POP merges into the most similar POP in the province. Cash adds up. Literacy and militancy become size-weighted averages in `Fixed`.
-*   Rows are compacted at month end so that row indices stay dense.
+*   **Implemented:** rows are compacted at month end (`World::compact_pops`). Rows sharing `(province, profession)` merge and empty, cashless rows are dropped, so row indices stay dense.
+*   **Still M2:** merging *small* POPs into the most similar identity (needs culture and religion columns).

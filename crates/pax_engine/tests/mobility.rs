@@ -161,3 +161,36 @@ fn migration_conserves_people_and_money_in_random_worlds() {
     }
     assert!(moves > 0, "random worlds should exercise migration");
 }
+
+#[test]
+fn compaction_merges_duplicates_and_drops_empty_rows() {
+    let mut world = mismatched_world();
+    world.push_pop(0, 0, 500, d("30")); // duplicate farmer identity
+    let empty = world.push_pop(0, 1, 0, Fixed::ZERO); // empty, cashless labourer row
+    world.pops.life_needs[empty] = Fixed::ZERO;
+    world.pops.life_needs[1] = Fixed::ZERO; // the duplicate is starving
+    let (people, money) = (world.population(), world.total_money());
+
+    assert_eq!(world.compact_pops(), 2);
+    assert_eq!(world.pops.len(), 1);
+    assert_eq!((world.pops.size[0], world.pops.cash[0]), (1500, d("130")));
+    // 1,000 people at 1.0 and 500 at 0.0 -> 0.666666
+    assert_eq!(world.pops.life_needs[0], Fixed::ratio(2, 3));
+    assert_eq!((world.population(), world.total_money()), (people, money));
+    assert_eq!(world.compact_pops(), 0, "compaction is idempotent");
+}
+
+#[test]
+fn identities_stay_unique_in_random_worlds() {
+    for seed in 4300..4360 {
+        let mut world = random_world(seed);
+        for _ in 0..60 {
+            pax_engine::step(&mut world);
+        }
+        world.compact_pops();
+        let mut seen = std::collections::BTreeSet::new();
+        for i in 0..world.pops.len() {
+            assert!(seen.insert((world.pops.province[i], world.pops.profession[i])), "seed {seed}: duplicate identity");
+        }
+    }
+}

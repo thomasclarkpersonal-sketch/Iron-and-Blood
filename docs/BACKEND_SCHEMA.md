@@ -106,7 +106,7 @@ All systems are plain functions over `&mut World`, called by `tick::step` in the
 4b. **`government::pay_transfers`.** Each nation pays `treasury × transfer_rate` to its POPs, split by size.
 5. **`mobility::reassign_workers`** then **`mobility::migrate_within_markets`** (month end). Unemployed workers move to vacancies in their province (D18), then surplus workers migrate to vacancies in other provinces of the same market (D20), taking their share of cash.
 6. **`politics::update_militancy`** (month end). Rises with hunger and taxes, and decays (D19).
-7. **`demographics::update_population`** (month end). Growth or starvation from `life_needs`; the estate of an extinct POP passes to an heir.
+7. **`demographics::update_population`** (month end). Growth or starvation from `life_needs`; the estate of an extinct POP passes to an heir. Then **`World::compact_pops`** merges duplicate identities and drops empty rows (D7).
 
 > [!IMPORTANT]
 > **Determinism:** money, prices, quantities *and all rates* are `Fixed` (D3). `tax_rate`, `literacy` and `militancy` were `f32` in earlier drafts. That is no longer allowed, because a float tax rate applied to fixed-point wealth makes money itself platform-dependent.
@@ -125,6 +125,7 @@ All systems are plain functions over `&mut World`, called by `tick::step` in the
 | `government_spending` | Paid from treasuries for goods that day (D16) |
 | `moved` | People who changed profession that day (month end only, D18) |
 | `migrated` | People who moved to another province of their market that day (D20) |
+| `compacted` | POP rows removed by month-end compaction (D7) |
 | `life_needs` | Life-needs coverage at the market: people, deprived, weighted mean (`LifeNeedsSummary`) |
 | `total_money` | Outside money after the day (asserted unchanged) |
 

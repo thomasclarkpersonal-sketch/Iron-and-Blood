@@ -107,7 +107,7 @@ To change a decision, edit its entry in the same pull request as the code. Say w
 | 4b | Government: transfers from treasuries to POPs (D15) | daily |
 | 5 | Labour mobility within a province (D18), then migration within a market (D20); *(M2)* promotion | month end |
 | 6 | Politics: militancy (D19); *(M2)* consciousness | month end |
-| 7 | Demographics | month end |
+| 7 | Demographics, then POP row compaction (D7) | month end |
 
 - A month is 30 days until a real calendar is needed (`rules.days_per_month`).
 - **Goods persist.** Unsold output stays in the producer's stock, and producers stop producing when stock reaches `target_stock_days` of output (D6).
@@ -154,6 +154,12 @@ To change a decision, edit its entry in the same pull request as the code. Say w
 - **Extinction:** if a POP reaches size 0, its cash passes to the largest living POP in the same province (lowest row on ties). If none exists, the empty row keeps it until someone moves in.
 - **Splitting** (promotion, migration, conscription; M2): the moving fraction takes cash in proportion to people moved, using largest remainder. Intensive attributes (literacy, militancy) are copied.
 - **Merging:** cash adds up. Intensive attributes become size-weighted averages, computed in `Fixed` with one rounding.
+- **Compaction** (implemented, `World::compact_pops`, month end after demographics):
+  - rows sharing an identity merge into the first such row, with these merge rules;
+  - rows that are empty and cashless are dropped;
+  - surviving rows keep their order, so the result is deterministic.
+  
+  This keeps the POP table bounded as mobility, migration and extinctions create and empty rows.
 - **Promotion and migration are deterministic fractional flows** (`ΔN = ⌊N × rate⌋`), not dice rolls. The counter-based RNG (D3) is available where genuine randomness is wanted, e.g. rebellions.
 - **POP identity** is `(province, profession, culture, religion)`. Culture and religion columns arrive in M2. Lookups by identity use a sorted index, never a `HashMap`.
 - **Derived values are never stored as state.** Nation, market and state come from the province; storing `nation_id` on POPs would go stale on conquest.

@@ -11,10 +11,10 @@
 //! | 4b | government: transfers from treasuries to POPs | daily |
 //! | 5 | mobility: unemployed workers move to vacancies (D18), then migrate within their market (D20) | month end |
 //! | 6 | politics: militancy (D19) | month end |
-//! | 7 | demographics | month end |
+//! | 7 | demographics, then POP row compaction (D7) | month end |
 //!
-//! Weekly systems (promotion, migration) and monthly politics slot in after
-//! step 4 when they are implemented.
+//! All month-end systems run on the last day of each month (D4); promotion
+//! between strata will join step 5 when implemented.
 
 use crate::fixed::Fixed;
 use crate::systems::firms::Payouts;
@@ -50,6 +50,8 @@ pub struct DayReport {
     pub moved: u64,
     /// People who moved to another province of their market today (month end only, D20).
     pub migrated: u64,
+    /// POP rows removed by month-end compaction (D7).
+    pub compacted: usize,
     pub total_money: Fixed,
 }
 
@@ -68,7 +70,7 @@ pub fn step(world: &mut World) -> DayReport {
     let outcome = market::clear_markets(world, &layout);
     let payouts = firms::pay_wages_and_dividends(world, &layout, &outcome.revenue, &outcome.input_cost);
     let transfers = government::pay_transfers(world, &layout);
-    let (mut moved, mut migrated) = (0, 0);
+    let (mut moved, mut migrated, mut compacted) = (0, 0, 0);
     if demographics::is_month_end(world) {
         moved = mobility::reassign_workers(world, &layout, &labour);
         // Mobility may have appended rows, so the tick's layout snapshot is stale
@@ -78,6 +80,7 @@ pub fn step(world: &mut World) -> DayReport {
         migrated = mobility::migrate_within_markets(world, &regrouped);
         politics::update_militancy(world);
         demographics::update_population(world);
+        compacted = world.compact_pops();
     }
 
     let money_after = world.total_money();
@@ -93,6 +96,7 @@ pub fn step(world: &mut World) -> DayReport {
         government_spending: outcome.government_spending,
         moved,
         migrated,
+        compacted,
         goods: outcome.goods,
         iterations: outcome.iterations,
         labour,
