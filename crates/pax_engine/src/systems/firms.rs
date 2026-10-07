@@ -4,10 +4,13 @@
 //!
 //! * **Value added:** `V = revenue − input purchases`, smoothed as
 //!   `V̄ ← V̄ + (V − V̄) / h` (`h` = `revenue_smoothing_days`).
-//! * **Sticky wages:** target `w* = labor_share × max(V̄, 0) / E`; the wage closes
+//! * **Sticky wages:** target `w* = max(labor_share × max(V̄, 0) / E, m × C)`, where
+//!   `C` is a worker's daily subsistence cost and `m` = `subsistence_wage_multiple`
+//!   (the wage floor that anchors prices to the cost of labour); the wage closes
 //!   `1 / wage_stickiness_days` of the gap each day, so a bad day does not
 //!   crash wages (MACROECONOMICS.md §4).
-//! * **Wage bill:** `min(w × E, cash)`, paid into the labour pool
+//! * **Wage bill:** `min(w × E, cash − input reserve)`, where the reserve is one
+//!   day of missing inputs at today's prices (liquidity rule). It is paid into the labour pool
 //!   `(province, worker profession)` and split across its POPs by size.
 //! * **Dividends:** cash above `reserve_days × wage bill` is paid out at
 //!   `dividend_payout_rate` per day to owner POPs in the same market, split by
@@ -39,6 +42,15 @@ pub fn pay_wages_and_dividends(
     let rules = &defs.rules.firms;
     let (pools, owners) = (&layout.labour, &layout.owners);
 
+    // Daily subsistence cost of one person, per (market, profession): the wage floor's base.
+    let (markets, profs) = (world.geography.market_count(), defs.professions.len());
+    let subsistence_cost: Vec<Fixed> = (0..markets * profs)
+        .map(|k| {
+            let (m, c) = (k / profs, k % profs);
+            defs.professions[c].subsistence.iter().enumerate().map(|(g, gamma)| gamma.mul_ceil(world.price(m, g))).sum()
+        })
+        .collect();
+
     let mut wage_income = vec![Fixed::ZERO; pools.key_count()];
     let mut dividend_income = vec![Fixed::ZERO; owners.key_count()];
 
@@ -47,6 +59,17 @@ pub fn pay_wages_and_dividends(
         let market = world.market_of_province(world.producers.province[i]);
         let wage_pool = pool_key(world, world.producers.province[i], def.worker);
         let owner_pool = owner_key(world, market, def.owner);
+        // Working capital: one day of inputs for today's workforce at today's prices.
+        let goods = defs.good_count();
+        let target = def.output_per_worker.mul_int(world.producers.employed[i] as i64);
+        let input_reserve: Fixed = def
+            .inputs
+            .iter()
+            .map(|&(g, a)| {
+                let short = (a.mul_ceil(target) - world.producers.input_stock[i * goods + g]).max(Fixed::ZERO);
+                short.mul_ceil(world.price(market, g))
+            })
+            .sum();
         let has_owners = owners.members(owner_pool).iter().any(|&r| world.pops.size[r as usize] > 0);
 
         let p = &mut world.producers;
@@ -55,13 +78,18 @@ pub fn pay_wages_and_dividends(
         p.value_added_avg[i] =
             avg + (revenue[i] - input_cost[i] - avg).div_int(rules.revenue_smoothing_days.max(1) as i64);
         if employed > 0 {
-            let target = def.labor_share.mul(p.value_added_avg[i].max(Fixed::ZERO)).div_int(employed);
+            let floor = rules.subsistence_wage_multiple.mul(subsistence_cost[market * profs + def.worker]);
+            let target = def.labor_share.mul(p.value_added_avg[i].max(Fixed::ZERO)).div_int(employed).max(floor);
             let wage = p.wage[i];
             p.wage[i] = (wage + (target - wage).div_int(rules.wage_stickiness_days.max(1) as i64)).max(Fixed::ZERO);
         }
 
         let bill = p.wage[i].mul_int(employed);
-        let paid = bill.min(p.cash[i]);
+        // Liquidity rule (D6): wages come only from cash above the working-capital
+        // reserve, so a struggling producer can still buy inputs, produce and sell.
+        // A firm paying out its last cash in wages could never buy inputs again:
+        // no output, no revenue, a permanent trap.
+        let paid = bill.min((p.cash[i] - input_reserve).max(Fixed::ZERO));
         p.cash[i] -= paid;
         wage_income[wage_pool] += paid;
 

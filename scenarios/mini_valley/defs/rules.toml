@@ -21,5 +21,5 @@ target_stock_days = 1        # stop producing once unsold stock = 1 day of outpu
 subsistence_wage_multiple = 1.5   # target wage >= 1.5x a worker's daily subsistence cost
 
 [demographics]              # D7, monthly rates
-growth_rate = 0.0005          # ~0.6% a year
+growth_rate = 0.001
 starvation_rate = 0.05

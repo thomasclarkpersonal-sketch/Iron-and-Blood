@@ -114,6 +114,7 @@ pub struct MarketRulesEntry {
     pub step_decay_iterations: u32,
     pub tolerance: Dec,
     pub max_daily_change: Dec,
+    pub min_stock: Dec,
     pub price_floor: Dec,
     pub price_ceiling: Dec,
 }
@@ -126,6 +127,7 @@ pub struct FirmRulesEntry {
     pub reserve_days: u32,
     pub dividend_payout_rate: Dec,
     pub target_stock_days: u32,
+    pub subsistence_wage_multiple: Dec,
 }
 
 #[derive(Deserialize)]

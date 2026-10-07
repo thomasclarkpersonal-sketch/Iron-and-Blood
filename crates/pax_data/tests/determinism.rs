@@ -45,6 +45,18 @@ fn snapshot_resume_matches_continuous_run() {
 }
 
 #[test]
+fn two_states_matches_golden_hashes() {
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two_states");
+    let expected = golden::read(&dir.join("golden.hashes")).expect("two_states golden.hashes present");
+    let mut world = pax_data::load_scenario(&dir).expect("two_states loads").world;
+    assert_eq!(
+        tick::run(&mut world, expected.len() as u64),
+        expected,
+        "two_states results changed; re-record if intended"
+    );
+}
+
+#[test]
 fn matches_golden_hashes() {
     let path = scenario_dir().join("golden.hashes");
     let expected = golden::read(&path)

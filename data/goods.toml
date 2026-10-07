@@ -1,13 +1,40 @@
-# Goods traded in markets. See docs/DATA_FORMAT.md.
-# base_price is only the opening price; markets move freely afterwards.
+# Game goods. See docs/DATA_FORMAT.md. base_price is only the opening price.
 
 [[good]]
 key = "grain"
 base_price = 1.0
 
 [[good]]
+key = "fish"
+base_price = 2.0
+
+[[good]]
 key = "timber"
 base_price = 1.5
+
+[[good]]
+key = "cotton"
+base_price = 1.5
+
+[[good]]
+key = "coal"
+base_price = 2.0
+
+[[good]]
+key = "iron_ore"
+base_price = 2.0
+
+[[good]]
+key = "steel"
+base_price = 8.0
+
+[[good]]
+key = "cloth"
+base_price = 4.0
+
+[[good]]
+key = "clothes"
+base_price = 6.0
 
 [[good]]
 key = "furniture"
@@ -16,3 +43,7 @@ base_price = 6.0
 [[good]]
 key = "wine"
 base_price = 4.0
+
+[[good]]
+key = "tools"
+base_price = 12.0

@@ -37,8 +37,8 @@ flowchart LR
 ### Wages and dividends (D6)
 
 - Value added: `V = revenue − input purchases`, smoothed into `V̄`.
-- Target wage: `w* = labor_share × max(V̄, 0) / E`. The wage moves `1/wage_stickiness_days` of the way there each day (wage stickiness; see [MACROECONOMICS.md §4](MACROECONOMICS.md#4-labor-market--wage-stickiness)).
-- The wage bill (at most the cash on hand) is paid into the labour pool `(province, profession)` and split among its POPs by size.
+- Target wage: `w* = max(labor_share × max(V̄, 0) / E, 1.5 × C)`, where `C` is a worker's daily subsistence cost: the wage floor that anchors prices to the cost of labour. The wage moves `1/wage_stickiness_days` of the way there each day (wage stickiness; see [MACROECONOMICS.md §4](MACROECONOMICS.md#4-labor-market--wage-stickiness)).
+- The wage bill is paid only from cash above one day of missing inputs (liquidity rule), into the labour pool `(province, profession)`, and split among its POPs by size.
 - Cash above `reserve_days × wage bill` is paid as dividends, at `dividend_payout_rate` per day, to the owner profession in the same market.
 
 ## ⚖️ Price Discovery (D1)
@@ -53,7 +53,7 @@ Prices are not hard-coded and are not anchored to a base price. Every day, each 
    - `zᵢ = (Dᵢ − Sᵢ)/(Dᵢ + Sᵢ)` is always in `[−1, 1]` and is defined as 0 when both are 0.
    - `λₖ = λ·d/(d + k)` decays to damp oscillation.
    - It stops when every `|zᵢ| ≤ tolerance` or after `max_iterations`.
-3. **Limits** the executed price to `±max_daily_change` of yesterday's. With no stock in the market at all, the price is held.
+3. **Limits** the executed price to `±max_daily_change` of yesterday's. With no stock in the market, counting stocks below `min_stock` as none, the price is held.
 4. **Settles** at the executed price.
    - If demand exceeds supply, *every* buyer gets the same fraction `S/D` (pro-rata rationing).
    - Buyers pay `q × p`; the market's total receipts are split among sellers pro rata to what they offered (largest remainder).

@@ -12,6 +12,8 @@ Game data is TOML (see [DECISIONS.md D9](DECISIONS.md#d9-data-format-toml)), loa
 
 ## Definitions directory (`data/`)
 
+`data/` is the game's content and grows over time. `scenarios/mini_valley` has its own frozen copy in `scenarios/mini_valley/defs/`, because it is the golden regression fixture: content changes must not move its hashes.
+
 ### `goods.toml`
 
 ```toml
@@ -57,12 +59,14 @@ input_spend_rate = 0.5      # fraction of cash spendable on inputs per day, in [
 | `market.step_decay_iterations` | Step decay `d` in `λ·d/(d+k)` | ≥ 1 |
 | `market.tolerance` | Stop when all \|z\| ≤ this | ≥ 0 |
 | `market.max_daily_change` | Max executed price move per day | (0, 1) |
+| `market.min_stock` | Stocks below this are dust: not offered, and the price is held | ≥ 0 |
 | `market.price_floor`, `price_ceiling` | Technical bounds; every `base_price` must lie inside | 0 < floor < ceiling |
 | `firms.wage_stickiness_days` | Days to close the gap to the target wage | ≥ 1 |
 | `firms.revenue_smoothing_days` | Horizon of the value-added average | ≥ 1 |
 | `firms.reserve_days` | Cash reserve before dividends, in days of wage bill | ≥ 0 |
 | `firms.dividend_payout_rate` | Daily payout of cash above reserve | [0, 1] |
 | `firms.target_stock_days` | Stop producing at this many days of unsold output | ≥ 1 |
+| `firms.subsistence_wage_multiple` | Target wage floor, as a multiple of a worker's daily subsistence cost | ≥ 0 |
 | `demographics.growth_rate` | Monthly growth at full life needs | [0, 1] |
 | `demographics.starvation_rate` | Monthly decline at zero life needs | [0, 1] |
 

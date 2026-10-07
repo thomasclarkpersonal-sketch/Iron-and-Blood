@@ -53,8 +53,10 @@ jobs:
         run: cargo test --all --release
       - name: Determinism gate (DECISIONS.md D11)
         run: |
-          cargo run --release -p pax_cli -- verify scenarios/mini_valley --threads 1
-          cargo run --release -p pax_cli -- verify scenarios/mini_valley --threads 4
+          for s in scenarios/mini_valley scenarios/two_states; do
+            cargo run --release -p pax_cli -- verify "$s" --threads 1
+            cargo run --release -p pax_cli -- verify "$s" --threads 4
+          done
 
   bench:
     # D13 / MILESTONE_1 T1: fail a PR that makes the daily tick > 20% slower.
@@ -103,3 +105,4 @@ jobs:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
       - uses: Swatinem/rust-cache@v2
       - run: cargo run --release -p pax_cli -- verify scenarios/mini_valley
+      - run: cargo run --release -p pax_cli -- verify scenarios/two_states

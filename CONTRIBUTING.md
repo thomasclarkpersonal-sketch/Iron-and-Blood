@@ -57,6 +57,7 @@ git tag v0.1.0 && git push origin v0.1.0
 
   ```bash
   cargo run --release -p pax_cli -- record scenarios/mini_valley
+  cargo run --release -p pax_cli -- record scenarios/two_states
   ```
 
 Reviewers should treat an unexplained `golden.hashes` diff as a blocking issue.

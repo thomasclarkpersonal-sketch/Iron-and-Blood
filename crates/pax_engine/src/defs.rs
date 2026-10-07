@@ -85,6 +85,11 @@ pub struct MarketRules {
     /// The executed price may differ from yesterday's by at most this fraction.
     /// Residual imbalance is rationed pro rata.
     pub max_daily_change: Fixed,
+    /// Stock below this many units is not offered and does not count as stock
+    /// for price discovery. Without it, rounding dust (10⁻⁶ units) made a market
+    /// look supplied: discovery kept raising the price against almost nothing
+    /// until it hit the ceiling, which killed whole supply chains.
+    pub min_stock: Fixed,
     /// Technical price bounds that keep fixed-point products in range.
     /// They are not economic anchors and should never bind in normal play.
     pub price_floor: Fixed,
@@ -105,6 +110,12 @@ pub struct FirmRules {
     /// Producers stop producing once unsold output reaches this many days of
     /// full-capacity production (inventory targeting).
     pub target_stock_days: u32,
+    /// Floor on a producer's *target* wage: this multiple of a worker's daily
+    /// subsistence cost (`Σ γ p` for the worker profession at market prices).
+    /// Without a floor, wages, reservation prices and prices can chase each other
+    /// to zero in a chain whose buyer purchases a fixed quantity (MILESTONE_1
+    /// "reservation-price drift"). The floor anchors prices to the cost of labour.
+    pub subsistence_wage_multiple: Fixed,
 }
 
 /// Monthly population change (DECISIONS.md D7).
