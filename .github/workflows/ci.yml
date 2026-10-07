@@ -55,9 +55,38 @@ jobs:
         run: |
           cargo run --release -p pax_cli -- verify scenarios/mini_valley --threads 1
           cargo run --release -p pax_cli -- verify scenarios/mini_valley --threads 4
-      - name: Benchmark smoke run (1M POP rows)
-        # Reports timing in the log; the regression gate is MILESTONE_1 task T1.
-        run: cargo run --release -p pax_cli -- bench scenarios/mini_valley --days 5 --scale 170000 --threads 4
+
+  bench:
+    # D13 / MILESTONE_1 T1: fail a PR that makes the daily tick > 20% slower.
+    # Base and head are built and timed on the same runner (see scripts/bench-compare.sh).
+    name: Benchmark regression
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    env:
+      BASE_SHA: ${{ github.event.pull_request.base.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - uses: Swatinem/rust-cache@v2
+      - name: Build head
+        run: |
+          cargo build --release -p pax_cli
+          cp target/release/pax_cli "$RUNNER_TEMP/pax_cli_head"
+      - name: Build base
+        run: |
+          git worktree add "$RUNNER_TEMP/base" "$BASE_SHA"
+          # Shared target dir: dependencies built for head are reused.
+          cargo build --release -p pax_cli --manifest-path "$RUNNER_TEMP/base/Cargo.toml" --target-dir target
+          cp target/release/pax_cli "$RUNNER_TEMP/pax_cli_base"
+      - name: Compare base vs head
+        run: |
+          scripts/bench-compare.sh \
+            "$RUNNER_TEMP/pax_cli_base" "$RUNNER_TEMP/base/scenarios/mini_valley" \
+            "$RUNNER_TEMP/pax_cli_head" scenarios/mini_valley
 
   determinism-cross-platform:
     # Fixed-point state must hash identically on every OS/CPU we ship to (D3).
