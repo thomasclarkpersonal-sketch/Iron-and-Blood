@@ -161,4 +161,11 @@ impl Defs {
     pub fn good_count(&self) -> usize {
         self.goods.len()
     }
+
+    /// Whether each profession is a *worker profession*: one that some producer
+    /// type employs. Owner-only professions never take jobs (D18). This is the
+    /// single definition, used by mobility and by reports.
+    pub fn worker_professions(&self) -> Vec<bool> {
+        (0..self.professions.len()).map(|c| self.producer_types.iter().any(|t| t.worker == c)).collect()
+    }
 }

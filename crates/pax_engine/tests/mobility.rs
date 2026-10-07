@@ -65,7 +65,7 @@ fn unemployed_move_to_vacancies_with_their_cash() {
     let labour = assign_employment(&mut world, &layout.labour);
     let (people, money) = (world.population(), world.total_money());
 
-    let moved = reassign_workers(&mut world, &labour);
+    let moved = reassign_workers(&mut world, &layout, &labour);
 
     // 900 unemployed farmers × 0.2 = 180 move into the 500 labourer vacancies.
     assert_eq!(moved, 180);
@@ -82,7 +82,7 @@ fn no_vacancies_means_no_moves() {
     world.producers.capacity[1] = 0; // no labourer jobs
     let layout = world.pop_layout();
     let labour = assign_employment(&mut world, &layout.labour);
-    assert_eq!(reassign_workers(&mut world, &labour), 0);
+    assert_eq!(reassign_workers(&mut world, &layout, &labour), 0);
     assert_eq!(world.pops.len(), 1);
 }
 
@@ -95,7 +95,7 @@ fn mobility_conserves_people_and_money_in_random_worlds() {
             let layout = world.pop_layout();
             let labour = assign_employment(&mut world, &layout.labour);
             let (people, money) = (world.population(), world.total_money());
-            moves += reassign_workers(&mut world, &labour);
+            moves += reassign_workers(&mut world, &layout, &labour);
             assert_eq!((world.population(), world.total_money()), (people, money), "seed {seed}");
             assert!(world.pops.cash.iter().all(|c| !c.is_negative()), "seed {seed}");
         }

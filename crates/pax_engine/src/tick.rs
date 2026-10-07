@@ -67,7 +67,7 @@ pub fn step(world: &mut World) -> DayReport {
     let transfers = government::pay_transfers(world, &layout);
     let mut moved = 0;
     if demographics::is_month_end(world) {
-        moved = mobility::reassign_workers(world, &labour);
+        moved = mobility::reassign_workers(world, &layout, &labour);
         demographics::update_population(world);
     }
 
