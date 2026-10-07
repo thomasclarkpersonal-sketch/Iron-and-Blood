@@ -17,9 +17,9 @@ flowchart TD
         Step --> Labour[1 Labour]
         Step --> Production[2 Production]
         Step --> Market[3 Market clearing]
-        Step --> Firms[4 Wages and dividends]
-        Step --> Weekly[5 Weekly: mobility, M2]
-        Step --> Monthly[6-7 Monthly: politics M2, demographics]
+        Step --> Firms[4 Wages, dividends, income tax]
+        Step --> Government[4b Government transfers]
+        Step --> Monthly[5-7 Month end: mobility, politics, demographics, compaction]
     end
 
     Server --> Engine

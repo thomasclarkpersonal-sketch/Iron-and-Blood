@@ -25,7 +25,7 @@ stateDiagram-v2
     Living --> Market : daily, buy needs (D2)
     Market --> Income : daily, wages + dividends
     Income --> Living
-    Living --> Mobility : weekly (M2), promotion / demotion / migration
+    Living --> Mobility : month end, profession change / migration (D18, D20)
     Mobility --> Split_Merge : move ⌊N × rate⌋ people with their share of cash
     Split_Merge --> Living
     Living --> Demographics : month end, growth or starvation
