@@ -172,7 +172,7 @@ impl World {
     /// is deliberate, so debug-build timings are not representative.
     pub fn pop_layout(&mut self) -> Arc<PopLayout> {
         if let Some(cached) = &self.layout.0
-            && cached.fingerprint == crate::layout::fingerprint(self)
+            && cached.fingerprint() == crate::layout::fingerprint(self)
         {
             debug_assert!(**cached == PopLayout::build(self), "POP layout fingerprint collision");
             return cached.clone();

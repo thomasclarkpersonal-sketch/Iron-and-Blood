@@ -5,8 +5,8 @@
 //! depend only on:
 //!
 //! * `pops.province` and `pops.profession` (and the number of rows),
-//! * `geography.province_market`, and
-//! * the number of professions and markets.
+//! * `geography.province_market` (and so the number of provinces), and
+//! * the number of professions and markets, which size the key spaces.
 //!
 //! In M1 none of these change after loading, so rebuilding the groupings every
 //! tick (three O(N) passes, ~8 ms at 1M POPs) was pure overhead (MILESTONE_1 T4).
@@ -21,6 +21,12 @@
 //! province→market map, therefore can never read stale groupings, even if it
 //! forgets to call [`World::invalidate_pop_layout`], which remains available as an
 //! explicit hint. Debug builds additionally compare the cache with a fresh build.
+//!
+//! **Snapshot validity:** a system receives the layout as an `Arc` snapshot taken
+//! at the start of the tick, alongside `&mut World`. Within a tick no system
+//! changes POP provinces or professions or the market map; systems that will
+//! (M2 migration, promotion, conquest) must run *after* the systems that use the
+//! snapshot, or fetch `World::pop_layout` again afterwards.
 //!
 //! This module also owns the **key encodings** of both groupings
 //! ([`pool_key`], [`owner_key`]). Systems import them from here, so the
@@ -70,10 +76,16 @@ pub struct PopLayout {
     /// Market row of each POP.
     pub market: Vec<u32>,
     /// Fingerprint of the inputs this layout was built from (see [`fingerprint`]).
-    pub fingerprint: u64,
+    /// Private so nothing outside this module can make a stale layout look valid.
+    fingerprint: u64,
 }
 
 impl PopLayout {
+    /// Fingerprint of the inputs this layout was built from.
+    pub fn fingerprint(&self) -> u64 {
+        self.fingerprint
+    }
+
     /// Builds the groupings from scratch: O(N). Systems should use
     /// [`World::pop_layout`] instead, which reuses a valid cached layout.
     pub fn build(world: &World) -> PopLayout {
@@ -93,14 +105,16 @@ impl PopLayout {
 }
 
 /// 64-bit fingerprint of every input the layout depends on: row count, each
-/// POP's province and profession, the province→market map and the number of
-/// professions. Word-at-a-time multiply–rotate mixing keeps it at ~1 ns per row.
+/// POP's province and profession, the province→market map (whose length is
+/// the province count), and the profession and market counts that size the
+/// pool key spaces. Word-at-a-time multiply–rotate mixing keeps it at ~1 ns per row.
 /// A collision (≈2⁻⁶⁴) would be needed to miss a change.
 pub fn fingerprint(world: &World) -> u64 {
     const K: u64 = 0x9E37_79B9_7F4A_7C15;
     let mix = |h: u64, v: u64| (h ^ v).wrapping_mul(K).rotate_left(29);
     let mut h = mix(K, world.pops.len() as u64);
     h = mix(h, world.defs.professions.len() as u64);
+    h = mix(h, world.geography.market_count() as u64);
     for (&province, &profession) in world.pops.province.iter().zip(&world.pops.profession) {
         h = mix(h, ((province as u64) << 16) | profession as u64);
     }
