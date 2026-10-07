@@ -524,7 +524,9 @@ fn settle(
         let weights: Vec<Fixed> = rows.iter().map(|&r| offered[r as usize]).collect();
         let delivered = allocate(bought[k], &weights).expect("goods sold implies positive offers");
         let receipts = allocate(paid[k], &weights).expect("goods sold implies positive offers");
-        for ((&r, q), cash) in rows.iter().zip(delivered).zip(receipts) {
+        for (((&r, q), cash), &offered_qty) in rows.iter().zip(delivered).zip(receipts).zip(&weights) {
+            // Largest-remainder allocation of sold ≤ offered never exceeds an offer.
+            assert!(q <= offered_qty, "market {k}: seller delivered {q} > offered {offered_qty}");
             let producer = offers[r as usize].producer;
             producers.output_stock[producer] -= q;
             producers.cash[producer] += cash;
