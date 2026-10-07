@@ -175,7 +175,7 @@ impl Fixed {
         for _ in frac_part.len()..DECIMALS {
             frac_val *= 10;
         }
-        let raw = int_val * SCALE_I128 + frac_val;
+        let raw = int_val.checked_mul(SCALE_I128).ok_or_else(|| format!("'{s}' is out of range"))? + frac_val;
         let raw = if neg { -raw } else { raw };
         i64::try_from(raw).map(Fixed).map_err(|_| format!("'{s}' is out of range"))
     }
@@ -264,6 +264,9 @@ mod tests {
         assert!(Fixed::parse_decimal("1e5").is_err());
         assert!(Fixed::parse_decimal("").is_err());
         assert!(Fixed::parse_decimal("99999999999999999").is_err());
+        // 34 integer digits fit i128 but overflow once scaled by 10^6 (audit 2026-10-08).
+        assert!(Fixed::parse_decimal("1000000000000000000000000000000000").is_err());
+        assert!(Fixed::parse_decimal("-99999999999999999999999999999999999999").is_err());
     }
 
     #[test]

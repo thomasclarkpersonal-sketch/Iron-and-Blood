@@ -181,6 +181,19 @@ struct ConsumerAggregate {
     deprived_budget: Fixed,
 }
 
+/// Whether `budget ≥ cost × size`, compared in i128. `cost × size` alone can
+/// exceed `Fixed`'s range for prices inside the allowed band (D1) when POPs are
+/// huge; the comparison itself never needs the product as a `Fixed`.
+fn affords(budget: Fixed, cost: Fixed, size: i64) -> bool {
+    budget.raw() as i128 >= cost.raw() as i128 * size as i128
+}
+
+/// `max(0, budget − cost × size)` without overflow: the result is at most
+/// `budget`, so it always fits.
+fn discretionary(budget: Fixed, cost: Fixed, size: i64) -> Fixed {
+    Fixed::from_raw((budget.raw() as i128 - cost.raw() as i128 * size as i128).max(0) as i64)
+}
+
 /// Daily consumption budget of a POP.
 fn budget(prof: &ProfessionDef, cash: Fixed) -> Fixed {
     cash.mul(prof.spend_rate)
@@ -200,7 +213,7 @@ fn les_demand(
     if comfortable {
         // Clamped at zero: an aggregate classified at opening prices may sit
         // below the subsistence line at trial prices.
-        let discretionary = (budget - cost.mul_int(size)).max(Fixed::ZERO);
+        let discretionary = discretionary(budget, cost, size);
         for (g, x) in out.iter_mut().enumerate() {
             let beta = prof.preference[g];
             let extra = if beta.is_positive() { beta.mul_div(discretionary, prices[g]) } else { Fixed::ZERO };
@@ -221,7 +234,7 @@ fn pop_demand(prof: &ProfessionDef, size: u32, cash: Fixed, cost: Fixed, prices:
     }
     let size = size as i64;
     let y = budget(prof, cash);
-    let comfortable = cost.is_zero() || y >= cost.mul_int(size);
+    let comfortable = cost.is_zero() || affords(y, cost, size);
     les_demand(prof, size, y, comfortable, cost, prices, out);
 }
 
@@ -456,7 +469,7 @@ fn aggregate_consumers(world: &World, pop_market: &[u32]) -> Vec<ConsumerAggrega
                 let y = budget(&defs.professions[c], pops.cash[i]);
                 let cost = costs[m * profs + c];
                 let a = &mut acc.row(m)[c];
-                if cost.is_zero() || y >= cost.mul_int(size as i64) {
+                if cost.is_zero() || affords(y, cost, size as i64) {
                     a.comfortable_size += size as i64;
                     a.comfortable_budget += y;
                 } else {
