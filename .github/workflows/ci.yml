@@ -84,11 +84,19 @@ jobs:
           # Shared target dir: dependencies built for head are reused.
           cargo build --release -p pax_cli --manifest-path "$RUNNER_TEMP/base/Cargo.toml" --target-dir target
           cp target/release/pax_cli "$RUNNER_TEMP/pax_cli_base"
-      - name: Compare base vs head
+      - name: Compare base vs head (mini_valley, 1 market)
         run: |
           scripts/bench-compare.sh \
             "$RUNNER_TEMP/pax_cli_base" "$RUNNER_TEMP/base/scenarios/mini_valley" \
             "$RUNNER_TEMP/pax_cli_head" scenarios/mini_valley
+      - name: Compare base vs head (two_states, nations and inputs)
+        # Exercises the paths mini_valley doesn't: taxes, transfers, input chains.
+        env:
+          SCALE: "2000"
+        run: |
+          scripts/bench-compare.sh \
+            "$RUNNER_TEMP/pax_cli_base" "$RUNNER_TEMP/base/scenarios/two_states" \
+            "$RUNNER_TEMP/pax_cli_head" scenarios/two_states
 
   determinism-cross-platform:
     # Fixed-point state must hash identically on every OS/CPU we ship to (D3).

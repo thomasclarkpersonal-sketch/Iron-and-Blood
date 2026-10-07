@@ -3,6 +3,7 @@
 
 pub mod demographics;
 pub mod firms;
+pub mod government;
 pub mod labor;
 pub mod market;
 pub mod production;

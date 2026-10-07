@@ -64,6 +64,16 @@ Rows are stored grouped by market: the loader sorts them stably. The market's pa
 | `output_stock` | `Fixed` | Unsold output; goods persist (D4) |
 | `input_stock` | `Fixed` | Row-major `[producer × good]` |
 
+### `Nations` (D15)
+| Column | Type | Notes |
+|---|---|---|
+| `key` | `String` | |
+| `treasury` | `Fixed` | Outside money held by the state (D5 invariant) |
+| `income_tax_rate` | `Fixed` | Withheld from wages and dividends, in [0, 1] |
+| `transfer_rate` | `Fixed` | Share of the treasury paid to the nation's POPs each day, in [0, 1] |
+
+`Geography::market_nation` maps each market to its nation (`None` means stateless).
+
 ### `Markets`
 | Column | Type | Notes |
 |---|---|---|
@@ -74,7 +84,7 @@ Rows are stored grouped by market: the loader sorts them stably. The market's pa
 Orders and offers are **not** stored in state: they exist only during the market phase. The old `MarketNode { buy_orders: HashMap, … }` design is retired, because HashMap iteration order is non-deterministic (D3).
 
 ### *M2 tables (planned)*
-- `Nations` (treasury `Fixed`, tax rates `Fixed`, laws).
+- Laws, and tariffs on `Nations`.
 - `Accounts` for inside money: deposits, loans and bonds as asset/liability pairs (D5).
 - `Shares` (owner POP/nation → producer).
 
@@ -89,7 +99,8 @@ All systems are plain functions over `&mut World`, called by `tick::step` in the
    - **Discover:** each market runs bounded tâtonnement in parallel.
    - **Settle:** POPs buy in parallel; producers buy inputs; sellers are paid pro rata to their offers.
    - The concurrency rule (AGENTS.md §3) is satisfied by construction: no POP ever touches shared market state.
-4. **`firms::pay_wages_and_dividends`.** Value-added smoothing, sticky wages, then wage and dividend transfers.
+4. **`firms::pay_wages_and_dividends`.** Value-added smoothing, sticky wages, then wage and dividend transfers with income tax withheld (D15).
+4b. **`government::pay_transfers`.** Each nation pays `treasury × transfer_rate` to its POPs, split by size.
 5. **`demographics::update_population`** (month end). Growth or starvation from `life_needs`; the estate of an extinct POP passes to an heir.
 
 > [!IMPORTANT]
@@ -104,7 +115,8 @@ All systems are plain functions over `&mut World`, called by `tick::step` in the
 | `labour` | Workforce, jobs and employed per non-empty labour pool (`LabourReport`) |
 | `household_spending` | POP consumption spending (final demand; expenditure GDP in a closed economy) |
 | `input_spending` | Producer spending on inputs (intermediate consumption) |
-| `payouts` | Wages and dividends paid that day |
+| `payouts` | Gross wages and dividends paid that day, and the income tax withheld from them |
+| `transfers` | Paid from treasuries to POPs that day |
 | `life_needs` | Life-needs coverage at the market: people, deprived, weighted mean (`LifeNeedsSummary`) |
 | `total_money` | Outside money after the day (asserted unchanged) |
 

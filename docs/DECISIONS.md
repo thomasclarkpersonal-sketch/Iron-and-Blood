@@ -1,6 +1,6 @@
 # Design Decisions
 
-This is the binding record of decisions that other documents and the code depend on. Where any other document disagrees with this one, **this one wins**, and the other document is a bug to fix. Code comments refer to entries as `D1`–`D14`.
+This is the binding record of decisions that other documents and the code depend on. Where any other document disagrees with this one, **this one wins**, and the other document is a bug to fix. Code comments refer to entries as `D1`, `D2`, and so on.
 
 Each entry has a status:
 - **Accepted**: implemented or binding now.
@@ -25,6 +25,7 @@ To change a decision, edit its entry in the same pull request as the code. Say w
 | [D12](#d12-frontend-headless-first-client-chosen-before-m3) | Frontend | Deferred (before M3) |
 | [D13](#d13-performance-budget) | Performance budget | Accepted |
 | [D14](#d14-market-hierarchy-and-inter-market-trade) | Market hierarchy | Accepted (principle), M2 |
+| [D15](#d15-nations-treasuries-income-tax-and-transfers) | Nations and fiscal policy | Accepted (M2-1) |
 
 ---
 
@@ -98,7 +99,8 @@ To change a decision, edit its entry in the same pull request as the code. Say w
 | 1 | Labour: assign employment | daily |
 | 2 | Production | daily |
 | 3 | Market: orders → price discovery → settlement | daily |
-| 4 | Firms: wages, dividends | daily |
+| 4 | Firms: wages, dividends (income tax withheld, D15) | daily |
+| 4b | Government: transfers from treasuries to POPs (D15) | daily |
 | 5 | *(M2)* Promotion/demotion, migration | weekly (day 7, 14, …) |
 | 6 | *(M2)* Politics: militancy, consciousness | month end |
 | 7 | Demographics | month end |
@@ -152,7 +154,7 @@ To change a decision, edit its entry in the same pull request as the code. Say w
 - **POP identity** is `(province, profession, culture, religion)`. Culture and religion columns arrive in M2. Lookups by identity use a sorted index, never a `HashMap`.
 - **Derived values are never stored as state.** Nation, market and state come from the province; storing `nation_id` on POPs would go stale on conquest.
   - **Exception: self-validating caches.** For performance, derived data may live in a cache *outside* state, under three conditions: it's excluded from equality and `World::state_hash`; it fingerprints all of its inputs on every use and rebuilds on mismatch; and debug builds check it against a fresh build.
-  - The only such cache is `World::layout` (`layout.rs`). Its inputs are the POP row count, `pops.province`, `pops.profession`, `geography.province_market` and the number of professions.
+  - The only such cache is `World::layout` (`layout.rs`). Its inputs are the POP row count, `pops.province`, `pops.profession`, `geography.province_market`, `geography.market_nation` (D15), and the number of professions, markets and nations.
 
 ## D8. ECS: hand-rolled Struct-of-Arrays
 
@@ -222,3 +224,20 @@ The state → national → sphere → global roll-up in the old ECONOMY_SYSTEM w
 3. **Allocation of scarce goods across importers is pro rata.** No priority by nation rank, prestige or table order.
 4. Iceberg losses destroy *goods*, never money. Tariffs are a transfer to the importing treasury.
 5. Distances and friction come from a matrix precomputed at load time and rebuilt only when infrastructure changes (MAP_AND_LOGISTICS.md).
+
+## D15. Nations, treasuries, income tax and transfers
+
+**Accepted (M2-1).** The first fiscal layer of [POLITICS_SYSTEM.md](POLITICS_SYSTEM.md).
+
+- **Nations own markets** through `geography.market_nation`. A market without a nation is *stateless* and untaxed, so scenarios may omit nations entirely (`mini_valley` does). A POP's nation is derived from its market, never stored (D7).
+- **Treasury:** a nation's `treasury` is outside money and part of the D5 invariant (`World::total_money`).
+- **Income tax:** a flat `income_tax_rate` (`Fixed`, in [0, 1]) is withheld at source from every wage and dividend payment by producers in the nation's markets.
+  - The labour or owner pool receives the net; the treasury receives the tax.
+  - `DayReport::payouts` reports gross wages and dividends plus the taxes.
+- **Transfers:** each day the treasury pays `treasury × transfer_rate` (rounded down) to the nation's POPs, split by size with largest remainder. This is a flat per-capita benefit.
+  - Some spending is mandatory. A treasury that only collected would drain money from circulation and push prices and wages down (MACROECONOMICS.md §1).
+  - Purchases of goods (military upkeep, infrastructure) arrive with M2-2.
+- **Rates are state, not definitions.** They live in the `Nations` table and in the state hash, because players will change them. Commands (D10) will set them at the start of a tick.
+- **Tick order:** taxes are withheld inside the firms system; transfers run right after it, before demographics.
+- **Out of scope for M2-1:** progressive brackets (by profession or income), tariffs (with D14), bonds and debt (inside money, D5), and laws constraining rates (politics).
+

@@ -145,6 +145,8 @@ pub struct ScenarioFile {
     /// Definitions directory, relative to the scenario directory.
     pub data: String,
     #[serde(default)]
+    pub nation: Vec<NationEntry>,
+    #[serde(default)]
     pub market: Vec<MarketEntry>,
     #[serde(default)]
     pub province: Vec<ProvinceEntry>,
@@ -158,6 +160,21 @@ pub struct ScenarioFile {
 #[serde(deny_unknown_fields)]
 pub struct MarketEntry {
     pub key: String,
+    /// Owning nation (optional: stateless markets are untaxed).
+    #[serde(default)]
+    pub nation: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NationEntry {
+    pub key: String,
+    #[serde(default)]
+    pub treasury: Dec,
+    #[serde(default)]
+    pub income_tax_rate: Dec,
+    #[serde(default)]
+    pub transfer_rate: Dec,
 }
 
 #[derive(Deserialize)]

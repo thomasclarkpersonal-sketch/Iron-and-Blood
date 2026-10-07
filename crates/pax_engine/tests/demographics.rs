@@ -29,6 +29,7 @@ fn world(provinces: usize) -> World {
         province_keys: (0..provinces).map(|p| format!("p{p}")).collect(),
         province_market: vec![0; provinces],
         market_keys: vec!["m".into()],
+        market_nation: Vec::new(),
     };
     World::new(Arc::new(defs), geography, 1)
 }

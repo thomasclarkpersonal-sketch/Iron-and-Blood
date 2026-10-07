@@ -12,7 +12,8 @@
 //! * **Unemployment:** unemployed ÷ workforce at period end. It counts only
 //!   professions that some producer type employs; owner professions are
 //!   outside the labour force.
-//! * **Wage share:** wages ÷ (wages + dividends) paid during the period.
+//! * **Wage share:** gross wages ÷ (gross wages + gross dividends) paid during the period.
+//! * **Tax take:** income tax withheld ÷ gross wages and dividends (D15).
 //! * **Life needs:** `DayReport::life_needs` from the period's last market day:
 //!   mean satisfaction weighted by POP sizes at that market (the engine computes
 //!   it, so the CLI never re-creates the tick's ordering), and the share of
@@ -40,12 +41,12 @@ pub fn run(mut world: World, days: u64, every: u64) -> Result<ExitCode, String> 
         (0..world.defs.professions.len()).map(|c| world.defs.producer_types.iter().any(|t| t.worker == c)).collect();
 
     println!(
-        "{:>5} {:>10} {:>12} {:>9} {:>12} {:>8} {:>8} {:>10} {:>9}",
-        "day", "population", "GDP/day", "prices", "real GDP", "unempl%", "wage%", "lifeneeds", "deprived%"
+        "{:>5} {:>10} {:>12} {:>9} {:>12} {:>8} {:>8} {:>6} {:>10} {:>9}",
+        "day", "population", "GDP/day", "prices", "real GDP", "unempl%", "wage%", "tax%", "lifeneeds", "deprived%"
     );
 
     let mut base: Option<(Vec<f64>, f64)> = None; // (basket q0, Σ p0 q0)
-    let (mut spending, mut wages, mut dividends, mut n) = (0.0, 0.0, 0.0, 0u64);
+    let (mut spending, mut wages, mut dividends, mut taxes, mut n) = (0.0, 0.0, 0.0, 0.0, 0u64);
     for day0 in 0..days {
         let report: DayReport = step(&mut world);
         if base.is_none() {
@@ -56,6 +57,7 @@ pub fn run(mut world: World, days: u64, every: u64) -> Result<ExitCode, String> 
         spending += f(report.household_spending);
         wages += f(report.payouts.wages);
         dividends += f(report.payouts.dividends);
+        taxes += f(report.payouts.taxes);
         n += 1;
 
         if !crate::is_report_day(day0, every, days) {
@@ -79,6 +81,7 @@ pub fn run(mut world: World, days: u64, every: u64) -> Result<ExitCode, String> 
         }
         let unemployment = if workforce > 0 { unemployed as f64 / workforce as f64 * 100.0 } else { 0.0 };
         let wage_share = if wages + dividends > 0.0 { wages / (wages + dividends) * 100.0 } else { 0.0 };
+        let tax_take = if wages + dividends > 0.0 { taxes / (wages + dividends) * 100.0 } else { 0.0 };
 
         let population = world.population();
         // The engine weights life needs by the sizes the market saw (DayReport).
@@ -87,9 +90,9 @@ pub fn run(mut world: World, days: u64, every: u64) -> Result<ExitCode, String> 
         let deprived_pct = if life.people > 0 { life.deprived as f64 / life.people as f64 * 100.0 } else { 0.0 };
 
         println!(
-            "{day:>5} {population:>10} {gdp:>12.2} {index:>9} {real_gdp:>12} {unemployment:>8.1} {wage_share:>8.1} {life_mean:>10.3} {deprived_pct:>9.1}"
+            "{day:>5} {population:>10} {gdp:>12.2} {index:>9} {real_gdp:>12} {unemployment:>8.1} {wage_share:>8.1} {tax_take:>6.1} {life_mean:>10.3} {deprived_pct:>9.1}"
         );
-        (spending, wages, dividends, n) = (0.0, 0.0, 0.0, 0);
+        (spending, wages, dividends, taxes, n) = (0.0, 0.0, 0.0, 0.0, 0);
     }
     Ok(ExitCode::SUCCESS)
 }

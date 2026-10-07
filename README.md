@@ -22,7 +22,7 @@ To build a highly concurrent, performant, and deeply interconnected socioeconomi
    - Taxation, tariffs, and government spending directly influence the economy and POP wealth.
 
 ## 🚦 Status
-**Milestone 1 (closed single-market economy) is implemented.** It includes:
+**Milestone 1 (closed single-market economy) is complete, and Milestone 2 has started** (nations, income tax and transfers: D15). It includes:
 - fixed-point determinism;
 - an outside-money conservation check on every tick;
 - golden-hash replay verification;

@@ -79,8 +79,15 @@ name = "Mini Valley"
 seed = 1836                 # root of all randomness
 data = "../../data"         # definitions directory, relative to this file
 
+[[nation]]                  # optional (D15); omit for a stateless scenario
+key = "lowland_kingdom"
+treasury = 2000             # opening treasury cash (default 0)
+income_tax_rate = 0.08      # share of wages and dividends withheld (default 0)
+transfer_rate = 0.05        # share of the treasury paid to its POPs per day (default 0)
+
 [[market]]
 key = "valley"
+nation = "lowland_kingdom"  # optional: markets without a nation are untaxed
 
 [[province]]
 key = "riverside"

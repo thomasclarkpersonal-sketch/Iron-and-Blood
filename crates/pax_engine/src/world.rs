@@ -27,9 +27,19 @@ pub struct Geography {
     /// Market row of each province.
     pub province_market: Vec<u32>,
     pub market_keys: Vec<String>,
+    /// Nation that owns each market (`None`: stateless, untaxed), D15.
+    /// Either empty (no market belongs to any nation) or exactly one entry per
+    /// market, each `Some(n)` naming an existing nation row. The engine checks
+    /// this whenever it builds the POP layout ([`World::check_market_nations`]).
+    pub market_nation: Vec<Option<u32>>,
 }
 
 impl Geography {
+    /// Nation of a market, if any.
+    pub fn nation_of_market(&self, market: usize) -> Option<usize> {
+        self.market_nation.get(market).copied().flatten().map(|n| n as usize)
+    }
+
     pub fn province_count(&self) -> usize {
         self.province_keys.len()
     }
@@ -102,6 +112,41 @@ pub struct Markets {
     pub price: Vec<Fixed>,
 }
 
+/// Nation table (D15). A nation owns markets, levies a flat income tax on wages
+/// and dividends paid in them, and pays a daily per-capita transfer from its
+/// treasury to its people. Tax and transfer rates are policy *state* (players
+/// will change them), so they live here rather than in `Defs`.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Nations {
+    pub key: Vec<String>,
+    /// Outside money held by the state (part of the D5 invariant).
+    pub treasury: Vec<Fixed>,
+    /// Share of every wage and dividend payment withheld as tax, in `[0, 1]`.
+    pub income_tax_rate: Vec<Fixed>,
+    /// Share of the treasury paid out each day as transfers to the nation's
+    /// POPs, split by size, in `[0, 1]`.
+    pub transfer_rate: Vec<Fixed>,
+}
+
+impl Nations {
+    pub fn len(&self) -> usize {
+        self.key.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.key.is_empty()
+    }
+}
+
+/// Initial values for a new nation row.
+#[derive(Clone, Debug)]
+pub struct NewNation {
+    pub key: String,
+    pub treasury: Fixed,
+    pub income_tax_rate: Fixed,
+    pub transfer_rate: Fixed,
+}
+
 /// Complete mutable simulation state plus a handle to the static definitions.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct World {
@@ -114,6 +159,7 @@ pub struct World {
     pub pops: Pops,
     pub producers: Producers,
     pub markets: Markets,
+    pub nations: Nations,
     /// Cached POP groupings; derived, not state (see [`crate::layout`]).
     pub layout: LayoutCache,
 }
@@ -145,6 +191,7 @@ impl World {
             pops: Pops::default(),
             producers: Producers::default(),
             markets: Markets { price },
+            nations: Nations::default(),
             layout: LayoutCache::default(),
         }
     }
@@ -242,6 +289,48 @@ impl World {
         self.invalidate_pop_layout();
     }
 
+    /// Checks the market→nation invariant documented on
+    /// [`Geography::market_nation`].
+    ///
+    /// # Panics
+    /// With a message naming the broken invariant, rather than an
+    /// index-out-of-bounds deep inside a system.
+    pub fn check_market_nations(&self) {
+        let map = &self.geography.market_nation;
+        if map.is_empty() {
+            return;
+        }
+        assert_eq!(
+            map.len(),
+            self.geography.market_count(),
+            "geography.market_nation must be empty or have one entry per market"
+        );
+        for (m, n) in map.iter().enumerate() {
+            if let Some(n) = n {
+                assert!(
+                    (*n as usize) < self.nations.len(),
+                    "market {m} names nation {n}, but only {} exist",
+                    self.nations.len()
+                );
+            }
+        }
+    }
+
+    /// Adds a nation. Assign it markets through `geography.market_nation`.
+    pub fn push_nation(&mut self, new: NewNation) -> usize {
+        assert!(!new.treasury.is_negative(), "negative treasury");
+        for rate in [new.income_tax_rate, new.transfer_rate] {
+            assert!(rate >= Fixed::ZERO && rate <= Fixed::ONE, "nation rate outside [0, 1]");
+        }
+        self.invalidate_pop_layout();
+        let n = &mut self.nations;
+        n.key.push(new.key);
+        n.treasury.push(new.treasury);
+        n.income_tax_rate.push(new.income_tax_rate);
+        n.transfer_rate.push(new.transfer_rate);
+        n.len() - 1
+    }
+
     pub fn market_of_province(&self, province: u32) -> usize {
         self.geography.province_market[province as usize] as usize
     }
@@ -261,7 +350,8 @@ impl World {
     pub fn total_money(&self) -> Fixed {
         let pops: Fixed = self.pops.cash.iter().copied().sum();
         let producers: Fixed = self.producers.cash.iter().copied().sum();
-        pops + producers
+        let treasuries: Fixed = self.nations.treasury.iter().copied().sum();
+        pops + producers + treasuries
     }
 
     /// Total population.
@@ -292,6 +382,13 @@ impl World {
         h.fixeds(&f.output_stock);
         h.fixeds(&f.input_stock);
         h.fixeds(&self.markets.price);
+        // Scenarios without nations hash exactly as before nations existed.
+        if !self.nations.is_empty() {
+            let n = &self.nations;
+            h.fixeds(&n.treasury);
+            h.fixeds(&n.income_tax_rate);
+            h.fixeds(&n.transfer_rate);
+        }
         h.finish()
     }
 }
