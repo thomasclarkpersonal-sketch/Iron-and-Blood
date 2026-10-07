@@ -67,4 +67,4 @@ Each task is sized for one developer. All must keep `cargo test`, `clippy -D war
 4. Promotion/demotion and migration as deterministic flows (D7). **Labour mobility within a province done (D18).** Still to do: migration between provinces, promotion, culture and religion columns, POP merge.
 5. Share registry, investment, and firm bankruptcy (D6).
 6. Save files: initial state + command log (D10).
-7. Politics: militancy and consciousness in `Fixed`, driven by `life_needs`.
+7. Politics: militancy and consciousness in `Fixed`, driven by `life_needs`. **Militancy done (D19)**, without effects yet. Still to do: consciousness, rebellions, reforms.

@@ -31,7 +31,7 @@ POPs align with interest groups (Industrialists, Agrarians, Trade Unions, Devout
 *   *Example:* a wealthy capitalist leans strongly Industrialist; a starving labourer leans Trade Union or Radical.
 
 ### Militancy vs. consciousness
-Both are `Fixed` columns on `Pops`, updated at month end (D4):
+Both are `Fixed` columns on `Pops`, updated at month end (D4). **Militancy is implemented (D19)**, without effects yet; consciousness is still design.
 *   **Militancy:** willingness to use violence against the state. It rises with unmet life needs (`1 − life_needs`) and with the tax burden, and decays slowly toward a baseline. High militancy produces rebellions, the one place genuine randomness is used (`rng::Stream::REBELLION`, D3).
 *   **Consciousness:** political awareness. Driven by literacy, discretionary spending (`Y − N·C`) and technology. High consciousness creates demand for political reforms (voting rights, free press) and social reforms (minimum wage, pensions).
 

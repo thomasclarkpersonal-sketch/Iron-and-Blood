@@ -7,4 +7,5 @@ pub mod government;
 pub mod labor;
 pub mod market;
 pub mod mobility;
+pub mod politics;
 pub mod production;

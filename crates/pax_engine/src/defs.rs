@@ -139,6 +139,19 @@ pub struct DemographicRules {
     pub mobility_rate: Fixed,
 }
 
+/// Monthly militancy dynamics (D19).
+///
+/// `m ← clamp(m + rise × (1 − life_needs) + tax_weight × tax_rate − decay × m, 0, 1)`
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PoliticsRules {
+    /// Monthly rise at zero life-needs satisfaction.
+    pub militancy_rise: Fixed,
+    /// Monthly rise per unit of income tax rate.
+    pub militancy_tax_weight: Fixed,
+    /// Share of militancy that fades each month.
+    pub militancy_decay: Fixed,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Rules {
     /// Fixed 30-day months until a real calendar is needed.
@@ -146,6 +159,7 @@ pub struct Rules {
     pub market: MarketRules,
     pub firms: FirmRules,
     pub demographics: DemographicRules,
+    pub politics: PoliticsRules,
 }
 
 /// Everything static about a game. Shared immutably by all systems.

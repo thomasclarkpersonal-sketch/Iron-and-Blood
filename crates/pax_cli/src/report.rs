@@ -20,6 +20,8 @@
 //!   people whose subsistence was not fully met.
 //!   `population` is the end-of-period population, after demographics.
 //!
+//! * **Militancy:** population-weighted mean at period end (D19).
+//!
 //! If day 1 traded nothing, there is no base basket and the price index and real
 //! GDP print as `n/a` rather than a made-up 100.
 
@@ -40,8 +42,18 @@ pub fn run(mut world: World, days: u64, every: u64) -> Result<ExitCode, String> 
     let worker_professions = world.defs.worker_professions();
 
     println!(
-        "{:>5} {:>10} {:>12} {:>9} {:>12} {:>8} {:>8} {:>6} {:>10} {:>9}",
-        "day", "population", "GDP/day", "prices", "real GDP", "unempl%", "wage%", "tax%", "lifeneeds", "deprived%"
+        "{:>5} {:>10} {:>12} {:>9} {:>12} {:>8} {:>8} {:>6} {:>10} {:>9} {:>9}",
+        "day",
+        "population",
+        "GDP/day",
+        "prices",
+        "real GDP",
+        "unempl%",
+        "wage%",
+        "tax%",
+        "lifeneeds",
+        "deprived%",
+        "militancy"
     );
 
     let mut base: Option<(Vec<f64>, f64)> = None; // (basket q0, Σ p0 q0)
@@ -86,10 +98,17 @@ pub fn run(mut world: World, days: u64, every: u64) -> Result<ExitCode, String> 
         // The engine weights life needs by the sizes the market saw (DayReport).
         let life = &report.life_needs;
         let life_mean = life.mean().map_or(0.0, f);
+        // Population-weighted mean militancy at period end (D19).
+        let militancy = if population > 0 {
+            world.pops.size.iter().zip(&world.pops.militancy).map(|(&n, &m)| n as f64 * f(m)).sum::<f64>()
+                / population as f64
+        } else {
+            0.0
+        };
         let deprived_pct = if life.people > 0 { life.deprived as f64 / life.people as f64 * 100.0 } else { 0.0 };
 
         println!(
-            "{day:>5} {population:>10} {gdp:>12.2} {index:>9} {real_gdp:>12} {unemployment:>8.1} {wage_share:>8.1} {tax_take:>6.1} {life_mean:>10.3} {deprived_pct:>9.1}"
+            "{day:>5} {population:>10} {gdp:>12.2} {index:>9} {real_gdp:>12} {unemployment:>8.1} {wage_share:>8.1} {tax_take:>6.1} {life_mean:>10.3} {deprived_pct:>9.1} {militancy:>9.3}"
         );
         (spending, wages, dividends, taxes, n) = (0.0, 0.0, 0.0, 0.0, 0);
     }

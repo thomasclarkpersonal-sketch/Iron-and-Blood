@@ -10,8 +10,8 @@
 //! 3. Movers leave their POP rows pro rata to row size (largest remainder) and
 //!    take their share of the row's cash (`cash × movers / size`, split exactly).
 //!    They join the first POP row of the destination profession in the province,
-//!    or a new row if none exists. The destination's `life_needs` becomes the
-//!    size-weighted mean.
+//!    or a new row if none exists. The destination's `life_needs` and
+//!    `militancy` become size-weighted means.
 //!
 //! People and money are moved, never created: population and total cash are
 //! unchanged. Employment from the day's labour report is used, so mobility
@@ -119,6 +119,7 @@ fn move_people(world: &mut World, rows: &[u32], dest: usize, n: u64) -> u64 {
         p.cash[r] -= cash;
         let dest_size = p.size[dest] as i64;
         p.life_needs[dest] = weighted_mean(p.life_needs[dest], dest_size, p.life_needs[r], m);
+        p.militancy[dest] = weighted_mean(p.militancy[dest], dest_size, p.militancy[r], m);
         p.size[dest] += m as u32;
         p.cash[dest] += cash;
     }
