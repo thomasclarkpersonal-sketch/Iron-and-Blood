@@ -50,7 +50,7 @@ docs/                Design documentation (source of truth)
 ```
 
 ## 📚 Documentation
-Start with **[Design Decisions](docs/DECISIONS.md)**: it is binding and wins over any other document.
+New to the project? Start with **[Onboarding](docs/ONBOARDING.md)**: a codebase tour and recipes for common changes. **[Design Decisions](docs/DECISIONS.md)** is binding and wins over any other document.
 
 * [Milestone 1](docs/MILESTONE_1.md): scope, acceptance criteria, team task list, M2 preview.
 * [System Architecture Overview](docs/ARCHITECTURE.md): engine design and the tick schedule.
