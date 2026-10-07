@@ -43,26 +43,35 @@ pub fn produce(world: &mut World) {
     }
 }
 
-/// Inputs producer `i` plans to buy today: `(good, quantity)` for one day of
-/// output at today's workforce, minus the input stock it already holds.
+/// Inputs producer `i` still lacks for one day of output at today's workforce:
+/// `(good, aⱼ × E π − stock)` per input, ignoring prices. Empty for producers
+/// without inputs or workers.
 ///
-/// Empty when the producer has no inputs or no workers, or when the **shutdown
-/// rule** applies: the output price does not exceed the input cost per unit, so
-/// buying inputs would only turn money into loss-making output (D6). This is the
-/// single definition used by input orders (market) and by the working-capital
-/// reserve (firms), so the two can never disagree.
-pub fn planned_inputs(world: &World, i: usize) -> Vec<(GoodId, Fixed)> {
+/// Callers evaluate it on the state they see. The market calls it before
+/// purchases (what to buy today); firms call it after purchases (what is still
+/// missing for the next day). Same formula, different moments.
+pub fn input_requirements(world: &World, i: usize) -> Vec<(GoodId, Fixed)> {
     let p = &world.producers;
     let def = &world.defs.producer_types[p.kind[i] as usize];
     if def.inputs.is_empty() || p.employed[i] == 0 {
         return Vec::new();
     }
-    let market = world.market_of_province(p.province[i]);
-    let unit_input_cost: Fixed = def.inputs.iter().map(|&(g, a)| a.mul_ceil(world.price(market, g))).sum();
-    if world.price(market, def.output) <= unit_input_cost {
-        return Vec::new();
-    }
     let goods = world.defs.good_count();
     let target = def.output_per_worker.mul_int(p.employed[i] as i64);
     def.inputs.iter().map(|&(g, a)| (g, (a.mul_ceil(target) - p.input_stock[i * goods + g]).max(Fixed::ZERO))).collect()
+}
+
+/// Inputs producer `i` will actually *order* today: [`input_requirements`],
+/// unless the **shutdown rule** applies (output price ≤ input cost per unit), in
+/// which case nothing. Buying then would only turn money into loss-making output
+/// (D6).
+pub fn planned_inputs(world: &World, i: usize) -> Vec<(GoodId, Fixed)> {
+    let p = &world.producers;
+    let def = &world.defs.producer_types[p.kind[i] as usize];
+    let market = world.market_of_province(p.province[i]);
+    let unit_input_cost: Fixed = def.inputs.iter().map(|&(g, a)| a.mul_ceil(world.price(market, g))).sum();
+    if !def.inputs.is_empty() && world.price(market, def.output) <= unit_input_cost {
+        return Vec::new();
+    }
+    input_requirements(world, i)
 }

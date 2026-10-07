@@ -228,17 +228,28 @@ impl World {
         if order.iter().enumerate().all(|(k, &i)| k == i) {
             return;
         }
-        let p = &mut self.pops;
-        p.size = order.iter().map(|&i| p.size[i]).collect();
-        p.cash = order.iter().map(|&i| p.cash[i]).collect();
-        p.profession = order.iter().map(|&i| p.profession[i]).collect();
-        p.province = order.iter().map(|&i| p.province[i]).collect();
-        p.life_needs = order.iter().map(|&i| p.life_needs[i]).collect();
+        // Exhaustive destructuring: adding a column to `Pops` is a compile error
+        // here until it is permuted too.
+        let Pops { size, cash, profession, province, life_needs } = &mut self.pops;
+        fn permute<T: Copy>(column: &mut Vec<T>, order: &[usize]) {
+            *column = order.iter().map(|&i| column[i]).collect();
+        }
+        permute(size, &order);
+        permute(cash, &order);
+        permute(profession, &order);
+        permute(province, &order);
+        permute(life_needs, &order);
         self.invalidate_pop_layout();
     }
 
     pub fn market_of_province(&self, province: u32) -> usize {
         self.geography.province_market[province as usize] as usize
+    }
+
+    /// All prices of one market, indexed by good.
+    pub fn prices(&self, market: usize) -> &[Fixed] {
+        let goods = self.defs.good_count();
+        &self.markets.price[market * goods..(market + 1) * goods]
     }
 
     pub fn price(&self, market: usize, good: GoodId) -> Fixed {

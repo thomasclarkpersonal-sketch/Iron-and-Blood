@@ -135,7 +135,8 @@ To change a decision, edit its entry in the same pull request as the code. Say w
 - **Wage floor:** the target wage is never below `firms.subsistence_wage_multiple` (`rules.toml`) × a worker's daily subsistence cost `Σ γ p` (`ProfessionDef::subsistence_cost`).
   - This is a classical subsistence wage. It anchors prices to the cost of labour.
   - Without it, in a chain whose buyer buys a fixed quantity, wages, reservation prices and prices chased each other down to the technical floor (seen in `two_states`).
-- **Liquidity rule:** wages are paid only from cash above the cost of today's planned inputs (`production::planned_inputs`, the same plan the market orders from), into the labour pool `(province, profession)`, and split by POP size.
+- **Liquidity rule:** wages are paid only from cash above a **restart reserve**: the cost of the inputs still missing for one day of output at today's prices (`production::input_requirements`). It goes into the labour pool `(province, profession)` and is split by POP size.
+  - The reserve is kept **even while the producer is shut down** (the market then orders nothing: `planned_inputs` is empty under the shutdown rule). That way the producer can restart when prices recover.
   - A struggling producer can therefore always buy inputs, produce and sell. Its workers absorb the shortfall in pay instead of the firm dying.
   - Paying out the last cash in wages was a permanent trap: no inputs meant no output, no revenue, and no recovery.
 - **Dividends:** cash above `reserve_days × wage bill` is paid out at `dividend_payout_rate` per day to the producer type's **owner profession** in the same market, split by size.

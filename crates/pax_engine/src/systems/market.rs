@@ -86,9 +86,9 @@ pub struct LifeNeedsSummary {
 }
 
 impl LifeNeedsSummary {
-    /// Population-weighted mean life-needs satisfaction (1 if nobody took part).
-    pub fn mean(&self) -> Fixed {
-        if self.people == 0 { Fixed::ONE } else { Fixed::from_raw((self.weighted_raw / self.people as i128) as i64) }
+    /// Population-weighted mean life-needs satisfaction; `None` if nobody took part.
+    pub fn mean(&self) -> Option<Fixed> {
+        (self.people > 0).then(|| Fixed::from_raw((self.weighted_raw / self.people as i128) as i64))
     }
 
     fn add(mut self, other: LifeNeedsSummary) -> LifeNeedsSummary {
@@ -306,8 +306,7 @@ fn input_orders(world: &World) -> Vec<InputOrder> {
     let p = &world.producers;
     let mut orders = Vec::new();
     for i in 0..p.len() {
-        // One shared plan (production::planned_inputs) for orders and the
-        // firms' working-capital reserve, including the shutdown rule.
+        // production::planned_inputs: the requirements, unless shut down.
         let plan = planned_inputs(world, i);
         if plan.is_empty() {
             continue;

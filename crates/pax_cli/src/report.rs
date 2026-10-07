@@ -83,7 +83,7 @@ pub fn run(mut world: World, days: u64, every: u64) -> Result<ExitCode, String> 
         let population = world.population();
         // The engine weights life needs by the sizes the market saw (DayReport).
         let life = &report.life_needs;
-        let life_mean = f(life.mean());
+        let life_mean = life.mean().map_or(0.0, f);
         let deprived_pct = if life.people > 0 { life.deprived as f64 / life.people as f64 * 100.0 } else { 0.0 };
 
         println!(

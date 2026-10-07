@@ -38,7 +38,7 @@ flowchart LR
 
 - Value added: `V = revenue − input purchases`, smoothed into `V̄`.
 - Target wage: `w* = max(labor_share × max(V̄, 0) / E, m × C)`, where `C` is a worker's daily subsistence cost and `m` is `firms.subsistence_wage_multiple` in `rules.toml`: the wage floor that anchors prices to the cost of labour. The wage moves `1/wage_stickiness_days` of the way there each day (wage stickiness; see [MACROECONOMICS.md §4](MACROECONOMICS.md#4-labor-market--wage-stickiness)).
-- The wage bill is paid only from cash above one day of missing inputs (liquidity rule), into the labour pool `(province, profession)`, and split among its POPs by size.
+- The wage bill is paid only from cash above a **restart reserve**: the cost of the inputs still missing for one day of output (`production::input_requirements`). The reserve is kept even while the producer is shut down, so it can always restart. Wages go into the labour pool `(province, profession)` and are split among its POPs by size.
 - Cash above `reserve_days × wage bill` is paid as dividends, at `dividend_payout_rate` per day, to the owner profession in the same market.
 
 ## ⚖️ Price Discovery (D1)
