@@ -152,7 +152,7 @@ To change a decision, edit its entry in the same pull request as the code. Say w
 ## D7. POP accounting
 
 - `cash` is the POP's **total** holdings, not a per-capita amount. When size changes (births, deaths, casualties) the money stays with the survivors.
-- **Extinction:** if a POP reaches size 0, its cash passes to the largest living POP in the same province (lowest row on ties). If none exists, the empty row keeps it until someone moves in.
+- **Extinction:** at each month end, the cash of every empty row passes to the largest living POP in the same province (lowest row on ties). That covers rows that died out this month and earlier. If nobody lives in the province, the row keeps the cash until someone does.
 - **Splitting** (promotion, migration, conscription; M2): the moving fraction takes cash in proportion to people moved, using largest remainder. Intensive attributes (literacy, militancy) are copied.
 - **Merging:** cash adds up. Intensive attributes become size-weighted averages, computed in `Fixed` with one rounding.
 - **Compaction** (implemented, `World::compact_pops`, month end after demographics):

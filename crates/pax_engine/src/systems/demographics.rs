@@ -6,10 +6,10 @@
 //! * `s < 1`: `−starvation_rate × (1 − s)`
 //!
 //! `ΔN = ⌊N × rate⌋`. A POP's cash is total holdings, so it stays with the
-//! survivors. If a POP dies out entirely, its cash passes to the largest
-//! living POP in the same province (lowest row on ties) — money is never
-//! destroyed. If nobody lives in the province the empty row keeps the cash
-//! until someone migrates in (migration arrives in M2).
+//! survivors. Each month end, the cash of every empty row (a POP that died
+//! out, this month or earlier) passes to the largest living POP in the same
+//! province (lowest row on ties). Money is never destroyed. If nobody lives in
+//! the province, the empty row keeps the cash until someone does.
 
 use crate::fixed::Fixed;
 use crate::world::World;
@@ -24,7 +24,6 @@ pub fn update_population(world: &mut World) {
     let rules = world.defs.rules.demographics.clone();
     let province_count = world.geography.province_count();
     let pops = &mut world.pops;
-    let mut died_out = Vec::new();
     for i in 0..pops.len() {
         let size = pops.size[i];
         if size == 0 {
@@ -35,11 +34,12 @@ pub fn update_population(world: &mut World) {
         let delta = Fixed::from_int(size as i64).mul(rate).floor_int();
         let new_size = (size as i64 + delta).clamp(0, u32::MAX as i64) as u32;
         pops.size[i] = new_size;
-        if new_size == 0 {
-            died_out.push(i);
-        }
     }
-    if died_out.is_empty() {
+    // Every empty row still holding cash has an estate to settle: rows that
+    // died out this month, and rows that died out earlier with no heir in the
+    // province at the time (D7). Those pass on once anyone lives there.
+    let estates: Vec<usize> = (0..pops.len()).filter(|&i| pops.size[i] == 0 && pops.cash[i].is_positive()).collect();
+    if estates.is_empty() {
         return;
     }
 
@@ -57,7 +57,7 @@ pub fn update_population(world: &mut World) {
             *slot = Some(j);
         }
     }
-    for i in died_out {
+    for i in estates {
         if let Some(h) = heir[pops.province[i] as usize] {
             let estate = std::mem::take(&mut pops.cash[i]);
             pops.cash[h] += estate;

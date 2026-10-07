@@ -61,7 +61,7 @@ If a market is short, every buyer receives the same fraction of what it asked fo
 
 - Rate: `+growth_rate` when `life_needs = 1`, otherwise `−starvation_rate × (1 − life_needs)`.
 - `ΔN = ⌊N × rate⌋`, a deterministic flow with no dice rolls.
-- Cash is unchanged: survivors inherit. If a POP dies out, its cash passes to the largest living POP in the same province, so money is never destroyed (D5).
+- Cash is unchanged: survivors inherit. If a POP dies out, its cash passes to the largest living POP in the same province, at that month end or the first one after anyone lives there, so money is never destroyed or frozen (D5, D7).
 
 ## 🔀 Labour Mobility (D18)
 Each month, within a province, unemployed workers move to professions with vacancies (D18). Then surplus workers migrate to provinces of the same market that have vacancies in their profession (D20). Both take their share of cash with them. Migration across markets and promotion to higher strata come later.
