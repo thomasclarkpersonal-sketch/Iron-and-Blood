@@ -72,7 +72,7 @@ Everyday and luxury goods are goods with `β > 0`. Poor POPs barely buy them, ri
 
 ## 🌍 Market Hierarchy and Trade (D14, M2)
 
-M1 has independent market nodes (one per *state*). M2 links them, and these rules are binding:
+M1 has independent market nodes (one per *state*). M2 links them, and these rules are binding. The concrete mechanism, merchants that arbitrage price gaps along routes with one day of transit, is proposed for review in [TRADE.md](TRADE.md):
 
 1. Every node clears by itself using the method above.
 2. Goods flow from node A to node B when `p_B·(1 − τ_AB) − tariff_AB > p_A`. Here `τ` is the iceberg transport loss ([MAP_AND_LOGISTICS.md](MAP_AND_LOGISTICS.md)). Flow is throttled by infrastructure capacity.
