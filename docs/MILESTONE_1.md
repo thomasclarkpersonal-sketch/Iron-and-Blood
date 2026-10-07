@@ -64,7 +64,7 @@ Each task is sized for one developer. All must keep `cargo test`, `clippy -D war
 1. Inter-market trade per D14: friction matrix, iceberg costs, tariffs.
 2. Nations and treasuries. **M2-1 done (D15):** flat income tax on wages and dividends, a treasury in the money invariant, and per-capita transfers. **M2-2 done (D16):** government consumption of a basket of goods through the market. Still to do: tariffs (with D14).
 3. Banking with inside money (D5): deposits, loans, bonds, defaults.
-4. Promotion/demotion and migration as deterministic flows (D7). **Labour mobility within a province done (D18).** Still to do: migration between provinces, promotion, culture and religion columns, POP merge.
+4. Promotion/demotion and migration as deterministic flows (D7). **Labour mobility within a province (D18) and migration within a market (D20) done.** Still to do: migration across markets, promotion, culture and religion columns, POP merge.
 5. Share registry, investment, and firm bankruptcy (D6).
 6. Save files: initial state + command log (D10).
 7. Politics: militancy and consciousness in `Fixed`, driven by `life_needs`. **Militancy done (D19)**, without effects yet. Still to do: consciousness, rebellions, reforms.

@@ -137,6 +137,9 @@ pub struct DemographicRules {
     /// Share of a province's unemployed workers of one profession who move each
     /// month to a profession with vacancies in the same province (D18).
     pub mobility_rate: Fixed,
+    /// Share of a province's surplus workers of one profession who migrate each
+    /// month to provinces of the same market with vacancies (D20).
+    pub migration_rate: Fixed,
 }
 
 /// Monthly militancy dynamics (D19).

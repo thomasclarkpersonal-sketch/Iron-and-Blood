@@ -104,7 +104,9 @@ pub(crate) fn execute_moves(world: &mut World, layout: &PopLayout, moves: &[Move
 fn move_people(world: &mut World, rows: &[u32], dest: usize, n: u64) -> u64 {
     let sizes: Vec<i64> = rows.iter().map(|&r| world.pops.size[r as usize] as i64).collect();
     let available: i64 = sizes.iter().sum();
-    let n = n.min(available.max(0) as u64);
+    // Planning invariant: a move never exceeds the people it was planned from
+    // (unemployed ≤ workforce, surplus ≤ workforce). A violation is a planning bug.
+    assert!(n as i64 <= available, "planned move of {n} exceeds the {available} people available");
     let Some(take) = allocate_raw(n as i64, &sizes) else { return 0 };
     for (&r, m) in rows.iter().zip(take) {
         let r = r as usize;
@@ -134,4 +136,67 @@ fn weighted_mean(a: Fixed, a_size: i64, b: Fixed, b_size: i64) -> Fixed {
     Fixed::from_raw(
         ((a.raw() as i128 * a_size as i128 + b.raw() as i128 * b_size as i128) / (a_size + b_size) as i128) as i64,
     )
+}
+
+/// Month-end migration between provinces of the same market (D20).
+///
+/// For each market and worker profession, provinces whose workforce exceeds
+/// their jobs send `⌊surplus × migration_rate⌋` people to provinces of the same
+/// market with vacancies for that profession (largest vacancy first, then lowest
+/// province), never beyond a destination's vacancies. Migrants keep their
+/// profession and take their cash, through the same `execute_moves` as labour
+/// mobility, after which it runs on the workforce as it stands then. `layout`
+/// must be current (the tick passes a fresh one). Returns the number of people moved.
+pub fn migrate_within_markets(world: &mut World, layout: &PopLayout) -> u64 {
+    let rate = world.defs.rules.demographics.migration_rate;
+    if !rate.is_positive() {
+        return 0;
+    }
+    let profs = world.defs.professions.len();
+    let provinces = world.geography.province_count();
+    let mut workforce = vec![0u64; provinces * profs];
+    for i in 0..world.pops.len() {
+        workforce[world.pops.province[i] as usize * profs + world.pops.profession[i] as usize] +=
+            world.pops.size[i] as u64;
+    }
+    let mut jobs = vec![0u64; provinces * profs];
+    for i in 0..world.producers.len() {
+        let worker = world.defs.producer_types[world.producers.kind[i] as usize].worker;
+        jobs[world.producers.province[i] as usize * profs + worker] += world.producers.capacity[i] as u64;
+    }
+    let is_worker = world.defs.worker_professions();
+    let mut moves = Vec::new();
+    for market in 0..world.geography.market_count() {
+        let members: Vec<u32> =
+            (0..provinces as u32).filter(|&p| world.geography.province_market[p as usize] as usize == market).collect();
+        if members.len() < 2 {
+            continue;
+        }
+        for c in (0..profs).filter(|&c| is_worker[c]) {
+            let key = |p: u32| p as usize * profs + c;
+            let mut vacancies: Vec<(u32, u64)> = members
+                .iter()
+                .filter(|&&p| jobs[key(p)] > workforce[key(p)])
+                .map(|&p| (p, jobs[key(p)] - workforce[key(p)]))
+                .collect();
+            vacancies.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+            for &source in &members {
+                let surplus = workforce[key(source)].saturating_sub(jobs[key(source)]);
+                let mut movers = Fixed::from_int(surplus as i64).mul(rate).floor_int() as u64;
+                for (dest, open) in vacancies.iter_mut() {
+                    if movers == 0 {
+                        break;
+                    }
+                    if *dest == source || *open == 0 {
+                        continue;
+                    }
+                    let n = movers.min(*open);
+                    moves.push(Move { from: (source, c), to: (*dest, c), n });
+                    *open -= n;
+                    movers -= n;
+                }
+            }
+        }
+    }
+    execute_moves(world, layout, &moves)
 }

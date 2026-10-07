@@ -60,7 +60,12 @@ pub fn rules() -> Rules {
             militancy_tax_weight: d("0.1"),
             militancy_decay: d("0.1"),
         },
-        demographics: DemographicRules { growth_rate: d("0.01"), starvation_rate: d("0.3"), mobility_rate: d("0.2") },
+        demographics: DemographicRules {
+            growth_rate: d("0.01"),
+            starvation_rate: d("0.3"),
+            mobility_rate: d("0.2"),
+            migration_rate: d("0.1"),
+        },
     }
 }
 
