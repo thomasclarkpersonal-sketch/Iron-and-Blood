@@ -93,6 +93,18 @@ All systems are plain functions over `&mut World`, called by `tick::step` in the
 > [!IMPORTANT]
 > **Determinism:** money, prices, quantities *and all rates* are `Fixed` (D3). `tax_rate`, `literacy` and `militancy` were `f32` in earlier drafts. That is no longer allowed, because a float tax rate applied to fixed-point wealth makes money itself platform-dependent.
 
+### `DayReport` (diagnostics returned by `tick::step`, never state)
+| Field | Meaning |
+|---|---|
+| `day` | The simulated day (0-based) |
+| `goods` | Price, demand, supply and traded quantity per `[market × good]` |
+| `iterations` | Tâtonnement iterations per market |
+| `labour` | Workforce, jobs and employed per non-empty labour pool (`LabourReport`) |
+| `household_spending` | POP consumption spending (final demand; expenditure GDP in a closed economy) |
+| `input_spending` | Producer spending on inputs (intermediate consumption) |
+| `payouts` | Wages and dividends paid that day |
+| `total_money` | Outside money after the day (asserted unchanged) |
+
 ## 🔌 API Boundary (M3)
 
 `pax_server` will wrap the engine. It is server-authoritative (D10) and uses a binary protocol: FlatBuffers or Cap'n Proto, chosen at the start of M3.
