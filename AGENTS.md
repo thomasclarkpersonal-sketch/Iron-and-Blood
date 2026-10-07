@@ -37,7 +37,7 @@ Binding design decisions live in [docs/DECISIONS.md](docs/DECISIONS.md) (cited a
 ## 6. Economic Integrity (D5)
 - **Stock-flow consistency:** money is never created or destroyed except by an explicit, logged mint/burn event (none exist yet). Every transfer debits and credits the same amount.
 - **Splitting totals** (wages among POPs, revenue among sellers, cash of a splitting POP) MUST use `alloc::allocate`/`allocate_raw` (largest remainder), so parts sum exactly to the whole.
-- `tick::step` asserts conservation every day. Add a case to `crates/pax_engine/tests/conservation.rs` for every new money flow.
+- `tick::step` asserts conservation every day. Add a case to `crates/pax_engine/tests/conservation.rs` for every new money flow; extend the shared random-world generator in `crates/pax_engine/tests/common/mod.rs` rather than writing a second one.
 
 ## 7. Determinism Gate (D11)
 - `cargo run --release -p pax_cli -- verify scenarios/mini_valley` must pass.

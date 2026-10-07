@@ -22,6 +22,7 @@ pub fn is_month_end(world: &World) -> bool {
 
 pub fn update_population(world: &mut World) {
     let rules = world.defs.rules.demographics.clone();
+    let province_count = world.geography.province_count();
     let pops = &mut world.pops;
     let mut died_out = Vec::new();
     for i in 0..pops.len() {
@@ -38,14 +39,28 @@ pub fn update_population(world: &mut World) {
             died_out.push(i);
         }
     }
+    if died_out.is_empty() {
+        return;
+    }
+
+    // Heir of each province: its largest living POP, lowest row on ties. Sizes do
+    // not change while estates are settled, so one O(N) pass serves every extinct
+    // POP (previously each extinction rescanned the whole table: O(N²)).
+    let mut heir: Vec<Option<usize>> = vec![None; province_count];
+    for j in 0..pops.len() {
+        if pops.size[j] == 0 {
+            continue;
+        }
+        let slot = &mut heir[pops.province[j] as usize];
+        // Ascending rows + strict ">" keeps the lowest row among equal sizes.
+        if slot.is_none_or(|h| pops.size[j] > pops.size[h]) {
+            *slot = Some(j);
+        }
+    }
     for i in died_out {
-        let province = pops.province[i];
-        let heir = (0..pops.len())
-            .filter(|&j| pops.province[j] == province && pops.size[j] > 0)
-            .max_by(|&a, &b| pops.size[a].cmp(&pops.size[b]).then(b.cmp(&a)));
-        if let Some(heir) = heir {
+        if let Some(h) = heir[pops.province[i] as usize] {
             let estate = std::mem::take(&mut pops.cash[i]);
-            pops.cash[heir] += estate;
+            pops.cash[h] += estate;
         }
     }
 }
