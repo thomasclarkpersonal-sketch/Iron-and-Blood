@@ -53,6 +53,7 @@ docs/                Design documentation (source of truth)
 New to the project? Start with **[Onboarding](docs/ONBOARDING.md)**: a codebase tour and recipes for common changes. **[Design Decisions](docs/DECISIONS.md)** is binding and wins over any other document.
 
 * [Milestone 1](docs/MILESTONE_1.md): scope, acceptance criteria, team task list, M2 preview.
+* [Milestone 2](docs/MILESTONE_2.md): M2 status, decisions waiting on you, next tasks.
 * [System Architecture Overview](docs/ARCHITECTURE.md): engine design and the tick schedule.
 * [Backend Schema](docs/BACKEND_SCHEMA.md): workspace, SoA tables, systems.
 * [Data Format](docs/DATA_FORMAT.md): TOML definition and scenario files.
