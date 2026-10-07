@@ -46,4 +46,9 @@ fn cache_rebuilds_itself_when_inputs_change_without_invalidation() {
     world.geography.province_market[0] =
         (world.geography.province_market[0] + 1) % world.geography.market_count() as u32;
     assert_eq!(*world.pop_layout(), PopLayout::build(&world), "stale layout served after a market map change");
+    // And for a new market, which resizes the owner pools even with the map unchanged.
+    world.geography.market_keys.push("extra".into());
+    let goods = world.defs.good_count();
+    world.markets.price.extend(std::iter::repeat_n(Fixed::ONE, goods));
+    assert_eq!(*world.pop_layout(), PopLayout::build(&world), "stale layout served after adding a market");
 }
