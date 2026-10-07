@@ -25,7 +25,7 @@ use pax_engine::defs::{
     Defs, DemographicRules, FirmRules, GoodDef, MarketRules, PoliticsRules, ProducerTypeDef, ProfessionDef, Rules,
 };
 use pax_engine::world::{Geography, NewNation, NewProducer};
-use pax_engine::{Command, Fixed, World};
+use pax_engine::{Command, CommandError, Fixed, World};
 
 pub use schema::Dec;
 use schema::{CommandFile, GoodsFile, ProductionFile, ProfessionsFile, RulesFile, ScenarioFile};
@@ -106,6 +106,11 @@ impl CommandLog {
         self.by_day.is_empty()
     }
 
+    /// The last day with a command, if any. Golden replays must run past it (D11).
+    pub fn last_day(&self) -> Option<u64> {
+        self.by_day.keys().next_back().copied()
+    }
+
     pub fn len(&self) -> usize {
         self.by_day.values().map(Vec::len).sum()
     }
@@ -123,7 +128,6 @@ pub fn parse_commands(world: &World, text: &str) -> Result<CommandLog, LoadError
             continue;
         };
         let rate = c.rate.0;
-        errors.check(in_range(rate, Fixed::ZERO, Fixed::ONE), || format!("{ctx}: rate must be in [0, 1]"));
         let command = match c.kind.as_str() {
             "set_income_tax" => Command::SetIncomeTax { nation, rate },
             "set_transfer_rate" => Command::SetTransferRate { nation, rate },
@@ -135,6 +139,13 @@ pub fn parse_commands(world: &World, text: &str) -> Result<CommandLog, LoadError
                 continue;
             }
         };
+        // The engine's own rule decides validity (World::validate). Commands of
+        // the same log don't interact today (each sets one rate), so validating
+        // against the initial world is exact.
+        if let Err(e) = world.validate(command) {
+            errors.0.push(format!("{ctx}: {e}"));
+            continue;
+        }
         log.by_day.entry(c.day).or_default().push(command);
     }
     errors.finish(log)
@@ -489,23 +500,32 @@ fn build_world(defs: Arc<Defs>, s: &ScenarioFile) -> Result<World, LoadError> {
     Ok(world)
 }
 
-/// Runs `days` ticks applying `log`'s commands, returning the state hash after
-/// each day: the determinism harness for scenarios with command logs (D11, D21).
+/// Advances one day, applying `log`'s commands for that day: the single
+/// replay step used by `pax_cli` and by tests (D21).
 ///
-/// # Panics
-/// If a logged command is rejected. A logged command is part of the game, so a
-/// rejection means the log and the scenario disagree.
-pub fn run_logged(world: &mut World, log: &CommandLog, days: u64) -> Vec<u64> {
+/// Returns the day's report and every rejection, as `(command, error)`.
+/// Logs are validated when loaded, so a rejection means the log and the world
+/// disagree. The day runs either way; each caller decides whether that is
+/// fatal (the harness: yes; the interactive CLI: warn).
+pub fn step_logged(world: &mut World, log: &CommandLog) -> (pax_engine::DayReport, Vec<(Command, CommandError)>) {
+    let commands = log.for_day(world.day);
+    let (report, results) = pax_engine::tick::step_with(world, commands);
+    let rejected = commands.iter().zip(results).filter_map(|(&c, r)| r.err().map(|e| (c, e))).collect();
+    (report, rejected)
+}
+
+/// Runs `days` ticks with [`step_logged`], returning the state hash after each
+/// day: the determinism harness for scenarios with command logs (D11, D21).
+/// Any rejection is fatal here: a golden replay must apply its whole log.
+pub fn run_logged(world: &mut World, log: &CommandLog, days: u64) -> Result<Vec<u64>, String> {
     (0..days)
         .map(|_| {
             let day = world.day;
-            let (_, results) = pax_engine::tick::step_with(world, log.for_day(day));
-            for r in results {
-                if let Err(e) = r {
-                    panic!("command on day {day} rejected: {e}");
-                }
+            let (_, rejected) = step_logged(world, log);
+            if let Some((c, e)) = rejected.first() {
+                return Err(format!("command {c:?} on day {day} rejected: {e}"));
             }
-            world.state_hash()
+            Ok(world.state_hash())
         })
         .collect()
 }

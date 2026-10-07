@@ -199,7 +199,8 @@ All parsing lives in `pax_data`, so the format can change without touching the e
 ## D11. Determinism harness and golden files
 
 - `tick::run` returns a stable FNV-1a hash of all state after each day (`World::state_hash`). It does not use `DefaultHasher`, which is not stable across Rust versions.
-- `scenarios/*/golden.hashes` pins one year of hashes. CI runs `pax_cli verify` at 1 and 4 threads on Linux, and on Windows and macOS.
+- `scenarios/*/golden.hashes` pins **at least one year** of hashes, and for scenarios with a command log (D21) **at least past the last logged command**. `pax_data::golden::min_days` defines that minimum. `pax_cli record` refuses to write less and `pax_cli verify` rejects less. `two_states` pins 730 days.
+- `pax_cli record` keeps an existing golden file's length unless `--days` is given, so re-recording never silently drops coverage. A golden file that exists but can't be read is an error, not a fallback. CI runs `pax_cli verify` at 1 and 4 threads on Linux, and on Windows and macOS.
 - Tests also check: same input gives same hashes; results are identical at 1/2/3/8 threads; resuming from a snapshot matches a continuous run.
 - **Any change that alters simulation results must re-record the golden file in the same PR**, and say so in the description. Unexpected golden diffs are bugs.
 
@@ -313,7 +314,10 @@ The state → national → sphere → global roll-up in the old ECONOMY_SYSTEM w
 - **`pax_engine::Command`** is the only way the outside world changes state during a game.
   - Commands so far: `SetIncomeTax`, `SetTransferRate`, `SetConsumptionRate`.
   - Rates are `Fixed` (D3); a command never carries a float.
-- **Validation first:** `World::apply` validates and then applies. A rejected command (`CommandError`: unknown nation, rate outside [0, 1], consumption without a basket) changes nothing.
+- **Validation first:** `World::validate` is the **only** definition of command validity (`CommandError`: unknown nation, rate outside [0, 1], consumption without a basket).
+  - `World::apply` calls it and then applies, so a rejected command changes nothing.
+  - Loaders call it on each logged command against the scenario's initial world.
+  - New checks belong in `validate`, never in `apply`, so load-time and replay-time validity can't drift apart.
 - **Timing:** `tick::step_with(world, commands)` applies commands at the **start** of a tick, in the given order, before any system (D4).
   - With several players, the order is `(tick, player, sequence)` (D10). The server will build that order; the engine only sees an ordered slice.
 - **Command logs:** a game is its initial state plus its command log.

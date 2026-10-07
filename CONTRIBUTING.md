@@ -1,5 +1,7 @@
 # Contributing
 
+New here? Read [docs/ONBOARDING.md](docs/ONBOARDING.md) first.
+
 ## Setup
 
 The toolchain is pinned in `rust-toolchain.toml`; `rustup` installs it automatically. Develop inside WSL or Linux.
@@ -15,6 +17,7 @@ cargo run --release -p pax_cli -- run scenarios/mini_valley --days 365
 ```bash
 cargo fmt --all
 cargo clippy --all-targets --release -- -D warnings
+RUSTDOCFLAGS="-D warnings" cargo doc --no-deps
 cargo test --all
 cargo run --release -p pax_cli -- verify scenarios/mini_valley
 ```
