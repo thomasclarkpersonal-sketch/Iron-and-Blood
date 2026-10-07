@@ -265,6 +265,9 @@ pub fn parse_defs(src: &DefSources<'_>) -> Result<Defs, LoadError> {
     errors.check(in_range(r.demographics.starvation_rate.0, Fixed::ZERO, Fixed::ONE), || {
         "rules.demographics: starvation_rate must be in [0, 1]".into()
     });
+    errors.check(in_range(r.demographics.mobility_rate.0, Fixed::ZERO, Fixed::ONE), || {
+        "rules.demographics: mobility_rate must be in [0, 1]".into()
+    });
     for g in &goods {
         errors.check(in_range(g.base_price, m.price_floor.0, m.price_ceiling.0), || {
             format!("good '{}': base_price outside price_floor..price_ceiling", g.key)
@@ -293,6 +296,7 @@ pub fn parse_defs(src: &DefSources<'_>) -> Result<Defs, LoadError> {
         demographics: DemographicRules {
             growth_rate: r.demographics.growth_rate.0,
             starvation_rate: r.demographics.starvation_rate.0,
+            mobility_rate: r.demographics.mobility_rate.0,
         },
     };
 

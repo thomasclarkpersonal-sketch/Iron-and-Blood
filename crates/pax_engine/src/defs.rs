@@ -134,6 +134,9 @@ pub struct DemographicRules {
     pub growth_rate: Fixed,
     /// Monthly decline at zero life-needs satisfaction (scaled linearly).
     pub starvation_rate: Fixed,
+    /// Share of a province's unemployed workers of one profession who move each
+    /// month to a profession with vacancies in the same province (D18).
+    pub mobility_rate: Fixed,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

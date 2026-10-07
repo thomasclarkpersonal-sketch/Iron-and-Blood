@@ -103,7 +103,8 @@ All systems are plain functions over `&mut World`, called by `tick::step` in the
    - The concurrency rule (AGENTS.md §3) is satisfied by construction: no POP ever touches shared market state.
 4. **`firms::pay_wages_and_dividends`.** Value-added smoothing, sticky wages, then wage and dividend transfers with income tax withheld (D15).
 4b. **`government::pay_transfers`.** Each nation pays `treasury × transfer_rate` to its POPs, split by size.
-5. **`demographics::update_population`** (month end). Growth or starvation from `life_needs`; the estate of an extinct POP passes to an heir.
+5. **`mobility::reassign_workers`** (month end). Unemployed workers move to vacancies in their province, taking their share of cash (D18).
+6. **`demographics::update_population`** (month end). Growth or starvation from `life_needs`; the estate of an extinct POP passes to an heir.
 
 > [!IMPORTANT]
 > **Determinism:** money, prices, quantities *and all rates* are `Fixed` (D3). `tax_rate`, `literacy` and `militancy` were `f32` in earlier drafts. That is no longer allowed, because a float tax rate applied to fixed-point wealth makes money itself platform-dependent.
@@ -120,6 +121,7 @@ All systems are plain functions over `&mut World`, called by `tick::step` in the
 | `payouts` | Gross wages and dividends paid that day, and the income tax withheld from them |
 | `transfers` | Paid from treasuries to POPs that day |
 | `government_spending` | Paid from treasuries for goods that day (D16) |
+| `moved` | People who changed profession that day (month end only, D18) |
 | `life_needs` | Life-needs coverage at the market: people, deprived, weighted mean (`LifeNeedsSummary`) |
 | `total_money` | Outside money after the day (asserted unchanged) |
 

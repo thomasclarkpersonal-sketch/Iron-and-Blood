@@ -9,7 +9,8 @@
 //! | 3 | market: orders → price discovery → settlement | daily |
 //! | 4 | firms: wages and dividends, income tax withheld | daily |
 //! | 4b | government: transfers from treasuries to POPs | daily |
-//! | 5 | demographics | month end |
+//! | 5 | mobility: unemployed workers move to vacancies (D18) | month end |
+//! | 6 | demographics | month end |
 //!
 //! Weekly systems (promotion, migration) and monthly politics slot in after
 //! step 4 when they are implemented.
@@ -18,7 +19,7 @@ use crate::fixed::Fixed;
 use crate::systems::firms::Payouts;
 use crate::systems::labor::LabourReport;
 use crate::systems::market::{GoodReport, LifeNeedsSummary};
-use crate::systems::{demographics, firms, government, labor, market, production};
+use crate::systems::{demographics, firms, government, labor, market, mobility, production};
 use crate::world::World;
 
 /// Diagnostics produced by one day. Not part of the simulation state.
@@ -44,6 +45,8 @@ pub struct DayReport {
     pub transfers: Fixed,
     /// Paid from treasuries for government consumption today (D16).
     pub government_spending: Fixed,
+    /// People who changed profession today (month end only, D18).
+    pub moved: u64,
     pub total_money: Fixed,
 }
 
@@ -62,7 +65,9 @@ pub fn step(world: &mut World) -> DayReport {
     let outcome = market::clear_markets(world, &layout);
     let payouts = firms::pay_wages_and_dividends(world, &layout, &outcome.revenue, &outcome.input_cost);
     let transfers = government::pay_transfers(world, &layout);
+    let mut moved = 0;
     if demographics::is_month_end(world) {
+        moved = mobility::reassign_workers(world, &labour);
         demographics::update_population(world);
     }
 
@@ -77,6 +82,7 @@ pub fn step(world: &mut World) -> DayReport {
         life_needs: outcome.life_needs,
         transfers,
         government_spending: outcome.government_spending,
+        moved,
         goods: outcome.goods,
         iterations: outcome.iterations,
         labour,

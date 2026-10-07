@@ -55,7 +55,7 @@ pub fn rules() -> Rules {
             target_stock_days: 2,
             subsistence_wage_multiple: d("1.5"),
         },
-        demographics: DemographicRules { growth_rate: d("0.01"), starvation_rate: d("0.3") },
+        demographics: DemographicRules { growth_rate: d("0.01"), starvation_rate: d("0.3"), mobility_rate: d("0.2") },
     }
 }
 

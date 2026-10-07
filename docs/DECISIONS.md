@@ -27,6 +27,7 @@ To change a decision, edit its entry in the same pull request as the code. Say w
 | [D14](#d14-market-hierarchy-and-inter-market-trade) | Market hierarchy | Accepted (principle), M2 |
 | [D15](#d15-nations-treasuries-income-tax-and-transfers) | Nations and fiscal policy | Accepted (M2-1) |
 | [D16](#d16-government-consumption) | Government consumption | Accepted (M2-2) |
+| [D18](#d18-labour-mobility) | Labour mobility | Accepted (M2-4) |
 
 ---
 
@@ -102,7 +103,7 @@ To change a decision, edit its entry in the same pull request as the code. Say w
 | 3 | Market: orders (households, producers' inputs, governments D16) → price discovery → settlement | daily |
 | 4 | Firms: wages, dividends (income tax withheld, D15) | daily |
 | 4b | Government: transfers from treasuries to POPs (D15) | daily |
-| 5 | *(M2)* Promotion/demotion, migration | weekly (day 7, 14, …) |
+| 5 | Labour mobility: unemployed workers move to vacancies (D18); *(M2)* promotion, migration | month end |
 | 6 | *(M2)* Politics: militancy, consciousness | month end |
 | 7 | Demographics | month end |
 
@@ -256,4 +257,22 @@ The state → national → sphere → global roll-up in the old ECONOMY_SYSTEM w
 - **Settlement:** the treasury pays `q × p` to the sellers through the normal receipts split. The goods are consumed, standing in for administration and public works. Money is conserved; goods leave the economy.
 - **Reporting:** `DayReport::government_spending`. `pax_cli report` counts it in GDP (C + G).
 - **Later (M2+):** state-employed POPs (bureaucrats, soldiers) and military upkeep (MILITARY_SYSTEM.md) will replace the abstract basket with real demand.
+
+## D18. Labour mobility
+
+**Accepted (M2-4).** The first deterministic population flow (D7), within a province.
+
+- **When:** at month end, before demographics (D4 step 5), using the day's labour report.
+- **Who:** *worker professions* only, meaning professions that some producer type employs. Owner professions don't take jobs.
+- **Rule, per province:**
+  - Destinations are worker professions with vacancies (`jobs − workforce > 0`), ordered by vacancy (descending), then profession.
+  - Each worker profession with unemployment sends `⌊unemployed × mobility_rate⌋` people to the destinations in that order, never beyond a destination's vacancies.
+- **Accounting (D7):**
+  - Movers leave their POP rows pro rata to size (largest remainder) and take `cash × movers / size`, split exactly.
+  - They join the first POP row of the destination profession in the province, creating one if needed (through `push_pop`, which keeps the layout cache valid).
+  - The destination's `life_needs` becomes the size-weighted mean.
+  - Population and money are conserved, and tested.
+- **Tuning:** `demographics.mobility_rate` in `rules.toml`. `mini_valley`'s frozen definitions use 0, which keeps it a pure regression fixture.
+- **What it does not fix:** unemployment caused by *total* job capacity lagging population. That needs investment (new and expanding producers), a later M2 item.
+- **Later:** migration between provinces (weighted by `τ`, MAP_AND_LOGISTICS.md), promotion to higher strata (literacy, D7), culture and religion.
 

@@ -63,6 +63,9 @@ If a market is short, every buyer receives the same fraction of what it asked fo
 - `ΔN = ⌊N × rate⌋`, a deterministic flow with no dice rolls.
 - Cash is unchanged: survivors inherit. If a POP dies out, its cash passes to the largest living POP in the same province, so money is never destroyed (D5).
 
+## 🔀 Labour Mobility (D18)
+Each month, within a province, unemployed workers move to professions with vacancies, taking their share of cash with them. See [DECISIONS.md D18](DECISIONS.md#d18-labour-mobility). Migration between provinces and promotion to higher strata come later.
+
 ## 🧮 Merging and Splitting (M2)
 
 Merging and splitting keep the number of POP rows bounded:
