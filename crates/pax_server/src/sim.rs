@@ -29,7 +29,7 @@ use crate::view::{self, CheckedSubscription, DayViews, Subscription};
 
 /// How many `DayUpdate`s a session may have unacknowledged (D23). While its window is
 /// full the server keeps simulating but sends that session nothing. When the session
-/// acknowledges, it gets only the latest day, with `skipped` counting the rest.
+/// acknowledges, it gets only the latest day, with `skipped` counting the days it missed.
 pub(crate) const UPDATE_WINDOW: usize = 3;
 
 /// Days per real second at each speed (D23). `None` for paused; a zero interval for
@@ -56,8 +56,9 @@ struct Session {
     seat: Option<Seat>,
     /// Days of the `DayUpdate`s sent and not yet acknowledged, oldest first.
     in_flight: VecDeque<u64>,
-    /// Days that ran while the window was full: the next update reports them as `skipped`.
-    skipped: u32,
+    /// Days that ran since this session's last update, the current day included.
+    /// The next update reports all but the current day as `skipped`.
+    days_since_update: u32,
 }
 
 /// Who a welcomed session plays.
@@ -72,7 +73,10 @@ struct Seat {
 #[derive(Clone, Copy, Debug)]
 struct Pending {
     session: u64,
+    /// The stamp, assigned by the server on arrival (D10, D22): commands apply in
+    /// `(player, sequence)` order within their day, never in raw arrival order.
     player: u16,
+    sequence: u64,
     client_seq: u32,
     command: Command,
 }
@@ -98,8 +102,13 @@ pub(crate) struct Sim {
     speed: wire::Speed,
     /// When the next tick is due; `None` while paused.
     next_tick: Option<Instant>,
-    /// Commands for the next tick, in stamp order: `(day, player, sequence)` (D10).
+    /// Commands accepted for the next tick, each stamped `(player, sequence)` on
+    /// arrival. `tick` applies them sorted by that stamp (D10's `(day, player,
+    /// sequence)`; all of them are for the same day).
     pending: Vec<Pending>,
+    /// The next command's `sequence`: increases for the whole game, so it orders a
+    /// player's commands as the server received them.
+    next_sequence: u64,
     /// Every command that applied, in application order.
     log: Vec<Logged>,
 }
@@ -114,6 +123,7 @@ impl Sim {
             speed: wire::Speed::Paused,
             next_tick: None,
             pending: Vec::new(),
+            next_sequence: 0,
             log: Vec::new(),
         }
     }
@@ -208,7 +218,9 @@ impl Sim {
         if let Err(e) = self.game.world().validate(command) {
             return self.command_result(session, client_seq, commands::error_to_wire(&e));
         }
-        self.pending.push(Pending { session, player: seat.player, client_seq, command });
+        let sequence = self.next_sequence;
+        self.next_sequence += 1;
+        self.pending.push(Pending { session, player: seat.player, sequence, client_seq, command });
         self.command_result(session, client_seq, wire::CommandError::None);
     }
 
@@ -237,7 +249,7 @@ impl Sim {
         while s.in_flight.front().is_some_and(|&d| d <= day) {
             s.in_flight.pop_front();
         }
-        if s.skipped > 0 && s.in_flight.len() < UPDATE_WINDOW {
+        if s.days_since_update > 0 && s.in_flight.len() < UPDATE_WINDOW {
             send_update(s, &self.game.views(), self.speed);
         }
     }
@@ -249,6 +261,9 @@ impl Sim {
     pub(crate) fn tick(&mut self) {
         let day = self.game.world().day;
         let scripted = self.game.scenario().commands.for_day(day).to_vec();
+        // Stamp order, by construction: arrival order between players is a network
+        // race, so it must never decide the order commands apply in.
+        self.pending.sort_by_key(|p| (p.player, p.sequence));
         let mut commands = scripted.clone();
         commands.extend(self.pending.iter().map(|p| p.command));
         let results = self.game.step(&commands);
@@ -277,7 +292,7 @@ impl Sim {
             if s.seat.is_none() {
                 continue;
             }
-            s.skipped += 1;
+            s.days_since_update += 1;
             if s.in_flight.len() < UPDATE_WINDOW {
                 due.push(id);
             }
@@ -308,7 +323,7 @@ impl Sim {
                     subscription: CheckedSubscription::default(),
                     seat: None,
                     in_flight: VecDeque::new(),
-                    skipped: 0,
+                    days_since_update: 0,
                 };
                 self.sessions.insert(session, session_state);
             }
@@ -361,11 +376,12 @@ impl Sim {
 }
 
 /// Sends `s` an update for the current day and puts it in the session's window.
-/// `skipped` counts the days that ran since its last update, apart from today's.
+/// `skipped` counts the days that ran since its last update, apart from the current one,
+/// which this update shows: `days_since_update - 1`.
 fn send_update(s: &mut Session, views: &DayViews<'_>, speed: wire::Speed) {
-    let frame = view::day_update(views, &s.subscription, speed, s.skipped.saturating_sub(1));
+    let frame = view::day_update(views, &s.subscription, speed, s.days_since_update.saturating_sub(1));
     s.in_flight.push_back(views.world.day);
-    s.skipped = 0;
+    s.days_since_update = 0;
     s.conn.send(Outbound::Frame(frame));
 }
 
@@ -373,43 +389,32 @@ fn send_update(s: &mut Session, views: &DayViews<'_>, speed: wire::Speed) {
 /// sleep until the next event or the next tick. Draining first means input is never
 /// starved, even at `Fastest`.
 pub(crate) fn run(sim: &mut Sim, inbound: Receiver<Inbound>) {
-    'run: loop {
-        loop {
-            match inbound.try_recv() {
-                Ok(event) => {
-                    if !sim.handle(event) {
-                        break 'run;
-                    }
+    loop {
+        let event = match inbound.try_recv() {
+            Ok(event) => event,
+            Err(TryRecvError::Disconnected) => break,
+            // Nothing waiting: tick if due, otherwise sleep until an event or the tick.
+            Err(TryRecvError::Empty) => match sim.next_tick {
+                Some(due) if Instant::now() >= due => {
+                    sim.advance();
+                    // Keep the cadence, but never schedule in the past after a slow tick.
+                    let interval = tick_interval(sim.speed).unwrap_or_default();
+                    sim.next_tick = sim.next_tick.map(|_| (due + interval).max(Instant::now()));
+                    continue;
                 }
-                Err(TryRecvError::Empty) => break,
-                Err(TryRecvError::Disconnected) => break 'run,
-            }
-        }
-        let now = Instant::now();
-        match sim.next_tick {
-            Some(due) if now >= due => {
-                sim.advance();
-                // Keep the cadence, but never schedule in the past after a slow tick.
-                let interval = tick_interval(sim.speed).unwrap_or_default();
-                sim.next_tick = sim.next_tick.map(|_| (due + interval).max(Instant::now()));
-            }
-            Some(due) => match inbound.recv_timeout(due - now) {
-                Ok(event) => {
-                    if !sim.handle(event) {
-                        break;
-                    }
-                }
-                Err(RecvTimeoutError::Timeout) => {}
-                Err(RecvTimeoutError::Disconnected) => break,
+                Some(due) => match inbound.recv_deadline(due) {
+                    Ok(event) => event,
+                    Err(RecvTimeoutError::Timeout) => continue,
+                    Err(RecvTimeoutError::Disconnected) => break,
+                },
+                None => match inbound.recv() {
+                    Ok(event) => event,
+                    Err(_) => break,
+                },
             },
-            None => match inbound.recv() {
-                Ok(event) => {
-                    if !sim.handle(event) {
-                        break;
-                    }
-                }
-                Err(_) => break,
-            },
+        };
+        if !sim.handle(event) {
+            break;
         }
     }
     // Close every remaining connection (e.g. a rejected client that stayed connected).
@@ -592,5 +597,24 @@ mod tests {
         sim.handle(Inbound::Request { session: SESSION, request: Request::SetSpeed { speed: wire::Speed::Fast } });
         sim.handle(Inbound::Closed { session: SESSION });
         assert_eq!((sim.speed, sim.next_tick), (wire::Speed::Paused, None));
+    }
+
+    /// D10: within a day, commands apply in `(player, sequence)` order, whatever
+    /// order they arrived in (arrival order between players is a network race).
+    #[test]
+    fn commands_apply_in_stamp_order_not_arrival_order() {
+        let (mut sim, _rx) = welcomed(None);
+        let rate = |raw| Command::SetIncomeTax { nation: 0, rate: Fixed::from_raw(raw) };
+        // Player 1's command arrives first; player 0's two follow.
+        for (player, raw) in [(1, 100_000), (0, 110_000), (0, 120_000)] {
+            let sequence = sim.next_sequence;
+            sim.next_sequence += 1;
+            sim.pending.push(Pending { session: SESSION, player, sequence, client_seq: 0, command: rate(raw) });
+        }
+        sim.tick();
+        let applied: Vec<_> = sim.log().iter().map(|l| (l.player, l.command)).collect();
+        assert_eq!(applied, [(Some(0), rate(110_000)), (Some(0), rate(120_000)), (Some(1), rate(100_000))]);
+        // The last command in stamp order wins: player 1's.
+        assert_eq!(sim.game.world().nations.income_tax_rate[0], Fixed::from_raw(100_000));
     }
 }

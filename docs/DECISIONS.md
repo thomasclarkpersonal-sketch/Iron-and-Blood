@@ -397,6 +397,7 @@ The state → national → sphere → global roll-up in the old ECONOMY_SYSTEM w
   - Outbound: 256 frames per connection. A full outbound queue disconnects the client.
 - **Speed:** paused, or speeds 1–5 at 0.5, 1, 2 and 5 days per second, and as fast as the tick allows (about 10 days/s at the D13 budget). Speed and pause are **server controls, not engine commands**: they change no results, so they appear in neither the command log nor the state hash.
 - **Command order within a tick:** the scenario's own scripted commands for the day (`commands.toml`) apply first, then players' commands in stamp order `(day, player, sequence)` (D10). The applied-command log holds both kinds, with scripted commands marked as having no player. Saves are built from this log (below).
+- **Replays apply the saved log alone.** The scenario's scripted commands for logged days are in it, so a replay never applies `commands.toml` again for those days. Scripted commands for later days still come from the scenario. The tick and the save loader therefore apply each command exactly once.
 - **The clock stops when the player leaves.** When the welcomed session closes, the server pauses; a game never runs unobserved.
 - **Flow control:** each client may have at most 3 unacknowledged `DayUpdate`s.
   - While its window is full, the server keeps simulating but sends that client nothing.
