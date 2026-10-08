@@ -133,3 +133,48 @@ pub fn province_pops(world: &World, province: u32) -> Vec<ProfessionGroup> {
     groups.retain(|g| g.people > 0);
     groups
 }
+
+impl ProvinceStats {
+    /// People per nation: each province counts toward the nation owning its market
+    /// (D7: ownership is derived from geography, never stored on POPs). Provinces of
+    /// stateless markets count toward none.
+    pub fn population_by_nation(&self, world: &World) -> Vec<u64> {
+        let mut population = vec![0u64; world.nations.len()];
+        for (province, &people) in self.population.iter().enumerate() {
+            if let Some(nation) = world.geography.nation_of_market(world.market_of_province(province as u32)) {
+                population[nation] += people;
+            }
+        }
+        population
+    }
+}
+
+/// One producer as a province panel shows it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ProducerRow {
+    pub producer_type: u16,
+    pub capacity: u32,
+    pub employed: u32,
+    pub wage: Fixed,
+    pub cash: Fixed,
+}
+
+/// A province's producers, in table order. O(producers).
+pub fn province_producers(world: &World, province: u32) -> Vec<ProducerRow> {
+    let f = &world.producers;
+    (0..f.kind.len())
+        .filter(|&i| f.province[i] == province)
+        .map(|i| ProducerRow {
+            producer_type: f.kind[i],
+            capacity: f.capacity[i],
+            employed: f.employed[i],
+            wage: f.wage[i],
+            cash: f.cash[i],
+        })
+        .collect()
+}
+
+/// A province's labour pools from a day's report (`DayReport::labour`).
+pub fn province_labour(labour: &[LabourReport], province: u32) -> Vec<LabourReport> {
+    labour.iter().filter(|l| l.province == province).copied().collect()
+}

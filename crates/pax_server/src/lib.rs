@@ -16,6 +16,7 @@
 //! M3-4 to M3-6 (`docs/MILESTONE_3.md`).
 
 mod encode;
+mod game;
 mod net;
 mod request;
 mod sim;

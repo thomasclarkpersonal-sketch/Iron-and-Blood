@@ -8,27 +8,14 @@ use std::collections::BTreeMap;
 use std::sync::mpsc::Receiver;
 
 use pax_data::Scenario;
-use pax_engine::DayReport;
-use pax_engine::views::ProvinceStats;
 use pax_protocol::{PROTOCOL_MAJOR, PROTOCOL_MINOR, wire};
 use tracing::{debug, info};
 
 use crate::encode::{self, WelcomeInfo};
+use crate::game::Game;
 use crate::net::{ConnHandle, Inbound, Outbound};
 use crate::request::Request;
-use crate::view::{self, CheckedSubscription, DayViews, Subscription};
-
-/// The derived numbers every session's update shares while the world is unchanged:
-/// computed once, never per request (D22). A self-validating cache (D7, AGENTS.md §1):
-/// keyed by the world's generation, which every change to the world bumps
-/// ([`Sim::world_changed`]), and cross-checked against a fresh computation in debug
-/// builds.
-struct DayCache {
-    generation: u64,
-    stats: ProvinceStats,
-    /// `World::state_hash` (D10, D22): about 30 ms at 1M POP rows, so computed once.
-    state_hash: u64,
-}
+use crate::view::{self, CheckedSubscription, Subscription};
 
 struct Session {
     conn: ConnHandle,
@@ -50,33 +37,23 @@ struct Seat {
 }
 
 pub(crate) struct Sim {
-    scenario: Scenario,
+    game: Game,
     sessions: BTreeMap<u64, Session>,
     /// The single welcomed session (M3 is single player, D10).
     active: Option<u64>,
     /// Stop when the welcomed session leaves (the client launched this server).
     exit_when_idle: bool,
     speed: wire::Speed,
-    /// The report of the last day that ran; `None` before the first tick.
-    last_report: Option<DayReport>,
-    /// The current day's shared view inputs; see [`DayCache`].
-    day_cache: Option<DayCache>,
-    /// Bumped by every change to the world or its last report, so the cache can't
-    /// outlive what it was computed from.
-    generation: u64,
 }
 
 impl Sim {
     pub(crate) fn new(scenario: Scenario, exit_when_idle: bool) -> Self {
         Sim {
-            scenario,
+            game: Game::new(scenario),
             sessions: BTreeMap::new(),
             active: None,
             exit_when_idle,
             speed: wire::Speed::Paused,
-            last_report: None,
-            day_cache: None,
-            generation: 0,
         }
     }
 
@@ -96,43 +73,14 @@ impl Sim {
     /// Replaces the session's subscription and answers with a `DayUpdate` for the
     /// current day, so a newly opened panel fills at once, even when paused (D22).
     fn subscribe(&mut self, session: u64, requested: Subscription) {
-        let subscription = match requested.checked(&self.scenario.world) {
+        let subscription = match requested.checked(self.game.world()) {
             Ok(s) => s,
             Err(reason) => return self.goodbye(session, &reason),
         };
         let Some(s) = self.sessions.get_mut(&session) else { return };
         s.subscription = subscription;
-        let speed = self.speed;
-        let frame = view::day_update(&self.day_views(), &subscription, speed, 0);
+        let frame = view::day_update(&self.game.views(), &subscription, self.speed, 0);
         self.send(session, Outbound::Frame(frame));
-    }
-
-    /// Every change to the world (a tick, a load) must call this, so cached views
-    /// built from the old world are never served.
-    #[allow(dead_code)] // called by the tick (M3-4/5) and by loads (M3-6)
-    fn world_changed(&mut self) {
-        self.generation += 1;
-    }
-
-    /// The current views, computing the stats and the state hash the first time they're
-    /// needed and reusing them until the world changes.
-    fn day_views(&mut self) -> DayViews<'_> {
-        let world = &self.scenario.world;
-        let labour = self.last_report.as_ref().map(|r| r.labour.as_slice());
-        if self.day_cache.as_ref().is_none_or(|c| c.generation != self.generation) {
-            self.day_cache = Some(DayCache {
-                generation: self.generation,
-                stats: ProvinceStats::of(world, labour),
-                state_hash: world.state_hash(),
-            });
-        }
-        let cache = self.day_cache.as_ref().expect("filled above");
-        debug_assert_eq!(
-            cache.stats,
-            ProvinceStats::of(world, labour),
-            "stale DayCache: a world change didn't bump the generation"
-        );
-        DayViews { world, report: self.last_report.as_ref(), stats: &cache.stats, state_hash: cache.state_hash }
     }
 
     fn reject(&self, session: u64, reason: &str) {
@@ -142,7 +90,7 @@ impl Sim {
     }
 
     fn hello(&mut self, session: u64, major: u16, minor: u16, name: Option<&str>, requested_nation: Option<u32>) {
-        let nations = self.scenario.world.nations.key.len();
+        let nations = self.game.world().nations.key.len();
         if major != PROTOCOL_MAJOR {
             let reason = format!(
                 "protocol {major}.{minor} is not supported; this server speaks {PROTOCOL_MAJOR}.{PROTOCOL_MINOR}"
@@ -167,11 +115,11 @@ impl Sim {
             player: 0,
             resume_token: 0, // resuming a dropped session is M4 (D24)
             nation: requested_nation,
-            scenario: &self.scenario.name,
-            content_hash: self.scenario.content_hash,
+            scenario: &self.game.scenario().name,
+            content_hash: self.game.scenario().content_hash,
             speed: self.speed,
         };
-        self.send(session, Outbound::Frame(encode::welcome(&self.scenario.world, &info)));
+        self.send(session, Outbound::Frame(encode::welcome(self.game.world(), &info)));
     }
 
     /// Handles one inbound event. Returns `false` when the server should stop.

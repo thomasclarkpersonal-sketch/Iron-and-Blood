@@ -99,7 +99,8 @@ sequenceDiagram
 
 - **POP identity:** a POP is identified by `(province, profession)`, never by row index. Month-end compaction reorders and merges rows (D7). When culture and religion arrive, they join the identity.
 - **`state_hash`** is `World::state_hash()` after the day. The client can't verify it, and doesn't need to. It is shown in the debug overlay and written into bug reports, so a report pins the exact state and the server's command log can replay to it (D23). The server computes it once per day and shares it among sessions.
-- **Map modes:** `Nation` is drawn by the client from `StaticData`, so the server sends no values for it. `Unemployment`, `LifeNeeds` and `Militancy` are fractions in [0, 1]. `Population` is a count of people. `Price` is the price of `map_good` in each province's market.
+- **Map modes:** `Nation` is drawn by the client from `StaticData`, so the server sends no values for it.
+  - **Provinces where nobody lives** carry 0 in every mode. For `LifeNeeds`, `Militancy` and `Unemployment`, the client must read that as *no data*, not as a real 0. It can tell from the `Population` map mode or the province panel. `Unemployment`, `LifeNeeds` and `Militancy` are fractions in [0, 1]. `Population` is a count of people. `Price` is the price of `map_good` in each province's market.
 
 ## 5. Commands, ordering and flow control
 

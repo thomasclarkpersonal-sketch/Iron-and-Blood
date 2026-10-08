@@ -173,14 +173,8 @@ fn world_summary<'a>(b: &mut FlatBufferBuilder<'a>, v: &DayViews<'_>) -> WIPOffs
 }
 
 fn nation_table<'a>(b: &mut FlatBufferBuilder<'a>, v: &DayViews<'_>) -> WIPOffset<wire::NationTable<'a>> {
-    let w = v.world;
-    let n = &w.nations;
-    let mut population = vec![0u64; n.key.len()];
-    for (province, &people) in v.stats.population.iter().enumerate() {
-        if let Some(nation) = w.geography.nation_of_market(w.market_of_province(province as u32)) {
-            population[nation] += people;
-        }
-    }
+    let n = &v.world.nations;
+    let population = v.stats.population_by_nation(v.world);
     let treasury = fixeds(b, n.treasury.iter().copied());
     let income_tax_rate = fixeds(b, n.income_tax_rate.iter().copied());
     let transfer_rate = fixeds(b, n.transfer_rate.iter().copied());
@@ -275,10 +269,7 @@ fn province_detail<'a>(
         },
     );
 
-    let pools: Vec<_> = v
-        .report
-        .map(|r| r.labour.iter().filter(|l| l.province as usize == province).copied().collect())
-        .unwrap_or_default();
+    let pools = v.report.map(|r| views::province_labour(&r.labour, province as u32)).unwrap_or_default();
     let pool_profession = b.create_vector(&pools.iter().map(|l| l.profession).collect::<Vec<_>>());
     let workforce = b.create_vector(&pools.iter().map(|l| l.workforce).collect::<Vec<_>>());
     let jobs = b.create_vector(&pools.iter().map(|l| l.jobs).collect::<Vec<_>>());
@@ -293,13 +284,12 @@ fn province_detail<'a>(
         },
     );
 
-    let f = &w.producers;
-    let here: Vec<usize> = (0..f.kind.len()).filter(|&i| f.province[i] as usize == province).collect();
-    let producer_type = b.create_vector(&here.iter().map(|&i| f.kind[i]).collect::<Vec<_>>());
-    let capacity = b.create_vector(&here.iter().map(|&i| f.capacity[i]).collect::<Vec<_>>());
-    let producer_employed = b.create_vector(&here.iter().map(|&i| f.employed[i]).collect::<Vec<_>>());
-    let wage = fixeds(b, here.iter().map(|&i| f.wage[i]));
-    let producer_cash = fixeds(b, here.iter().map(|&i| f.cash[i]));
+    let rows = views::province_producers(w, province as u32);
+    let producer_type = b.create_vector(&rows.iter().map(|r| r.producer_type).collect::<Vec<_>>());
+    let capacity = b.create_vector(&rows.iter().map(|r| r.capacity).collect::<Vec<_>>());
+    let producer_employed = b.create_vector(&rows.iter().map(|r| r.employed).collect::<Vec<_>>());
+    let wage = fixeds(b, rows.iter().map(|r| r.wage));
+    let producer_cash = fixeds(b, rows.iter().map(|r| r.cash));
     let producers = wire::ProducerRows::create(
         b,
         &wire::ProducerRowsArgs {
