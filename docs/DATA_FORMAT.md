@@ -170,8 +170,7 @@ format = 1
 scenario = "scenarios/two_states"   # as the server was started
 content_hash = "0x9a1c0e5b7d2f3a11" # the scenario's content hash, hex (TOML integers are signed 64-bit)
 day = 360                           # the day the game was saved on
-snapshot = "first_war.world"        # binary snapshot of that day, next to this file (D10)
-snapshot_hash = "0x2c4e8a01f9b3d775" # its World::state_hash
+snapshot_hash = "0x2c4e8a01f9b3d775" # World::state_hash of the snapshot <name>.world (D10)
 
 [[checkpoint]]                      # World::state_hash when world.day reached `day` (every 30 days)
 day = 30
@@ -186,10 +185,16 @@ rate = 0.150000
 ```
 
 - Commands are listed in the order they applied, so days never decrease. Every command's day is before `day`.
-- Loading is refused if:
+- There is one checkpoint for each multiple of 30 up to `day`, in order.
+- Every load (`LoadGame`) refuses the save if:
   - the format is unknown;
   - the scenario's files changed (`content_hash`);
-  - any command is invalid by the engine's rule (`World::validate`, D21);
-  - a replay reaches a different state at any checkpoint.
+  - any command is invalid by the engine's rule (`World::validate`, D21), out of day order, or not before `day`;
+  - the checkpoints aren't exactly the checkpoint days up to `day`;
+  - `day` is a checkpoint day and its checkpoint differs from `snapshot_hash`;
+  - the snapshot is missing or damaged, isn't of `day` with `snapshot_hash`, or its scenario tables differ from the scenario's.
+
+  `LoadGame` doesn't replay, so beyond these checks it trusts the log.
+- **Replaying** (`pax_cli replay`, D23) makes the same checks, then re-applies the log, and refuses the save if any checkpoint, or the end state, differs.
 - Save names are 1 to 64 characters of `[A-Za-z0-9_-]`.
-- **Snapshots.** `<name>.world` is the binary world snapshot (format in `pax_data::snapshot`'s documentation). Loading reads it instead of replaying, and it must match the save's day and `snapshot_hash`. `snapshot` and `snapshot_hash` appear together or not at all. A save without them loads by replay.
+- **Snapshots.** `<name>.world`, next to `<name>.toml`, is the binary world snapshot (format in `pax_data::snapshot`'s documentation). Its name always comes from the save's, never from the file. A save without `snapshot_hash` has no snapshot, and loads by replay.

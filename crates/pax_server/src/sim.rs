@@ -279,10 +279,12 @@ impl Sim {
         self.send(session, Outbound::Frame(encode::save_list(&names)));
     }
 
-    /// Replaces the running game with a saved one (D23): replays it, verifying every
-    /// checkpoint, then pauses and sends every session a new `Welcome`, because the
-    /// scenario and its tables may differ (NETWORK_PROTOCOL §3). Commands queued for
-    /// the next tick are discarded. On any error the running game is left untouched.
+    /// Replaces the running game with a saved one (D23). `save::load` checks the
+    /// content hash and the history's consistency, then reads the snapshot, without
+    /// replaying; `pax_cli replay` is the full check. The game then pauses and every
+    /// session gets a new `Welcome`, because the scenario and its tables may differ
+    /// (NETWORK_PROTOCOL §3). Commands queued for the next tick are discarded. On any
+    /// error the running game is left untouched.
     fn load_game(&mut self, session: u64, name: Option<String>) {
         let label = name.clone().unwrap_or_default();
         let loaded = self.save_path(name.as_deref()).and_then(|path| load_from(&path));
@@ -676,8 +678,13 @@ mod tests {
                 assert_eq!(sim.game.views().state_hash, expected, "{name}: day {} differs from golden", day + 1);
             }
             assert!(sim.log().iter().all(|l| l.player.is_none()), "{name}: only scripted commands applied");
-            for &(day, hash) in sim.game.checkpoints() {
-                assert_eq!(hash, golden[day as usize - 1], "{name}: the day {day} checkpoint differs from golden");
+            for c in sim.game.checkpoints() {
+                assert_eq!(
+                    c.state_hash,
+                    golden[c.day as usize - 1],
+                    "{name}: the day {} checkpoint differs from golden",
+                    c.day
+                );
             }
         }
     }

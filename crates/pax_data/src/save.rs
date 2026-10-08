@@ -21,19 +21,26 @@
 //! ```
 //!
 //! **Snapshot** (M3-6b, D10): next to `<name>.toml`, the save writes `<name>.world`, a
-//! binary snapshot of the whole world on the saved day (`crate::snapshot`). The TOML
-//! records it:
+//! binary snapshot of the whole world on the saved day (`crate::snapshot`). Its file
+//! name always comes from the save's own name, never from the file, so a save can't
+//! point the loader anywhere else. The TOML records its hash:
 //!
 //! ```toml
-//! snapshot = "first_war.world"
-//! snapshot_hash = "0x2c4e…"           # World::state_hash of the snapshot
+//! snapshot_hash = "0x2c4e…"           # World::state_hash of first_war.world
 //! ```
 //!
-//! **Loading** ([`load`]) reloads the scenario, whose content hash must match, then
-//! reads the snapshot. It never replays, so it is fast at any game length. The
-//! snapshot must be the one the save names: its day and state hash must match. A
-//! save that names a missing or damaged snapshot is an error, never a silent
-//! fallback.
+//! **Both loaders** first check what is cheap to check without replaying:
+//! * the format, and the scenario's content hash;
+//! * every command is valid (`World::validate`), in day order, before the saved day;
+//! * the checkpoints are exactly the checkpoint days up to the saved day, in order;
+//! * if the saved day is a checkpoint day, its checkpoint equals `snapshot_hash`.
+//!
+//! Beyond that, the log is trusted until a replay checks it.
+//!
+//! **Loading** ([`load`]) then reads the snapshot. It never replays, so it is fast at
+//! any game length. The snapshot's day and state hash must match the save, and its
+//! scenario tables must equal the scenario's. A save whose snapshot is missing or
+//! damaged is an error, never a silent fallback.
 //!
 //! **Replaying** ([`load_by_replay`]) re-applies every logged command on its day,
 //! verifies every checkpoint, and, if the save has a snapshot, checks that the
@@ -69,6 +76,20 @@ pub struct SavedCommand {
     pub command: Command,
 }
 
+/// `World::state_hash` when `world.day` reached `day`, a multiple of
+/// [`CHECKPOINT_DAYS`] (D23).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Checkpoint {
+    pub day: u64,
+    pub state_hash: u64,
+}
+
+/// The checkpoint days a game saved on `day` has passed: every multiple of
+/// [`CHECKPOINT_DAYS`] from the first up to `day`.
+pub fn checkpoint_days(day: u64) -> impl Iterator<Item = u64> {
+    (1..=day / CHECKPOINT_DAYS).map(|k| k * CHECKPOINT_DAYS)
+}
+
 /// Everything a save file holds.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SaveData {
@@ -77,8 +98,8 @@ pub struct SaveData {
     pub content_hash: u64,
     /// The day the game was saved on: the save replays days `0..day`.
     pub day: u64,
-    /// `(day, World::state_hash)` pairs, in day order.
-    pub checkpoints: Vec<(u64, u64)>,
+    /// One per [`checkpoint_days`] of `day`, in day order.
+    pub checkpoints: Vec<Checkpoint>,
     /// Every applied command, in application order.
     pub commands: Vec<SavedCommand>,
 }
@@ -90,18 +111,18 @@ fn string(s: &str) -> String {
 
 impl SaveData {
     /// The save as TOML text. `world` supplies the nation keys commands are written
-    /// with; `snapshot` names the snapshot file and its state hash, if one was written.
-    pub fn to_toml(&self, world: &World, snapshot: Option<(&str, u64)>) -> String {
+    /// with; `snapshot_hash` is the snapshot's state hash, if one was written.
+    pub fn to_toml(&self, world: &World, snapshot_hash: Option<u64>) -> String {
         let mut out = String::from("# Iron and Blood save game (D23). Load it with the server's LoadGame.\n");
         let _ = writeln!(out, "format = {SAVE_FORMAT}");
         let _ = writeln!(out, "scenario = {}", string(&self.scenario.to_string_lossy()));
         let _ = writeln!(out, "content_hash = \"{:#018x}\"", self.content_hash);
         let _ = writeln!(out, "day = {}", self.day);
-        if let Some((file, hash)) = snapshot {
-            let _ = writeln!(out, "snapshot = {}\nsnapshot_hash = \"{hash:#018x}\"", string(file));
+        if let Some(hash) = snapshot_hash {
+            let _ = writeln!(out, "snapshot_hash = \"{hash:#018x}\"");
         }
-        for &(day, hash) in &self.checkpoints {
-            let _ = write!(out, "\n[[checkpoint]]\nday = {day}\nstate_hash = \"{hash:#018x}\"\n");
+        for c in &self.checkpoints {
+            let _ = write!(out, "\n[[checkpoint]]\nday = {}\nstate_hash = \"{:#018x}\"\n", c.day, c.state_hash);
         }
         for c in &self.commands {
             let (kind, nation, rate) = describe_command(&c.command);
@@ -115,20 +136,23 @@ impl SaveData {
     }
 
     /// Writes `<name>.world` (the snapshot of `world`, which must be on `self.day`),
-    /// then `<name>.toml` naming it. Both writes are atomic, and the TOML is written
-    /// last, so a reader never sees a save whose snapshot isn't complete.
+    /// then `<name>.toml` with its hash. Both writes are atomic, and the TOML is
+    /// written last, so a reader never sees a save whose snapshot isn't complete.
     pub fn write(&self, path: &Path, world: &World) -> std::io::Result<()> {
         assert_eq!(world.day, self.day, "a save's snapshot is of the saved day");
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir)?;
         }
-        let snapshot_path = path.with_extension("world");
-        let hash = crate::snapshot::write(&snapshot_path, world, self.content_hash)?;
-        let file = snapshot_path.file_name().expect("a file path").to_string_lossy().into_owned();
+        let hash = crate::snapshot::write(&snapshot_path(path), world, self.content_hash)?;
         let tmp = path.with_extension("toml.tmp");
-        std::fs::write(&tmp, self.to_toml(world, Some((&file, hash))))?;
+        std::fs::write(&tmp, self.to_toml(world, Some(hash)))?;
         std::fs::rename(&tmp, path)
     }
+}
+
+/// The snapshot of the save at `path`: `<name>.world` next to `<name>.toml`.
+pub fn snapshot_path(path: &Path) -> PathBuf {
+    path.with_extension("world")
 }
 
 #[derive(Deserialize)]
@@ -138,7 +162,6 @@ struct SaveFile {
     scenario: String,
     content_hash: String,
     day: u64,
-    snapshot: Option<String>,
     snapshot_hash: Option<String>,
     #[serde(default)]
     checkpoint: Vec<CheckpointEntry>,
@@ -231,31 +254,42 @@ fn load_with(path: &Path, replay: bool) -> Result<LoadedSave, LoadError> {
     let mut checkpoints = Vec::with_capacity(file.checkpoint.len());
     for c in &file.checkpoint {
         match hex("state_hash", &c.state_hash) {
-            Ok(hash) if c.day <= file.day && c.day.is_multiple_of(CHECKPOINT_DAYS) => checkpoints.push((c.day, hash)),
-            Ok(_) => errors.push(format!("checkpoint for day {}: not a checkpoint day up to {}", c.day, file.day)),
+            Ok(state_hash) => checkpoints.push(Checkpoint { day: c.day, state_hash }),
             Err(e) => errors.push(format!("checkpoint for day {}: {e}", c.day)),
         }
     }
-    let snapshot = match (&file.snapshot, &file.snapshot_hash) {
-        (Some(name), Some(hash)) => match hex("snapshot_hash", hash) {
-            Ok(hash) => Some((path.with_file_name(name), hash)),
-            Err(e) => {
-                errors.push(e);
-                None
-            }
-        },
-        (None, None) => None,
-        _ => {
-            errors.push("a save names `snapshot` and `snapshot_hash` together, or neither".to_owned());
+    let days: Vec<u64> = checkpoints.iter().map(|c| c.day).collect();
+    let expected: Vec<u64> = checkpoint_days(file.day).collect();
+    if errors.is_empty() && days != expected {
+        errors.push(format!(
+            "checkpoints must be for days {expected:?} (every {CHECKPOINT_DAYS} days up to day {}), not {days:?}",
+            file.day
+        ));
+    }
+    let snapshot_hash = match file.snapshot_hash.as_deref().map(|h| hex("snapshot_hash", h)).transpose() {
+        Ok(hash) => hash,
+        Err(e) => {
+            errors.push(e);
             None
         }
     };
+    // On a checkpoint day the snapshot is that checkpoint's state.
+    if let (Some(hash), Some(last)) = (snapshot_hash, checkpoints.last())
+        && last.day == file.day
+        && last.state_hash != hash
+    {
+        errors.push(format!(
+            "the checkpoint for the saved day {} ({:#018x}) disagrees with snapshot_hash ({hash:#018x})",
+            file.day, last.state_hash
+        ));
+    }
     if !errors.is_empty() {
         return Err(LoadError { messages: errors });
     }
 
+    let snapshot = snapshot_hash.map(|hash| (snapshot_path(path), hash));
     if !replay && let Some((snapshot_path, hash)) = &snapshot {
-        let world = crate::snapshot::read(snapshot_path, scenario.world.defs.clone(), content_hash)?;
+        let world = crate::snapshot::read(snapshot_path, &scenario.world, content_hash)?;
         if world.day != file.day || world.state_hash() != *hash {
             return Err(LoadError::single(format!(
                 "{} is not this save's snapshot (day {}, hash {:#018x}; the save expects day {} and {hash:#018x})",
@@ -290,7 +324,7 @@ fn load_with(path: &Path, replay: bool) -> Result<LoadedSave, LoadError> {
             return Err(LoadError::single(format!("replaying day {day}: {command:?} was rejected: {e}")));
         }
         last_report = Some(step.report);
-        if let Some(&(cp_day, hash)) = checkpoints.get(next_checkpoint)
+        if let Some(&Checkpoint { day: cp_day, state_hash: hash }) = checkpoints.get(next_checkpoint)
             && cp_day == scenario.world.day
         {
             let actual = scenario.world.state_hash();

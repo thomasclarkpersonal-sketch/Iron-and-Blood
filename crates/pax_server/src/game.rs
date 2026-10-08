@@ -6,7 +6,7 @@
 //! and rebuilds [`Today`] in the same step. So a world change that isn't logged, or that leaves the views stale,
 //! can't be written (AGENTS.md §1, D7). Saves are built from this log (D23).
 
-use pax_data::save::{CHECKPOINT_DAYS, SaveData, SavedCommand};
+use pax_data::save::{CHECKPOINT_DAYS, Checkpoint, SaveData, SavedCommand};
 use pax_data::{DayStep, Scenario};
 use pax_engine::views::ProvinceStats;
 use pax_engine::{Command, CommandError, DayReport, World};
@@ -40,9 +40,9 @@ pub(crate) struct Game {
     /// Every command that applied, in application order: the game's history (D21),
     /// and what a save is built from (D23).
     log: Vec<SavedCommand>,
-    /// `(day, World::state_hash)` each time `world.day` reached a multiple of
-    /// `CHECKPOINT_DAYS`: what saves are verified against (D23).
-    checkpoints: Vec<(u64, u64)>,
+    /// The state hash each time `world.day` reached a multiple of `CHECKPOINT_DAYS`:
+    /// what saves are verified against (D23).
+    checkpoints: Vec<Checkpoint>,
     today: Today,
 }
 
@@ -75,7 +75,7 @@ impl Game {
     }
 
     #[cfg(test)]
-    pub(crate) fn checkpoints(&self) -> &[(u64, u64)] {
+    pub(crate) fn checkpoints(&self) -> &[Checkpoint] {
         &self.checkpoints
     }
 
@@ -122,7 +122,7 @@ impl Game {
         let day = self.scenario.world.day;
         if day.is_multiple_of(CHECKPOINT_DAYS) {
             // The hash Today just computed (D10): no second pass.
-            self.checkpoints.push((day, self.today.state_hash));
+            self.checkpoints.push(Checkpoint { day, state_hash: self.today.state_hash });
         }
         rejected
     }
