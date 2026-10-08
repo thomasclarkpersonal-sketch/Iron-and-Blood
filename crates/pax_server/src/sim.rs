@@ -45,7 +45,9 @@ enum Phase {
     /// Several players, before the host starts: claims and ready marks; no commands,
     /// no clock.
     Lobby,
-    /// Several players, after the start.
+    /// Several players, after the start. One-way for now: an emptied server stays
+    /// here (paused, D23). A way back to the lobby comes with M4-5's loading through
+    /// the lobby.
     Playing,
 }
 
@@ -179,13 +181,19 @@ impl Sim {
     /// The lobby is over once the game starts (M4-2): claims and ready marks only
     /// count before it. Returns whether the request may go on.
     fn in_lobby(&self, session: u64) -> bool {
-        let notice = match self.phase {
-            Phase::Lobby => return true,
-            Phase::Playing => "the game has started",
-            Phase::SinglePlayer => "this server has no lobby",
-        };
-        self.lobby_notice(session, notice);
-        false
+        match self.phase {
+            Phase::Lobby => true,
+            Phase::Playing => {
+                self.lobby_notice(session, "the game has started");
+                false
+            }
+            // Single player never sends LobbyState (NETWORK_PROTOCOL §3.8): a lobby
+            // request is ignored there, as a refused Kick is (D24).
+            Phase::SinglePlayer => {
+                debug!(session, "ignored: single player has no lobby");
+                false
+            }
+        }
     }
 
     fn claim_nation(&mut self, session: u64, nation: Option<u32>) {
@@ -1144,14 +1152,16 @@ mod tests {
         assert!(matches!(lobby(&mut b).as_slice(), [Sent::Lobby { notice: Some(n), .. }] if n.contains("has started")));
     }
 
-    /// A single-player server has no lobby and never sends LobbyState.
+    /// A single-player server has no lobby and never sends LobbyState: lobby
+    /// requests are ignored.
     #[test]
     fn single_player_has_no_lobby() {
         let (mut sim, mut rx, _saves) = welcomed(None);
-        sim.handle(Inbound::Request { session: SESSION, request: Request::ClaimNation { nation: Some(0) } });
-        assert!(
-            matches!(drain_all(&mut rx).as_slice(), [Sent::Lobby { notice: Some(n), started: true, .. }] if n.contains("no lobby"))
-        );
+        for request in [Request::ClaimNation { nation: Some(0) }, Request::SetReady { ready: true }, Request::StartGame]
+        {
+            sim.handle(Inbound::Request { session: SESSION, request });
+        }
+        assert_eq!(drain_all(&mut rx), []);
         submit(&mut sim, 1, tax(0, 100_000));
         assert_eq!(drain_all(&mut rx), [Sent::Result { seq: 1, error: wire::CommandError::None, day: 0 }]);
     }

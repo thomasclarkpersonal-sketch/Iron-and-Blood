@@ -83,6 +83,15 @@ fn two_players_each_with_their_own_nation_view_and_permissions() {
     ));
     b.set_ready(true);
     a.set_ready(true);
+    // The two connections race: start only once the lobby shows both ready.
+    loop {
+        if let Got::Lobby { players, .. } = a.next()
+            && players.len() == 2
+            && players.iter().all(|p| p.2)
+        {
+            break;
+        }
+    }
     a.start_game();
     until_started(&mut a);
     until_started(&mut b);

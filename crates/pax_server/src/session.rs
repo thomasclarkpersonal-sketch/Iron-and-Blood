@@ -38,7 +38,8 @@ pub(crate) struct Session {
     ready: bool,
 }
 
-/// Why [`SessionTable::sit`] refused a seat.
+/// Why the session table refused a seat ([`SessionTable::sit`]) or a lobby request
+/// ([`SessionTable::claim`], [`SessionTable::set_ready`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Refusal {
     /// The server's limit of players are already playing.
