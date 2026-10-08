@@ -1,5 +1,7 @@
 //! Loader validation: bad data must be rejected with every problem reported.
 
+mod common;
+
 use std::sync::Arc;
 
 use pax_data::{DefSources, parse_defs, parse_scenario};
@@ -144,15 +146,13 @@ fn consumption_commands_need_a_basket_at_load() {
 /// paths, and different whenever any one loaded file changes.
 #[test]
 fn content_hash_is_stable_and_sensitive_to_every_file() {
-    let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let original = pax_data::load_scenario(&repo.join("scenarios/two_states")).unwrap().content_hash;
+    let original = pax_data::load_scenario(&common::repo().join("scenarios/two_states")).unwrap().content_hash;
+    let copy = common::TempScenario::copy("two_states", "content-hash");
+    let hash = || pax_data::load_scenario(&copy.dir).unwrap().content_hash;
+    assert_eq!(hash(), original, "the hash must not depend on where the files are");
 
-    // A copy elsewhere: same layout (scenario.toml says data = "../../data"), new path.
-    let tmp = std::env::temp_dir().join(format!("pax-content-hash-{}", std::process::id()));
-    let scenario = tmp.join("scenarios/two_states");
-    std::fs::create_dir_all(scenario.join("map")).unwrap();
-    std::fs::create_dir_all(tmp.join("data")).unwrap();
-    let files = [
+    // Every file the loader reads for two_states (golden.hashes isn't one of them).
+    for f in [
         "scenarios/two_states/scenario.toml",
         "scenarios/two_states/commands.toml",
         "scenarios/two_states/map/provinces.toml",
@@ -161,15 +161,8 @@ fn content_hash_is_stable_and_sensitive_to_every_file() {
         "data/professions.toml",
         "data/production.toml",
         "data/rules.toml",
-    ];
-    for f in files {
-        std::fs::copy(repo.join(f), tmp.join(f)).unwrap();
-    }
-    let hash = || pax_data::load_scenario(&scenario).unwrap().content_hash;
-    assert_eq!(hash(), original, "the hash must not depend on where the files are");
-
-    for f in files {
-        let path = tmp.join(f);
+    ] {
+        let path = copy.path(f);
         let bytes = std::fs::read(&path).unwrap();
         // A TOML comment, or bytes after a PNG's end chunk: valid files, new content.
         let mut changed = bytes.clone();
@@ -179,5 +172,4 @@ fn content_hash_is_stable_and_sensitive_to_every_file() {
         std::fs::write(&path, bytes).unwrap();
     }
     assert_eq!(hash(), original);
-    std::fs::remove_dir_all(&tmp).unwrap();
 }

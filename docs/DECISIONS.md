@@ -377,7 +377,7 @@ The state → national → sphere → global roll-up in the old ECONOMY_SYSTEM w
 - **Versioning:** `Hello` and `Welcome` carry `protocol_major`/`protocol_minor`. A major mismatch is refused.
   - Compatible changes only append fields, deprecate instead of deleting, and add union members and enum values at the end.
   - Receivers ignore unknown union members and enum values.
-- **Content and map hashes:** both are `pax_protocol::content_hash`, the one engine-free scheme the server and the client share (FNV-1a over role-keyed, length-prefixed files).
+- **Content and map hashes:** both come from `pax_content`, a crate with no dependencies, so the server's loader and the client share one scheme (FNV-1a over role-keyed, length-prefixed files). Neither side's types leak into the other: `pax_data` doesn't link `pax_protocol`, and `pax_server` remains the only crate that sees both engine and wire types.
   - `Welcome.content_hash` covers every file the scenario loader reads, maps included; saves record it too (D23).
   - `StaticData.map_hash` covers only the two map files (M3-7). The client hashes its own copy of them the same way and refuses to draw a map that doesn't match.
 - **Ids:** every id is a `uint` index into the `StaticData` tables sent in `Welcome`, fixed for the session (player ids are `ushort`). "None" is an absent optional field, never a sentinel such as `-1`, so a missing id can't be cast into a huge index. POPs are identified by `(province, profession)`, never by row index, because compaction reorders rows (D7).

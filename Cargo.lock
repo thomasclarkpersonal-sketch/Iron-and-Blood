@@ -305,11 +305,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "pax_content"
+version = "0.1.0"
+
+[[package]]
 name = "pax_data"
 version = "0.1.0"
 dependencies = [
+ "pax_content",
  "pax_engine",
- "pax_protocol",
  "png",
  "rayon",
  "serde",

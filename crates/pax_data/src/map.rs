@@ -18,8 +18,8 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
+use pax_content::ContentHash;
 use pax_engine::World;
-use pax_protocol::content_hash::ContentHash;
 use serde::Deserialize;
 
 use crate::{LoadError, parse, read};
@@ -55,7 +55,8 @@ pub struct MapData {
     /// Each province's label anchor, in scenario order.
     pub labels: Vec<[u32; 2]>,
     pub background: Option<[u8; 3]>,
-    /// [`ContentHash`] over the two map files: `StaticData.map_hash` (D22).
+    /// `pax_content::map_hash` of the two map files: `StaticData.map_hash` (D22). The
+    /// client computes the same function over its own copies.
     pub map_hash: u64,
 }
 
@@ -66,9 +67,9 @@ pub(crate) struct MapFiles {
 }
 
 impl MapFiles {
+    /// Adds the map files to the scenario's content hash, with `pax_content`'s roles.
     pub(crate) fn hash_into(&self, h: &mut ContentHash) {
-        h.file("map/provinces.toml", self.toml.as_bytes());
-        h.file("map/provinces.png", &self.png);
+        pax_content::add_map_files(h, self.toml.as_bytes(), &self.png);
     }
 }
 
@@ -167,16 +168,15 @@ pub(crate) fn load(dir: &Path, world: &World) -> Result<(MapData, MapFiles), Loa
         return Err(LoadError { messages: errors });
     }
 
+    let map_hash = pax_content::map_hash(toml.as_bytes(), &png);
     let files = MapFiles { toml, png };
-    let mut hash = ContentHash::default();
-    files.hash_into(&mut hash);
     let map = MapData {
         width,
         height,
         colors: colors.into_iter().map(|c| c.expect("checked above")).collect(),
         labels,
         background: file.background,
-        map_hash: hash.finish(),
+        map_hash,
     };
     Ok((map, files))
 }

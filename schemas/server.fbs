@@ -28,9 +28,9 @@ table StaticData {
   markets: [string];
   /// A market that no nation lists is stateless.
   nations: [NationDef];
-  /// `pax_protocol::content_hash` of the scenario's two map files
-  /// (`map/provinces.toml`, `map/provinces.png`); absent if it has no map (M3-7).
-  /// The client hashes its own copies the same way and refuses to draw on a mismatch.
+  /// `pax_content::map_hash` of the scenario's two map files (`map/provinces.toml`,
+  /// `map/provinces.png`); absent if it has no map (M3-7). The client hashes its
+  /// own copies with the same function and refuses to draw on a mismatch.
   map_hash: ulong = null;
 }
 

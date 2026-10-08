@@ -1,0 +1,15 @@
+[package]
+name = "pax_content"
+description = "Content hashing shared by the server and the client: no engine, no wire types (D22)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# No dependencies, ever: pax_data (engine side) and the client (wire side) both link
+# it, and it must not carry either side's types across (AGENTS.md section 2). CI checks this.
+[dependencies]
+
+[lints]
+workspace = true

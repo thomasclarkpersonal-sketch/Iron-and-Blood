@@ -1,6 +1,6 @@
 //! Province map validation (M3-7, DATA_FORMAT "Province map").
 
-use std::path::{Path, PathBuf};
+mod common;
 
 const SEA: [u8; 3] = [0, 0, 128];
 const RIVERLANDS: [u8; 3] = [10, 200, 10];
@@ -8,30 +8,19 @@ const COAST: [u8; 3] = [10, 150, 150];
 const DALE: [u8; 3] = [200, 150, 50];
 const PEAKS: [u8; 3] = [150, 150, 160];
 
-/// A copy of two_states (same layout, so `data = "../../data"` resolves) whose map is
-/// `pixels` (rows of colours) with `toml` as its provinces.toml.
-fn scenario_with_map(name: &str, pixels: &[&[[u8; 3]]], toml: &str) -> PathBuf {
-    let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let tmp = std::env::temp_dir().join(format!("pax-map-{}-{name}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&tmp);
-    let scenario = tmp.join("scenarios/two_states");
-    std::fs::create_dir_all(scenario.join("map")).unwrap();
-    std::fs::create_dir_all(tmp.join("data")).unwrap();
-    for f in ["scenarios/two_states/scenario.toml", "scenarios/two_states/commands.toml"] {
-        std::fs::copy(repo.join(f), tmp.join(f)).unwrap();
-    }
-    for f in ["goods", "professions", "production", "rules"] {
-        std::fs::copy(repo.join(format!("data/{f}.toml")), tmp.join(format!("data/{f}.toml"))).unwrap();
-    }
+/// A temporary copy of two_states whose map is `pixels` (rows of colours) with `toml`
+/// as its provinces.toml. Removed when dropped.
+fn scenario_with_map(name: &str, pixels: &[&[[u8; 3]]], toml: &str) -> common::TempScenario {
+    let copy = common::TempScenario::copy("two_states", &format!("map-{name}"));
     let (width, height) = (pixels[0].len() as u32, pixels.len() as u32);
-    let file = std::fs::File::create(scenario.join("map/provinces.png")).unwrap();
+    let file = std::fs::File::create(copy.dir.join("map/provinces.png")).unwrap();
     let mut encoder = png::Encoder::new(file, width, height);
     encoder.set_color(png::ColorType::Rgb);
     encoder.set_depth(png::BitDepth::Eight);
     let data: Vec<u8> = pixels.iter().flat_map(|row| row.iter().flatten().copied()).collect();
     encoder.write_header().unwrap().write_image_data(&data).unwrap();
-    std::fs::write(scenario.join("map/provinces.toml"), toml).unwrap();
-    scenario
+    std::fs::write(copy.dir.join("map/provinces.toml"), toml).unwrap();
+    copy
 }
 
 fn entry(key: &str, color: [u8; 3], label: [u32; 2]) -> String {
@@ -46,8 +35,8 @@ fn standard_toml() -> String {
         + &entry("peaks", PEAKS, [3, 0])
 }
 
-fn errors(scenario: &Path) -> String {
-    match pax_data::load_scenario(scenario) {
+fn errors(scenario: &common::TempScenario) -> String {
+    match pax_data::load_scenario(&scenario.dir) {
         Ok(_) => panic!("the map should have been refused"),
         Err(e) => e.to_string(),
     }
@@ -56,7 +45,7 @@ fn errors(scenario: &Path) -> String {
 #[test]
 fn a_valid_map_loads_with_colours_in_scenario_order() {
     let s = scenario_with_map("valid", &[&[RIVERLANDS, COAST, DALE, PEAKS], &[SEA, SEA, SEA, SEA]], &standard_toml());
-    let map = pax_data::load_scenario(&s).unwrap().map.expect("two_states names a map");
+    let map = pax_data::load_scenario(&s.dir).unwrap().map.expect("two_states names a map");
     assert_eq!((map.width, map.height, map.background), (4, 2, Some(SEA)));
     assert_eq!(map.colors, [RIVERLANDS, COAST, DALE, PEAKS]);
     assert_eq!(map.labels[3], [3, 0]);
@@ -103,7 +92,6 @@ fn a_label_must_sit_on_its_own_province() {
 
 #[test]
 fn the_shipped_two_states_map_is_valid() {
-    let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let map = pax_data::load_scenario(&repo.join("scenarios/two_states")).unwrap().map.unwrap();
+    let map = pax_data::load_scenario(&common::repo().join("scenarios/two_states")).unwrap().map.unwrap();
     assert_eq!((map.width, map.height, map.colors.len()), (640, 400, 4));
 }

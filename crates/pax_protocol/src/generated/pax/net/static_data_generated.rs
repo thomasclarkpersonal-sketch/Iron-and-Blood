@@ -109,9 +109,9 @@ impl<'a> StaticData<'a> {
     // which contains a valid value in this slot
     unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<NationDef>>>>(StaticData::VT_NATIONS, None)}
   }
-  /// `pax_protocol::content_hash` of the scenario's two map files
-  /// (`map/provinces.toml`, `map/provinces.png`); absent if it has no map (M3-7).
-  /// The client hashes its own copies the same way and refuses to draw on a mismatch.
+  /// `pax_content::map_hash` of the scenario's two map files (`map/provinces.toml`,
+  /// `map/provinces.png`); absent if it has no map (M3-7). The client hashes its
+  /// own copies with the same function and refuses to draw on a mismatch.
   #[inline]
   pub fn map_hash(&self) -> Option<u64> {
     // Safety:

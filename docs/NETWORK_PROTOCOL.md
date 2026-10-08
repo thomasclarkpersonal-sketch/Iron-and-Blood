@@ -52,7 +52,7 @@ sequenceDiagram
 1. **Hello first.** The client sends `Hello` with `protocol_major` and `protocol_minor`. A different major version gets `Rejected`. A newer or older minor version is accepted, under the evolution rules in §8.
 2. **Welcome** carries `StaticData`: the key tables (goods, professions, producer types, provinces, markets), the province→market map, and each nation with the markets it owns (a market no nation lists is stateless).
    - Every id in the protocol is an index into these tables, and the indices stay fixed for the whole session.
-   - **Map check:** the client draws the map from its own copy of the scenario's map files. It hashes them with `pax_protocol::content_hash` (roles `map/provinces.toml` and `map/provinces.png`) and compares the result with `StaticData.map_hash`. On a mismatch it shows an error rather than mislabelling provinces.
+   - **Map check:** the client draws the map from its own copy of the scenario's map files. It hashes them with `pax_content::map_hash`, the same function the server uses, and compares the result with `StaticData.map_hash`. On a mismatch it shows an error rather than mislabelling provinces.
    - `content_hash` covers every file the scenario loader reads, maps included, each keyed by its role rather than its path. It identifies the game content in logs and saves (D23).
 3. **Subscribe** replaces the whole subscription. The server immediately answers with a `DayUpdate` for the current day, even while paused, so a newly opened panel fills at once.
 4. **Daily updates** follow the flow-control rule in §5.

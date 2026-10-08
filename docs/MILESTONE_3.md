@@ -78,7 +78,7 @@ Provinces belong to scenarios, so maps do too: a scenario names its map director
 
 - **Validation:** `pax_data` checks the map at load. Every scenario province must be listed once with a unique colour, every pixel must be a listed colour or the background, and every province must own at least one pixel with its label on its own pixels.
 - **The engine never reads the image.** Adjacency, needed later for military movement and migration across markets, will be **pre-computed** from the image by a tool (AGENTS.md §5), never computed during the tick.
-- **Map hash:** `StaticData.map_hash` is the shared `pax_protocol::content_hash` of the two files, so the client can check its own copy of the map with the server's exact function. `Welcome.content_hash` covers every file, maps included (D22).
+- **Map hash:** `StaticData.map_hash` is `pax_content::map_hash` of the two files (a dependency-free crate both sides link), so the client can check its own copy of the map with the server's exact function. `Welcome.content_hash` covers every file, maps included (D22).
 
 ## Definition of done
 

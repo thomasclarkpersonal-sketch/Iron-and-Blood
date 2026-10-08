@@ -1,9 +1,13 @@
-//! Content hashing shared by the server and the client (D22): FNV-1a (64-bit) over
-//! files, each keyed by its role (not its path) and length-prefixed.
+//! `pax_content`: content hashing shared by the server and the client (D22). FNV-1a
+//! (64-bit) over files, each keyed by its role (not its path) and length-prefixed.
 //!
-//! It lives here, in the engine-free protocol crate, so the client computes it with
-//! exactly the server's scheme. `Welcome.content_hash` (every file the scenario loader
-//! reads) and `StaticData.map_hash` (just the map files the client draws) both use it.
+//! It has no dependencies. `pax_data` (the engine side) and the client bridge (the
+//! wire side) both link it, so both compute hashes with exactly one scheme, and
+//! neither side's types leak into the other (AGENTS.md §2).
+//! * `Welcome.content_hash` covers every file the scenario loader reads.
+//! * `StaticData.map_hash` covers just the map files the client draws. It is
+//!   [`map_hash`], whose file roles are defined here, once.
+//!
 //! It is deliberately separate from the engine's state hash, so changing one never
 //! silently changes the other.
 
@@ -42,6 +46,25 @@ impl ContentHash {
     }
 }
 
+/// Role of a scenario map's province table (`map/provinces.toml`, M3-7).
+pub const MAP_TOML_ROLE: &str = "map/provinces.toml";
+/// Role of a scenario map's province image (`map/provinces.png`, M3-7).
+pub const MAP_PNG_ROLE: &str = "map/provinces.png";
+
+/// Adds a scenario map's two files to `hash`, with their roles, in this order.
+pub fn add_map_files(hash: &mut ContentHash, toml: &[u8], png: &[u8]) {
+    hash.file(MAP_TOML_ROLE, toml);
+    hash.file(MAP_PNG_ROLE, png);
+}
+
+/// `StaticData.map_hash`: the hash of a scenario map's two files. The server sends
+/// it, and the client computes it over its own copies with this same function.
+pub fn map_hash(toml: &[u8], png: &[u8]) -> u64 {
+    let mut hash = ContentHash::default();
+    add_map_files(&mut hash, toml, png);
+    hash.finish()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -52,6 +75,13 @@ mod tests {
         let mut h = ContentHash::default();
         h.bytes(b"a");
         assert_eq!(h.finish(), 0xaf63_dc4c_8601_ec8c);
+    }
+
+    /// Pins the map-hash scheme (roles, order, length prefixes). If this changes,
+    /// clients built before the change refuse every map: bump the protocol.
+    #[test]
+    fn map_hash_is_pinned() {
+        assert_eq!(map_hash(b"toml", b"png"), 0x0f75_714a_66db_78ed);
     }
 
     #[test]

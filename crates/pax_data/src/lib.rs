@@ -19,7 +19,7 @@ mod schema;
 #[cfg(feature = "bench")]
 pub mod bench;
 
-use pax_protocol::content_hash::ContentHash;
+use pax_content::ContentHash;
 use std::collections::BTreeMap;
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -123,7 +123,7 @@ pub struct Scenario {
     pub world: World,
     /// Commands to apply during the run (empty if the scenario has none).
     pub commands: CommandLog,
-    /// Identifies the scenario's content: `pax_protocol::content_hash` over every file
+    /// Identifies the scenario's content: `pax_content`'s hash over every file
     /// the loader reads, each keyed by its role (not its path, so moving a directory
     /// changes nothing). It goes in `Welcome` and in saves (D22, D23). It identifies
     /// content only; it is not simulation state.
