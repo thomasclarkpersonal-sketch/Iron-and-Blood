@@ -109,6 +109,20 @@ impl Config {
         Ok(())
     }
 
+    /// A multiplayer server for `scenario` with room for `players`, with D24's
+    /// defaults: no sandbox, a fairness pause after [`PAUSE_AFTER`] of silence and a
+    /// drop after [`DROP_AFTER`] (in place of D22's 10 s). The one place those
+    /// defaults are applied; the CLI starts from here too.
+    pub fn multiplayer(scenario: impl Into<PathBuf>, players: u16) -> Self {
+        Config {
+            max_players: players,
+            sandbox: false,
+            idle_timeout: DROP_AFTER,
+            pause_after: Some(PAUSE_AFTER),
+            ..Config::local(scenario)
+        }
+    }
+
     /// A local single-player server for `scenario`, as the client launches it: one
     /// player, sandbox allowed, the protocol's 10 s timeout.
     pub fn local(scenario: impl Into<PathBuf>) -> Self {

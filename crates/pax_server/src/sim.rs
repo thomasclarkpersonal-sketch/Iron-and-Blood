@@ -343,8 +343,14 @@ impl Sim {
         // The clock waits for the game to start (M4-2).
         let permitted = speed == wire::Speed::Paused || (self.sessions.is_host(session) && self.started());
         match Clock::at(speed, Instant::now()).filter(|_| permitted) {
+            // While anyone is stalled the game waits for them (D24): a speed set now is
+            // the one it resumes at, and pausing means it stays paused when they're back.
+            Some(_) if !self.sessions.waiting_for().is_empty() => {
+                self.paused_for_fairness = (speed != wire::Speed::Paused).then_some(speed);
+                self.last_changed_by = seat.player;
+                self.sessions.broadcast(&self.server_state());
+            }
             Some(clock) => {
-                // A player's own choice ends any fairness pause: the clock is theirs now.
                 self.paused_for_fairness = None;
                 self.set_clock(clock, Some(seat.player));
             }
@@ -358,14 +364,19 @@ impl Sim {
     /// The clock as a `ServerState` frame: the speed, the player who last set it, and
     /// the players a fairness pause waits for (D24).
     fn server_state(&self) -> Vec<u8> {
-        let waiting = self.sessions.waiting_for();
+        // Only a running game waits for anyone; a silent player in the lobby holds up
+        // nothing until the game starts.
+        let waiting = if self.phase == Phase::Playing { self.sessions.waiting_for() } else { Vec::new() };
         encode::server_state(self.game.world().day, self.clock.speed(), self.last_changed_by, &waiting)
     }
 
     /// A player has been silent past the pause threshold (D24): a running game pauses
     /// for everyone, waiting for them. Only a started game with a seat counts.
+    /// The stall is recorded whatever the phase (the network reports it only once);
+    /// only a running game pauses for it. A game that starts, or is set going, while
+    /// a player is stalled waits for them the same way (`set_speed`).
     fn stalled(&mut self, session: u64) {
-        if self.phase != Phase::Playing || !self.sessions.stall(session) {
+        if !self.sessions.stall(session) || self.phase != Phase::Playing || self.sessions.seat(session).is_none() {
             return;
         }
         info!(session, "waiting for a silent player");
@@ -1352,6 +1363,24 @@ mod tests {
         event(&mut sim, Inbound::Stalled { session: 2 });
         event(&mut sim, Inbound::Closed { session: 2 });
         assert_eq!(sim.clock.speed(), wire::Speed::Fast, "the others play on (D24)");
+    }
+
+    /// A player who went silent in the lobby is still waited for once the game
+    /// starts: the network reports a stall only once, and the row keeps it (D24).
+    #[test]
+    fn a_player_silent_since_the_lobby_holds_up_the_started_game() {
+        let (mut sim, _saves) = multiplayer(2);
+        let (mut a, _) = join(&mut sim, 1, Some(0));
+        let (_b, _) = join(&mut sim, 2, Some(1));
+        sim.handle(Inbound::Request { session: 2, request: Request::SetReady { ready: true } });
+        event(&mut sim, Inbound::Stalled { session: 2 });
+        start(&mut sim, &[1]);
+        drain(&mut a);
+        speed(&mut sim, 1, wire::Speed::Fast);
+        assert_eq!(sim.clock, Clock::Paused, "the game waits for player 1");
+        assert_eq!(drain(&mut a), [Sent::Waiting(wire::Speed::Paused, vec![1])]);
+        event(&mut sim, Inbound::Resumed { session: 2 });
+        assert_eq!(sim.clock.speed(), wire::Speed::Fast, "the host's speed, once player 1 is back");
     }
 
     /// M4-4: a player who leaves a started game keeps their seat for their resume

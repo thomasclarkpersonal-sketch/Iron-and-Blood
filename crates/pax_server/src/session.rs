@@ -245,11 +245,11 @@ impl SessionTable {
         self.reserved.clear();
     }
 
-    /// Marks a seated session silent past the pause threshold (D24). Returns whether
-    /// it is newly stalled.
+    /// Marks a session silent past the pause threshold, as the network reported it
+    /// (D24), whatever the game's phase: the row mirrors the report, and the sim
+    /// decides whether it pauses anything. Returns whether it is newly stalled.
     pub(crate) fn stall(&mut self, id: u64) -> bool {
-        let Some(row) = self.rows.get_mut(&id).filter(|r| r.seat.is_some()) else { return false };
-        !std::mem::replace(&mut row.stalled, true)
+        self.rows.get_mut(&id).is_some_and(|r| !std::mem::replace(&mut r.stalled, true))
     }
 
     /// A stalled session spoke again. Returns whether it was stalled.
