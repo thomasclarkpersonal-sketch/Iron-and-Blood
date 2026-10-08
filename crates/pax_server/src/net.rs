@@ -16,7 +16,6 @@
 //! memory without limit.
 
 use std::sync::Arc;
-use std::sync::mpsc::{SyncSender, TrySendError as SyncTrySendError};
 use std::time::Duration;
 
 use pax_protocol::{Direction, FrameDecoder};
@@ -70,6 +69,15 @@ impl ConnHandle {
     }
 }
 
+#[cfg(test)]
+impl ConnHandle {
+    /// A handle whose frames the test reads from the returned receiver.
+    pub(crate) fn for_test() -> (ConnHandle, mpsc::Receiver<Outbound>) {
+        let (out, rx) = mpsc::channel(OUTBOUND_QUEUE);
+        (ConnHandle { out, kill: Arc::new(Notify::new()) }, rx)
+    }
+}
+
 /// What connections tell the sim thread.
 pub(crate) enum Inbound {
     Connected {
@@ -90,22 +98,7 @@ pub(crate) enum Inbound {
     Crash,
 }
 
-/// Hands `event` to the sim thread, waiting (without blocking the runtime) while its
-/// queue is full. `Err` once the sim thread has stopped.
-async fn to_sim(sim: &SyncSender<Inbound>, mut event: Inbound) -> Result<(), ()> {
-    loop {
-        match sim.try_send(event) {
-            Ok(()) => return Ok(()),
-            Err(SyncTrySendError::Full(back)) => {
-                event = back;
-                tokio::time::sleep(Duration::from_millis(1)).await;
-            }
-            Err(SyncTrySendError::Disconnected(_)) => return Err(()),
-        }
-    }
-}
-
-pub(crate) async fn accept_loop(listener: TcpListener, sim: SyncSender<Inbound>, idle: Duration) {
+pub(crate) async fn accept_loop(listener: TcpListener, sim: flume::Sender<Inbound>, idle: Duration) {
     let mut next_session = 1u64;
     loop {
         match listener.accept().await {
@@ -126,12 +119,14 @@ pub(crate) async fn accept_loop(listener: TcpListener, sim: SyncSender<Inbound>,
     }
 }
 
-async fn connection(stream: TcpStream, session: u64, sim: SyncSender<Inbound>, idle: Duration) {
+async fn connection(stream: TcpStream, session: u64, sim: flume::Sender<Inbound>, idle: Duration) {
     let (mut rd, mut wr) = stream.into_split();
     let (out_tx, mut out_rx) = mpsc::channel::<Outbound>(OUTBOUND_QUEUE);
     let kill = Arc::new(Notify::new());
     let conn = ConnHandle { out: out_tx.clone(), kill: kill.clone() };
-    if to_sim(&sim, Inbound::Connected { session, conn }).await.is_err() {
+    // `send_async` waits, in FIFO order and without blocking the runtime, while the
+    // sim thread's queue is full; it fails only once the sim thread has stopped.
+    if sim.send_async(Inbound::Connected { session, conn }).await.is_err() {
         return; // the server is shutting down
     }
 
@@ -193,7 +188,7 @@ async fn connection(stream: TcpStream, session: u64, sim: SyncSender<Inbound>, i
                 continue;
             }
             debug!(session, ?request, "request");
-            if to_sim(&sim, Inbound::Request { session, request }).await.is_err() {
+            if sim.send_async(Inbound::Request { session, request }).await.is_err() {
                 break 'read Some("the server is shutting down".to_owned());
             }
         }
@@ -204,7 +199,7 @@ async fn connection(stream: TcpStream, session: u64, sim: SyncSender<Inbound>, i
         let _ = out_tx.try_send(Outbound::Frame(encode::goodbye(reason)));
     }
     let _ = out_tx.try_send(Outbound::Close);
-    let _ = to_sim(&sim, Inbound::Closed { session }).await;
+    let _ = sim.send_async(Inbound::Closed { session }).await;
     // A client that isn't reading would keep the writer blocked forever.
     if tokio::time::timeout(FLUSH_TIMEOUT, &mut writer).await.is_err() {
         writer.abort();

@@ -3,6 +3,7 @@
 //! test in `pax_server/src/view.rs`).
 
 use pax_engine::World;
+use pax_engine::world::{Geography, NewProducer};
 
 /// Builds a benchmark world: the scenario's whole map copied `regions` times
 /// (separate provinces and markets), with every POP row repeated `scale` times.
@@ -16,9 +17,9 @@ pub fn replicate(base: &World, scale: u32, regions: u32) -> World {
 /// round-robin, so a 3,000-market world can have D13's few hundred nations instead
 /// of one set per region. `None` behaves exactly like [`replicate`].
 pub fn replicate_with_nations(base: &World, scale: u32, regions: u32, max_nations: Option<u32>) -> World {
+    assert!(max_nations != Some(0), "a benchmark world needs at least one nation");
     let total_nations = base.nations.len() as u32 * regions;
-    let cap = max_nations.map_or(total_nations, |c| c.clamp(1, total_nations.max(1)));
-    use pax_engine::world::{Geography, NewProducer};
+    let cap = max_nations.map_or(total_nations, |c| c.min(total_nations.max(1)));
     let g = &base.geography;
     let (provinces, markets) = (g.province_count() as u32, g.market_count() as u32);
     let mut geography = Geography::default();

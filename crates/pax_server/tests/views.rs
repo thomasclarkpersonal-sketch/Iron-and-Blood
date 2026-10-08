@@ -19,7 +19,7 @@ fn subscribe_gets_an_immediate_update_with_the_requested_views() {
     let (server, mut c) = welcomed();
     c.subscribe(MapMode::Population, 0, Some(1), Some(2));
     match c.next() {
-        Got::DayUpdate { day, population, map_values, market, province } => {
+        Got::DayUpdate { day, population, map_values, market, province, .. } => {
             assert_eq!(day, 0, "the server is paused at day 0 until M3-5");
             assert!(population > 0);
             assert_eq!((map_values, market, province), (Some(4), Some(1), Some(2)));

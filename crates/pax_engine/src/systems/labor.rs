@@ -9,6 +9,7 @@
 //! the pool's POPs (wages are later distributed by size).
 
 use crate::alloc::allocate_raw;
+use crate::defs::WorkerProfessions;
 use crate::groups::Groups;
 use crate::layout::{pool_count, pool_key, pool_of_key};
 use crate::world::World;
@@ -85,8 +86,15 @@ pub fn assign_employment(world: &mut World, pools: &Groups) -> Vec<LabourReport>
 /// used by reports and tests.
 pub fn unemployment(defs: &crate::defs::Defs, labour: &[LabourReport]) -> (u64, u64) {
     let worker = defs.worker_professions();
-    labour
-        .iter()
-        .filter(|p| worker[p.profession as usize])
-        .fold((0, 0), |(u, w), p| (u + p.unemployed(), w + p.workforce))
+    labour.iter().fold((0, 0), |(u, w), pool| {
+        let (pu, pw) = pool_unemployment(&worker, pool);
+        (u + pu, w + pw)
+    })
+}
+
+/// One pool's `(unemployed, workforce)` under [`unemployment`]'s definition, given
+/// `worker` (`Defs::worker_professions`, computed once by the caller). It is the rule
+/// itself, so per-province views can apply it in a single pass over the pools.
+pub fn pool_unemployment(worker: &WorkerProfessions, pool: &LabourReport) -> (u64, u64) {
+    if worker.contains(pool.profession as usize) { (pool.unemployed(), pool.workforce) } else { (0, 0) }
 }

@@ -1,21 +1,33 @@
 //! The sim thread (D23): the only owner of the `World`.
 //!
 //! It handles session requests in arrival order and decides everything that needs game
-//! state: the handshake (`Welcome` or `Rejected`) and subscriptions with their views.
-//! Ticking, commands and saves arrive with M3-4 to M3-6.
+//! state:
+//! * the handshake (`Welcome` or `Rejected`);
+//! * subscriptions and their views;
+//! * commands, checked, queued and applied at the start of the next tick;
+//! * the log of every command that applied (D21, D23), kept by [`Game`];
+//! * pacing: when ticks happen, at the session's chosen speed;
+//! * flow control: which updates each session is sent, kept in [`crate::window`].
+//!
+//! Saves arrive with M3-6.
 
+use flume::{Receiver, RecvTimeoutError, TryRecvError};
 use std::collections::BTreeMap;
-use std::sync::mpsc::Receiver;
+use std::time::Instant;
 
 use pax_data::Scenario;
 use pax_protocol::{PROTOCOL_MAJOR, PROTOCOL_MINOR, wire};
 use tracing::{debug, info};
 
+use crate::clock::Clock;
+use crate::commands;
 use crate::encode::{self, WelcomeInfo};
 use crate::game::Game;
 use crate::net::{ConnHandle, Inbound, Outbound};
-use crate::request::Request;
-use crate::view::{self, CheckedSubscription, Subscription};
+use crate::queue::CommandQueue;
+use crate::request::{Request, WireCommand};
+use crate::view::{self, CheckedSubscription, DayViews, Subscription};
+use crate::window::UpdateWindow;
 
 struct Session {
     conn: ConnHandle,
@@ -24,15 +36,15 @@ struct Session {
     /// point in [`Sim::handle`] drops anything else, so no request handler has to
     /// remember to check (a rejected session's queued requests never act).
     seat: Option<Seat>,
+    /// Which days' updates it is sent (D23 flow control).
+    window: UpdateWindow,
 }
 
 /// Who a welcomed session plays.
 #[derive(Clone, Copy, Debug)]
 struct Seat {
-    #[allow(dead_code)] // read by command handling (M3-4)
     player: u16,
     /// `None`: sandbox, may command every nation (M3 only, D24).
-    #[allow(dead_code)] // read by command handling (M3-4)
     nation: Option<u32>,
 }
 
@@ -43,7 +55,10 @@ pub(crate) struct Sim {
     active: Option<u64>,
     /// Stop when the welcomed session leaves (the client launched this server).
     exit_when_idle: bool,
-    speed: wire::Speed,
+    /// The speed and the next tick. Only [`Sim::set_clock`] changes the speed.
+    clock: Clock,
+    /// Commands accepted for the next tick, stamped on arrival.
+    queue: CommandQueue,
 }
 
 impl Sim {
@@ -53,7 +68,8 @@ impl Sim {
             sessions: BTreeMap::new(),
             active: None,
             exit_when_idle,
-            speed: wire::Speed::Paused,
+            clock: Clock::Paused,
+            queue: CommandQueue::default(),
         }
     }
 
@@ -68,19 +84,6 @@ impl Sim {
         info!(session, reason, "closing session");
         self.send(session, Outbound::Frame(encode::goodbye(reason)));
         self.send(session, Outbound::Close);
-    }
-
-    /// Replaces the session's subscription and answers with a `DayUpdate` for the
-    /// current day, so a newly opened panel fills at once, even when paused (D22).
-    fn subscribe(&mut self, session: u64, requested: Subscription) {
-        let subscription = match requested.checked(self.game.world()) {
-            Ok(s) => s,
-            Err(reason) => return self.goodbye(session, &reason),
-        };
-        let Some(s) = self.sessions.get_mut(&session) else { return };
-        s.subscription = subscription;
-        let frame = view::day_update(&self.game.views(), &subscription, self.speed, 0);
-        self.send(session, Outbound::Frame(frame));
     }
 
     fn reject(&self, session: u64, reason: &str) {
@@ -118,17 +121,141 @@ impl Sim {
             scenario: &self.game.scenario().name,
             content_hash: self.game.scenario().content_hash,
             map_hash: self.game.scenario().map.as_ref().map(|m| m.map_hash),
-            speed: self.speed,
+            speed: self.clock.speed(),
         };
         self.send(session, Outbound::Frame(encode::welcome(self.game.world(), &info)));
+    }
+
+    /// Replaces the session's subscription and answers with a `DayUpdate` for the
+    /// current day, so a newly opened panel fills at once, even when paused (D22).
+    /// The refresh bypasses the flow-control window: the client asked for it.
+    fn subscribe(&mut self, session: u64, requested: Subscription) {
+        let subscription = match requested.checked(self.game.world()) {
+            Ok(s) => s,
+            Err(reason) => return self.goodbye(session, &reason),
+        };
+        let Some(s) = self.sessions.get_mut(&session) else { return };
+        s.subscription = subscription;
+        s.conn.send(Outbound::Frame(view::day_update(&self.game.views(), &subscription, self.clock.speed(), 0)));
+    }
+
+    fn command_result(&self, session: u64, client_seq: u32, error: wire::CommandError) {
+        let day = if error == wire::CommandError::None { self.game.world().day } else { 0 };
+        self.send(session, Outbound::Frame(encode::command_result(client_seq, error, day)));
+    }
+
+    /// Checks a command on arrival and queues it for the start of the next tick
+    /// (NETWORK_PROTOCOL §5). The checks run in this order:
+    /// 1. well-formed;
+    /// 2. permission: the session's nation (D24; sandbox allows all);
+    /// 3. `World::validate`, the single validity rule (D21).
+    ///
+    /// Every submission gets exactly one `CommandResult` now. A second one, an error,
+    /// follows only if the command fails when it is applied.
+    fn submit(&mut self, session: u64, client_seq: u32, command: Option<WireCommand>) {
+        let Some(seat) = self.sessions.get(&session).and_then(|s| s.seat) else { return };
+        let command = match command.ok_or(wire::CommandError::Malformed).and_then(commands::to_engine) {
+            Ok(c) => c,
+            Err(e) => return self.command_result(session, client_seq, e),
+        };
+        if seat.nation.is_some_and(|n| n as usize != commands::nation_of(&command)) {
+            return self.command_result(session, client_seq, wire::CommandError::NotPermitted);
+        }
+        if let Err(e) = self.game.world().validate(command) {
+            return self.command_result(session, client_seq, commands::error_to_wire(&e));
+        }
+        self.queue.stamp(session, seat.player, client_seq, command);
+        self.command_result(session, client_seq, wire::CommandError::None);
+    }
+
+    /// A session asked for a new speed. A speed newer than this server is ignored, as
+    /// D22 requires of unknown enum values: the clock is unchanged, and the session is
+    /// told the current state so it can resynchronise.
+    fn set_speed(&mut self, session: u64, speed: wire::Speed) {
+        let Some(seat) = self.sessions.get(&session).and_then(|s| s.seat) else { return };
+        match Clock::at(speed, Instant::now()) {
+            Some(clock) => self.set_clock(clock, seat.player),
+            None => {
+                debug!(session, speed = speed.0, "ignored: unknown speed");
+                let frame = encode::server_state(self.game.world().day, self.clock.speed(), seat.player);
+                self.send(session, Outbound::Frame(frame));
+            }
+        }
+    }
+
+    /// The only place the speed changes: sets the clock and tells every welcomed
+    /// session (`ServerState`, D23).
+    fn set_clock(&mut self, clock: Clock, changed_by: u16) {
+        self.clock = clock;
+        let speed = clock.speed();
+        info!(?speed, "speed changed");
+        let frame = encode::server_state(self.game.world().day, speed, changed_by);
+        for (&id, s) in &self.sessions {
+            if s.seat.is_some() {
+                self.send(id, Outbound::Frame(frame.clone()));
+            }
+        }
+    }
+
+    /// The session processed the update for `day`: everything up to it leaves the
+    /// window. If days ran while the window was full, the latest day goes out now.
+    fn ack(&mut self, session: u64, day: u64) {
+        let Some(s) = self.sessions.get_mut(&session) else { return };
+        if s.window.ack(day) {
+            send_update(s, &self.game.views(), self.clock.speed());
+        }
+    }
+
+    /// Runs one day: the queued commands in stamp order (D10), through
+    /// [`Game::step`], which logs what applied. A player's command that fails when
+    /// applied gets a late error `CommandResult`.
+    pub(crate) fn tick(&mut self) {
+        for (p, e) in self.game.step(self.queue.take()) {
+            self.command_result(p.session, p.client_seq, commands::error_to_wire(&e));
+        }
+    }
+
+    /// Ticks, then sends each welcomed session the new day if its window has room
+    /// (D23). The views are built once and shared by all sessions.
+    fn advance(&mut self) {
+        self.tick();
+        let mut due = Vec::new();
+        for (&id, s) in &mut self.sessions {
+            if s.seat.is_none() {
+                continue;
+            }
+            if s.window.day_ran() {
+                due.push(id);
+            }
+        }
+        if !due.is_empty() {
+            // Build the views only when someone will see them.
+            let views = self.game.views();
+            for id in due {
+                if let Some(s) = self.sessions.get_mut(&id) {
+                    send_update(s, &views, self.clock.speed());
+                }
+            }
+        }
+    }
+
+    /// Every command applied so far, in application order.
+    #[cfg(test)]
+    pub(crate) fn log(&self) -> &[crate::game::Logged] {
+        self.game.log()
     }
 
     /// Handles one inbound event. Returns `false` when the server should stop.
     fn handle(&mut self, event: Inbound) -> bool {
         match event {
             Inbound::Connected { session, conn } => {
-                self.sessions
-                    .insert(session, Session { conn, subscription: CheckedSubscription::default(), seat: None });
+                let session_state = Session {
+                    conn,
+                    subscription: CheckedSubscription::default(),
+                    seat: None,
+                    window: UpdateWindow::default(),
+                };
+                self.sessions.insert(session, session_state);
             }
             Inbound::Request { session, request: Request::Hello { major, minor, name, requested_nation, .. } } => {
                 self.hello(session, major, minor, name.as_deref(), requested_nation);
@@ -141,12 +268,18 @@ impl Sim {
                 Request::Subscribe { map_mode, map_good, market, province } => {
                     self.subscribe(session, Subscription { map_mode, map_good, market, province });
                 }
-                other => debug!(session, ?other, "not handled until M3-4 to M3-6"),
+                Request::SubmitCommand { client_seq, command } => self.submit(session, client_seq, command),
+                Request::SetSpeed { speed } => self.set_speed(session, speed),
+                Request::Ack { day } => self.ack(session, day),
+                other => debug!(session, ?other, "not handled until M3-6"),
             },
             Inbound::Closed { session } => {
-                self.sessions.remove(&session);
+                let seat = self.sessions.remove(&session).and_then(|s| s.seat);
                 if self.active == Some(session) {
                     self.active = None;
+                    // Nobody is watching: stop the clock (D23 never runs a game unobserved).
+                    let player = seat.expect("the active session was welcomed").player;
+                    self.set_clock(Clock::Paused, player);
                     if self.exit_when_idle {
                         info!("the client left; exiting (--exit-when-idle)");
                         return false;
@@ -172,8 +305,38 @@ impl Sim {
     }
 }
 
+/// Sends `s` an update for the current day and puts it in the session's window.
+fn send_update(s: &mut Session, views: &DayViews<'_>, speed: wire::Speed) {
+    let skipped = s.window.sent(views.world.day);
+    s.conn.send(Outbound::Frame(view::day_update(views, &s.subscription, speed, skipped)));
+}
+
+/// The sim thread's loop: handle everything already waiting, tick if due, otherwise
+/// sleep until the next event or the next tick. Draining first means input is never
+/// starved, even at `Fastest`.
 pub(crate) fn run(sim: &mut Sim, inbound: Receiver<Inbound>) {
-    while let Ok(event) = inbound.recv() {
+    loop {
+        let event = match inbound.try_recv() {
+            Ok(event) => event,
+            Err(TryRecvError::Disconnected) => break,
+            // Nothing waiting: tick if due, otherwise sleep until an event or the tick.
+            Err(TryRecvError::Empty) => match sim.clock.due() {
+                Some(due) if Instant::now() >= due => {
+                    sim.advance();
+                    sim.clock.ticked(Instant::now());
+                    continue;
+                }
+                Some(due) => match inbound.recv_deadline(due) {
+                    Ok(event) => event,
+                    Err(RecvTimeoutError::Timeout) => continue,
+                    Err(RecvTimeoutError::Disconnected) => break,
+                },
+                None => match inbound.recv() {
+                    Ok(event) => event,
+                    Err(_) => break,
+                },
+            },
+        };
         if !sim.handle(event) {
             break;
         }
@@ -182,5 +345,220 @@ pub(crate) fn run(sim: &mut Sim, inbound: Receiver<Inbound>) {
     for session in sim.sessions.values() {
         session.conn.send(Outbound::Frame(encode::goodbye("the server is shutting down")));
         session.conn.send(Outbound::Close);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pax_engine::{Command, Fixed};
+    use pax_protocol::read_server_message;
+    use tokio::sync::mpsc::Receiver;
+
+    const SESSION: u64 = 1;
+
+    /// What the sim thread sent a session, decoded.
+    #[derive(Debug, PartialEq)]
+    enum Sent {
+        Welcome,
+        Rejected,
+        Goodbye(String),
+        Result { seq: u32, error: wire::CommandError, day: u64 },
+        Update { day: u64, skipped: u32 },
+        State(wire::Speed),
+        Close,
+    }
+
+    fn drain(rx: &mut Receiver<Outbound>) -> Vec<Sent> {
+        let mut out = Vec::new();
+        while let Ok(o) = rx.try_recv() {
+            out.push(match o {
+                Outbound::Close => Sent::Close,
+                Outbound::Frame(f) => {
+                    let m = read_server_message(&f).unwrap();
+                    if m.payload_as_welcome().is_some() {
+                        Sent::Welcome
+                    } else if m.payload_as_rejected().is_some() {
+                        Sent::Rejected
+                    } else if let Some(g) = m.payload_as_goodbye() {
+                        Sent::Goodbye(g.reason().unwrap_or_default().to_owned())
+                    } else if let Some(r) = m.payload_as_command_result() {
+                        Sent::Result { seq: r.client_seq(), error: r.error(), day: r.applies_on_day() }
+                    } else if let Some(u) = m.payload_as_day_update() {
+                        Sent::Update { day: u.day(), skipped: u.skipped() }
+                    } else if let Some(s) = m.payload_as_server_state() {
+                        Sent::State(s.speed())
+                    } else {
+                        panic!("unexpected {:?}", m.payload_type())
+                    }
+                }
+            });
+        }
+        out
+    }
+
+    /// `two_states` with one welcomed session playing `nation` (`None`: sandbox).
+    fn welcomed(nation: Option<u32>) -> (Sim, Receiver<Outbound>) {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two_states");
+        let mut sim = Sim::new(pax_data::load_scenario(&dir).unwrap(), false);
+        let (conn, mut rx) = ConnHandle::for_test();
+        sim.handle(Inbound::Connected { session: SESSION, conn });
+        let hello = Request::Hello {
+            major: PROTOCOL_MAJOR,
+            minor: 0,
+            name: Some("t".into()),
+            requested_nation: nation,
+            resume_token: 0,
+        };
+        sim.handle(Inbound::Request { session: SESSION, request: hello });
+        assert_eq!(drain(&mut rx), [Sent::Welcome]);
+        (sim, rx)
+    }
+
+    fn submit(sim: &mut Sim, seq: u32, command: Option<WireCommand>) {
+        sim.handle(Inbound::Request { session: SESSION, request: Request::SubmitCommand { client_seq: seq, command } });
+    }
+
+    fn tax(nation: u32, raw: i64) -> Option<WireCommand> {
+        Some(WireCommand::SetIncomeTax { nation, rate_raw: Some(raw) })
+    }
+
+    #[test]
+    fn an_accepted_command_applies_at_the_next_tick_and_is_logged() {
+        let (mut sim, mut rx) = welcomed(None);
+        submit(&mut sim, 7, tax(1, 150_000));
+        assert_eq!(drain(&mut rx), [Sent::Result { seq: 7, error: wire::CommandError::None, day: 0 }]);
+        assert_ne!(sim.game.world().nations.income_tax_rate[1], Fixed::from_raw(150_000), "not before the tick");
+        sim.tick();
+        assert_eq!(sim.game.world().nations.income_tax_rate[1], Fixed::from_raw(150_000));
+        let applied = Command::SetIncomeTax { nation: 1, rate: Fixed::from_raw(150_000) };
+        assert_eq!(sim.log(), [crate::game::Logged { day: 0, player: Some(0), command: applied }]);
+    }
+
+    #[test]
+    fn commands_are_checked_in_order_well_formed_permitted_valid() {
+        let (mut sim, mut rx) = welcomed(Some(0));
+        submit(&mut sim, 1, None);
+        submit(&mut sim, 2, Some(WireCommand::SetIncomeTax { nation: 0, rate_raw: None }));
+        // Out of range *and* another nation's: permission is checked first (D24).
+        submit(&mut sim, 3, tax(1, 2_000_000));
+        submit(&mut sim, 4, tax(0, 2_000_000));
+        submit(&mut sim, 5, tax(0, 100_000));
+        use wire::CommandError as E;
+        let results: Vec<_> = drain(&mut rx)
+            .into_iter()
+            .map(|s| match s {
+                Sent::Result { seq, error, .. } => (seq, error),
+                other => panic!("{other:?}"),
+            })
+            .collect();
+        assert_eq!(
+            results,
+            [(1, E::Malformed), (2, E::Malformed), (3, E::NotPermitted), (4, E::RateOutOfRange), (5, E::None)]
+        );
+        sim.tick();
+        assert_eq!(sim.log().len(), 1, "only the valid command applied");
+    }
+
+    #[test]
+    fn scripted_commands_apply_first_on_their_day_and_are_logged_as_scripted() {
+        let (mut sim, _rx) = welcomed(None);
+        for _ in 0..360 {
+            sim.tick();
+        }
+        // Day 360: the scenario raises Lowland's tax to 12%; the player's command follows.
+        submit(&mut sim, 1, tax(0, 130_000));
+        sim.tick();
+        let log = sim.log();
+        assert_eq!(log.len(), 2);
+        assert_eq!((log[0].day, log[0].player), (360, None));
+        assert_eq!((log[1].day, log[1].player), (360, Some(0)));
+        assert_eq!(sim.game.world().nations.income_tax_rate[0], Fixed::from_raw(130_000), "the player's command wins");
+    }
+
+    #[test]
+    fn a_session_that_stops_acknowledging_gets_at_most_the_window() {
+        let (mut sim, mut rx) = welcomed(None);
+        for _ in 0..10 {
+            sim.advance();
+        }
+        let updates: Vec<_> = drain(&mut rx).into_iter().filter(|s| matches!(s, Sent::Update { .. })).collect();
+        assert_eq!(
+            updates,
+            [
+                Sent::Update { day: 1, skipped: 0 },
+                Sent::Update { day: 2, skipped: 0 },
+                Sent::Update { day: 3, skipped: 0 }
+            ]
+        );
+        // Acknowledging day 1 frees one slot: the latest day goes out, counting days 4–9 as skipped.
+        sim.handle(Inbound::Request { session: SESSION, request: Request::Ack { day: 1 } });
+        assert_eq!(drain(&mut rx), [Sent::Update { day: 10, skipped: 6 }]);
+        // Nothing more is owed until another day runs.
+        sim.handle(Inbound::Request { session: SESSION, request: Request::Ack { day: 10 } });
+        assert_eq!(drain(&mut rx), []);
+        sim.advance();
+        assert_eq!(drain(&mut rx), [Sent::Update { day: 11, skipped: 0 }]);
+    }
+
+    #[test]
+    fn speed_changes_are_announced_and_schedule_ticks() {
+        let (mut sim, mut rx) = welcomed(None);
+        assert_eq!(sim.clock, Clock::Paused, "a new game starts paused");
+        sim.handle(Inbound::Request { session: SESSION, request: Request::SetSpeed { speed: wire::Speed::Normal } });
+        assert_eq!(drain(&mut rx), [Sent::State(wire::Speed::Normal)]);
+        assert!(sim.clock.due().is_some());
+        sim.handle(Inbound::Request { session: SESSION, request: Request::SetSpeed { speed: wire::Speed::Paused } });
+        assert_eq!(drain(&mut rx), [Sent::State(wire::Speed::Paused)]);
+        assert_eq!(sim.clock, Clock::Paused);
+        // D22: a speed newer than this server is ignored, never a protocol error. The
+        // session is told the unchanged state.
+        sim.handle(Inbound::Request { session: SESSION, request: Request::SetSpeed { speed: wire::Speed::Fast } });
+        drain(&mut rx);
+        let before = sim.clock;
+        sim.handle(Inbound::Request { session: SESSION, request: Request::SetSpeed { speed: wire::Speed(9) } });
+        assert_eq!(drain(&mut rx), [Sent::State(wire::Speed::Fast)]);
+        assert_eq!(sim.clock, before);
+    }
+
+    #[test]
+    fn the_clock_stops_when_the_player_leaves() {
+        let (mut sim, _rx) = welcomed(None);
+        sim.handle(Inbound::Request { session: SESSION, request: Request::SetSpeed { speed: wire::Speed::Fast } });
+        sim.handle(Inbound::Closed { session: SESSION });
+        assert_eq!(sim.clock, Clock::Paused);
+    }
+
+    /// D11 pins the server's day to the harness's: with no players, `Sim::tick`
+    /// reproduces each scenario's `golden.hashes` (`pax_cli verify`) day by day.
+    #[test]
+    fn the_server_reproduces_the_golden_hashes() {
+        for name in ["mini_valley", "two_states"] {
+            let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios").join(name);
+            let golden = pax_data::golden::read(&dir.join("golden.hashes")).unwrap();
+            let mut sim = Sim::new(pax_data::load_scenario(&dir).unwrap(), false);
+            for (day, &expected) in golden.iter().enumerate() {
+                sim.tick();
+                assert_eq!(sim.game.views().state_hash, expected, "{name}: day {} differs from golden", day + 1);
+            }
+            assert!(sim.log().iter().all(|l| l.player.is_none()), "{name}: only scripted commands applied");
+        }
+    }
+
+    /// D10: within a day, commands apply in `(player, sequence)` order, whatever
+    /// order they arrived in (arrival order between players is a network race).
+    #[test]
+    fn commands_apply_in_stamp_order_not_arrival_order() {
+        let (mut sim, _rx) = welcomed(None);
+        let rate = |raw| Command::SetIncomeTax { nation: 0, rate: Fixed::from_raw(raw) };
+        // Player 1's command arrives first; player 0's two follow.
+        for (player, raw) in [(1, 100_000), (0, 110_000), (0, 120_000)] {
+            sim.queue.stamp(SESSION, player, 0, rate(raw));
+        }
+        sim.tick();
+        let applied: Vec<_> = sim.log().iter().map(|l| (l.player, l.command)).collect();
+        assert_eq!(applied, [(Some(0), rate(110_000)), (Some(0), rate(120_000)), (Some(1), rate(100_000))]);
+        // The last command in stamp order wins: player 1's.
+        assert_eq!(sim.game.world().nations.income_tax_rate[0], Fixed::from_raw(100_000));
     }
 }

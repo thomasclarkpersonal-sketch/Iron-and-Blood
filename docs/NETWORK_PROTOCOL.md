@@ -67,7 +67,7 @@ sequenceDiagram
 |---|---|---|
 | `Hello` | Open the session; request a nation (absent = sandbox, M3 only) | `Welcome` or `Rejected` |
 | `SubmitCommand` | One engine command (`SetIncomeTax`, `SetTransferRate`, `SetConsumptionRate`) with a client-chosen `client_seq` | exactly one `CommandResult` |
-| `SetSpeed` | Pause, or set speed 1–5 | `ServerState` |
+| `SetSpeed` | Pause, or set speed 1–5. A speed the server doesn't know is ignored: the reply is the unchanged `ServerState` (D22) | `ServerState` |
 | `Subscribe` | Choose the map mode, market panel and province panel | a `DayUpdate` for the current day |
 | `Ack` | Finished processing the `DayUpdate` for `day` | — |
 | `Ping` | Keep-alive and round-trip measurement | `Pong` |
@@ -100,6 +100,7 @@ sequenceDiagram
 - **POP identity:** a POP is identified by `(province, profession)`, never by row index. Month-end compaction reorders and merges rows (D7). When culture and religion arrive, they join the identity.
 - **`state_hash`** is `World::state_hash()` after the day. The client can't verify it, and doesn't need to. It is shown in the debug overlay and written into bug reports, so a report pins the exact state and the server's command log can replay to it (D23). The server computes it once per day and shares it among sessions.
 - **Map modes:** `Nation` is drawn by the client from `StaticData`, so the server sends no values for it.
+  - **Two moments of one day:** `WorldSummary.life_needs` and `.militancy` are the tick's own figures, weighted by the sizes the market saw. The map modes and the province panel use the POP table at the end of the day. Both use the same rules, so they agree except on month-end days, when demographics change sizes after the market.
   - **Provinces where nobody lives** carry 0 in every mode. For `LifeNeeds`, `Militancy` and `Unemployment`, the client must read that as *no data*, not as a real 0. It can tell from the `Population` map mode or the province panel. `Unemployment`, `LifeNeeds` and `Militancy` are fractions in [0, 1]. `Population` is a count of people. `Price` is the price of `map_good` in each province's market.
 
 ## 5. Commands, ordering and flow control
@@ -112,7 +113,7 @@ sequenceDiagram
    - `World::validate`, the single validity rule (D21).
 3. If valid, the server stamps it `(day = next tick, player, sequence)`, queues it, and replies `CommandResult { error: None, applies_on_day }`. Otherwise it replies with the error, and nothing is queued.
    - **Keeping the wire and the engine in step:** the conversions between `pax_engine::Command`/`CommandError` and their wire forms (in `pax_server`) use exhaustive `match`es with no `_` arm, in both directions. A new engine command or error then fails to compile until the schema gains its wire form, under the rules in §8.
-4. At the start of the tick, the queue is applied in stamp order through `tick::step_with`. Commands that applied successfully are appended to the session's command log (D23). `step_with` re-validates; if a command fails at that point, a second `CommandResult` reports the error and the command is not logged. No current command can fail this way.
+4. At the start of the tick, the scenario's scripted commands for the day apply first, then the queue in stamp order, through `pax_data::step_day`, the one day step shared with `pax_cli` and the tests (D23). Commands that applied successfully are appended to the session's command log (D23). Every command is re-validated as it applies; if a player's command fails at that point, a second `CommandResult` reports the error and the command is not logged. No current command can fail this way.
 
 **Flow control** (D23):
 - At most **3** `DayUpdate`s may be unacknowledged. When the window is full, the server stops sending to that client but keeps simulating. When an `Ack` frees the window, it sends only the latest day, with `skipped` set to the number of days skipped.
