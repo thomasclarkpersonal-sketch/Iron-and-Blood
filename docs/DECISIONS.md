@@ -379,6 +379,7 @@ The state → national → sphere → global roll-up in the old ECONOMY_SYSTEM w
   - Receivers ignore unknown union members and enum values.
 - **Ids:** every id is a `uint` index into the `StaticData` tables sent in `Welcome`, fixed for the session (player ids are `ushort`). "None" is an absent optional field, never a sentinel such as `-1`, so a missing id can't be cast into a huge index. POPs are identified by `(province, profession)`, never by row index, because compaction reorders rows (D7).
 - **Views, not state:** a `DayUpdate` carries `WorldSummary` and `NationTable` always, plus the subscribed `MapView`, `MarketDetail` and `ProvinceDetail`. The full POP and producer tables are never sent.
+  - The views themselves are built from the engine's read-only `views::ProvinceStats` and the day's report, in about 3 ms at that scale (M3-3).
   - Budget at the D13 long-term scale: ≤ 16 KB summary-only and ≤ 128 KB with every view subscribed.
   - Measured on the schema: 8.3 KB and 91 KB.
 - **Values:** simulation values travel as `Fixed { raw: long }` (D3), in both directions. Clients use floats for display only.

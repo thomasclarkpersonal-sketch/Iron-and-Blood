@@ -9,13 +9,18 @@
 //!   `encode` builds server frames. This crate is the only one that sees both the
 //!   engine and the wire types (`pax_protocol` has no engine dependency).
 //!
-//! M3-2 state: handshake, single session, keep-alive, timeouts and protocol errors.
-//! Ticking, views, commands and saves arrive with M3-3 to M3-6 (`docs/MILESTONE_3.md`).
+//! * **Views** (`view`): what each session sees of the world each day (M3-3).
+//!
+//! State: handshake, single session, keep-alive, timeouts, protocol errors, and
+//! subscriptions with views (M3-2, M3-3). Ticking, commands and saves arrive with
+//! M3-4 to M3-6 (`docs/MILESTONE_3.md`).
 
 mod encode;
+mod game;
 mod net;
 mod request;
 mod sim;
+mod view;
 
 use std::net::SocketAddr;
 use std::path::PathBuf;

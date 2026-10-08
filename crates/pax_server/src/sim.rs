@@ -1,8 +1,8 @@
 //! The sim thread (D23): the only owner of the `World`.
 //!
 //! It handles session requests in arrival order and decides everything that needs game
-//! state. In M3-2 that's the handshake: `Welcome` or `Rejected`. Ticking, views,
-//! commands and saves arrive with M3-3 to M3-6.
+//! state: the handshake (`Welcome` or `Rejected`) and subscriptions with their views.
+//! Ticking, commands and saves arrive with M3-4 to M3-6.
 
 use std::collections::BTreeMap;
 use std::sync::mpsc::Receiver;
@@ -12,11 +12,14 @@ use pax_protocol::{PROTOCOL_MAJOR, PROTOCOL_MINOR, wire};
 use tracing::{debug, info};
 
 use crate::encode::{self, WelcomeInfo};
+use crate::game::Game;
 use crate::net::{ConnHandle, Inbound, Outbound};
 use crate::request::Request;
+use crate::view::{self, CheckedSubscription, Subscription};
 
 struct Session {
     conn: ConnHandle,
+    subscription: CheckedSubscription,
     /// Set by `Welcome`. Until then the session may only say `Hello`: one choke
     /// point in [`Sim::handle`] drops anything else, so no request handler has to
     /// remember to check (a rejected session's queued requests never act).
@@ -34,7 +37,7 @@ struct Seat {
 }
 
 pub(crate) struct Sim {
-    scenario: Scenario,
+    game: Game,
     sessions: BTreeMap<u64, Session>,
     /// The single welcomed session (M3 is single player, D10).
     active: Option<u64>,
@@ -45,13 +48,39 @@ pub(crate) struct Sim {
 
 impl Sim {
     pub(crate) fn new(scenario: Scenario, exit_when_idle: bool) -> Self {
-        Sim { scenario, sessions: BTreeMap::new(), active: None, exit_when_idle, speed: wire::Speed::Paused }
+        Sim {
+            game: Game::new(scenario),
+            sessions: BTreeMap::new(),
+            active: None,
+            exit_when_idle,
+            speed: wire::Speed::Paused,
+        }
     }
 
     fn send(&self, session: u64, out: Outbound) {
         if let Some(s) = self.sessions.get(&session) {
             s.conn.send(out);
         }
+    }
+
+    /// A protocol error the sim thread detected: `Goodbye` with the reason, then close (D22).
+    fn goodbye(&self, session: u64, reason: &str) {
+        info!(session, reason, "closing session");
+        self.send(session, Outbound::Frame(encode::goodbye(reason)));
+        self.send(session, Outbound::Close);
+    }
+
+    /// Replaces the session's subscription and answers with a `DayUpdate` for the
+    /// current day, so a newly opened panel fills at once, even when paused (D22).
+    fn subscribe(&mut self, session: u64, requested: Subscription) {
+        let subscription = match requested.checked(self.game.world()) {
+            Ok(s) => s,
+            Err(reason) => return self.goodbye(session, &reason),
+        };
+        let Some(s) = self.sessions.get_mut(&session) else { return };
+        s.subscription = subscription;
+        let frame = view::day_update(&self.game.views(), &subscription, self.speed, 0);
+        self.send(session, Outbound::Frame(frame));
     }
 
     fn reject(&self, session: u64, reason: &str) {
@@ -61,7 +90,7 @@ impl Sim {
     }
 
     fn hello(&mut self, session: u64, major: u16, minor: u16, name: Option<&str>, requested_nation: Option<u32>) {
-        let nations = self.scenario.world.nations.key.len();
+        let nations = self.game.world().nations.key.len();
         if major != PROTOCOL_MAJOR {
             let reason = format!(
                 "protocol {major}.{minor} is not supported; this server speaks {PROTOCOL_MAJOR}.{PROTOCOL_MINOR}"
@@ -86,18 +115,19 @@ impl Sim {
             player: 0,
             resume_token: 0, // resuming a dropped session is M4 (D24)
             nation: requested_nation,
-            scenario: &self.scenario.name,
-            content_hash: self.scenario.content_hash,
+            scenario: &self.game.scenario().name,
+            content_hash: self.game.scenario().content_hash,
             speed: self.speed,
         };
-        self.send(session, Outbound::Frame(encode::welcome(&self.scenario.world, &info)));
+        self.send(session, Outbound::Frame(encode::welcome(self.game.world(), &info)));
     }
 
     /// Handles one inbound event. Returns `false` when the server should stop.
     fn handle(&mut self, event: Inbound) -> bool {
         match event {
             Inbound::Connected { session, conn } => {
-                self.sessions.insert(session, Session { conn, seat: None });
+                self.sessions
+                    .insert(session, Session { conn, subscription: CheckedSubscription::default(), seat: None });
             }
             Inbound::Request { session, request: Request::Hello { major, minor, name, requested_nation, .. } } => {
                 self.hello(session, major, minor, name.as_deref(), requested_nation);
@@ -106,9 +136,12 @@ impl Sim {
             Inbound::Request { session, request } if !self.sessions.get(&session).is_some_and(|s| s.seat.is_some()) => {
                 debug!(session, ?request, "ignored: the session was not welcomed");
             }
-            Inbound::Request { session, request } => {
-                debug!(session, ?request, "not handled until M3-3 to M3-6");
-            }
+            Inbound::Request { session, request } => match request {
+                Request::Subscribe { map_mode, map_good, market, province } => {
+                    self.subscribe(session, Subscription { map_mode, map_good, market, province });
+                }
+                other => debug!(session, ?other, "not handled until M3-4 to M3-6"),
+            },
             Inbound::Closed { session } => {
                 self.sessions.remove(&session);
                 if self.active == Some(session) {
