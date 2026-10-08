@@ -191,7 +191,10 @@ pub fn gdscript() -> String {
     out.push_str(&format!("## CommandError names, by value.\nconst COMMAND_ERROR_NAMES := [{}]\n", names.join(", ")));
     let intervals: Vec<String> = pax_protocol::wire::Speed::ENUM_VALUES
         .iter()
-        .map(|&s| pax_protocol::day_interval(s).map_or("null".to_owned(), |d| d.as_millis().to_string()))
+        .map(|&s| match pax_protocol::pacing(s) {
+            pax_protocol::Pacing::Every(d) => d.as_millis().to_string(),
+            pax_protocol::Pacing::Paused | pax_protocol::Pacing::Unknown => "null".to_owned(),
+        })
         .collect();
     out.push_str(&format!(
         "## Milliseconds per day at each speed, by value (D23); null when paused.\nconst SPEED_DAY_MS := [{}]\n",

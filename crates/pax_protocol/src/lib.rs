@@ -80,20 +80,30 @@ pub const PROTOCOL_MINOR: u16 = 1;
 /// from this, so the two can't drift apart.
 pub const IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
-/// How long one day takes at a running `speed` (D23): the server paces its clock
-/// with this, and the client describes the speeds from it. `Fastest` is zero (as fast
-/// as the engine allows). `None` for `Paused`, where no days run, and for speeds this
-/// build doesn't know.
-pub fn day_interval(speed: wire::Speed) -> Option<std::time::Duration> {
+/// How a speed paces the game clock (D23).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Pacing {
+    /// No days run.
+    Paused,
+    /// One day per interval: zero for `Fastest`, as fast as the engine allows.
+    Every(std::time::Duration),
+    /// A speed newer than this build: the server ignores it (D22).
+    Unknown,
+}
+
+/// D23's pacing table: the server paces its clock with it, and the client describes
+/// the speeds from it.
+pub fn pacing(speed: wire::Speed) -> Pacing {
     use std::time::Duration;
     use wire::Speed as S;
     match speed {
-        S::Slowest => Some(Duration::from_millis(2_000)), // 0.5 days/s
-        S::Slow => Some(Duration::from_millis(1_000)),    // 1
-        S::Normal => Some(Duration::from_millis(500)),    // 2
-        S::Fast => Some(Duration::from_millis(200)),      // 5
-        S::Fastest => Some(Duration::ZERO),
-        _ => None,
+        S::Paused => Pacing::Paused,
+        S::Slowest => Pacing::Every(Duration::from_millis(2_000)), // 0.5 days/s
+        S::Slow => Pacing::Every(Duration::from_millis(1_000)),    // 1
+        S::Normal => Pacing::Every(Duration::from_millis(500)),    // 2
+        S::Fast => Pacing::Every(Duration::from_millis(200)),      // 5
+        S::Fastest => Pacing::Every(Duration::ZERO),
+        _ => Pacing::Unknown,
     }
 }
 

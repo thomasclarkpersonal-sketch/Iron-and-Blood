@@ -150,7 +150,7 @@ impl ProvinceMap {
     /// Every problem found is reported, each prefixed `map:`. The server reads maps
     /// this way: it never draws, so it never builds the per-pixel ids.
     pub fn read(toml: &str, png: &[u8], province_keys: &[String]) -> Result<ProvinceMap, Vec<String>> {
-        validate(toml, png, province_keys, false).map(|(map, _)| map)
+        validate(toml, png, province_keys, Ids::Skip).map(|(map, _)| map)
     }
 
     /// [`ProvinceMap::read`], plus each pixel's province id: what the client draws with.
@@ -159,7 +159,7 @@ impl ProvinceMap {
         png: &[u8],
         province_keys: &[String],
     ) -> Result<(ProvinceMap, ProvinceIds), Vec<String>> {
-        let (map, ids) = validate(toml, png, province_keys, true)?;
+        let (map, ids) = validate(toml, png, province_keys, Ids::Build)?;
         let ids = ProvinceIds { width: map.width, height: map.height, ids: ids.expect("asked for") };
         Ok((map, ids))
     }
@@ -174,12 +174,21 @@ impl ProvinceMap {
     }
 }
 
-/// The checks every reader runs; the per-pixel ids only when `keep_ids`.
+/// Whether a read builds each pixel's province id.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Ids {
+    /// The server: it never draws.
+    Skip,
+    /// The client: it draws and picks with them.
+    Build,
+}
+
+/// The checks every reader runs; the per-pixel ids only when asked for.
 fn validate(
     toml: &str,
     png: &[u8],
     province_keys: &[String],
-    keep_ids: bool,
+    want: Ids,
 ) -> Result<(ProvinceMap, Option<Vec<u32>>), Vec<String>> {
     if province_keys.len() > MAX_PROVINCES {
         return Err(vec![format!(
@@ -229,7 +238,7 @@ fn validate(
     // Every pixel must belong to a province or the background; every province needs pixels.
     let mut painted = vec![0u64; keys.len()];
     let mut stray: BTreeMap<[u8; 3], (u32, u32)> = BTreeMap::new();
-    let mut ids = Vec::with_capacity(if keep_ids { image.len() } else { 0 });
+    let mut ids = Vec::with_capacity(if want == Ids::Build { image.len() } else { 0 });
     for (i, px) in image.iter().enumerate() {
         let p = owner.get(px).copied();
         match p {
@@ -239,7 +248,7 @@ fn validate(
                 stray.entry(*px).or_insert((i as u32 % width, i as u32 / width));
             }
         }
-        if keep_ids {
+        if want == Ids::Build {
             ids.push(p.map_or(BACKGROUND_ID, id_of));
         }
     }
@@ -273,7 +282,7 @@ fn validate(
         background: file.background,
         map_hash: pax_content::map_hash(toml.as_bytes(), png),
     };
-    Ok((map, keep_ids.then_some(ids)))
+    Ok((map, (want == Ids::Build).then_some(ids)))
 }
 
 #[cfg(test)]
