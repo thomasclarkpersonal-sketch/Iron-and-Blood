@@ -37,8 +37,8 @@ const USAGE: &str = "usage:
 
 struct Args {
     command: String,
-    /// The scenario directory; for `replay`, the save file.
-    scenario: PathBuf,
+    /// The command's operand: the scenario directory, or for `replay` the save file.
+    target: PathBuf,
     days: Option<u64>,
     every: u64,
     scale: u32,
@@ -47,12 +47,28 @@ struct Args {
     threads: Option<usize>,
 }
 
+/// The flags each command takes, as in `USAGE`.
+fn flags_of(command: &str) -> &'static [&'static str] {
+    match command {
+        "run" => &["--days", "--every", "--market"],
+        "record" => &["--days"],
+        "verify" | "replay" => &["--threads"],
+        "bench" => &["--days", "--scale", "--regions", "--threads"],
+        "report" => &["--days", "--every"],
+        _ => &[],
+    }
+}
+
 fn parse_args() -> Result<Args, String> {
     let mut it = std::env::args().skip(1);
     let command = it.next().ok_or("missing command")?;
-    let scenario = PathBuf::from(it.next().ok_or("missing scenario directory (or save file, for replay)")?);
-    let mut args = Args { command, scenario, days: None, every: 30, scale: 1, regions: 1, market: None, threads: None };
+    let target = PathBuf::from(it.next().ok_or("missing scenario directory (or save file, for replay)")?);
+    let mut args = Args { command, target, days: None, every: 30, scale: 1, regions: 1, market: None, threads: None };
     while let Some(flag) = it.next() {
+        // A flag a command doesn't use is an error, never silently ignored.
+        if !flags_of(&args.command).contains(&flag.as_str()) {
+            return Err(format!("unknown flag {flag} for {}", args.command));
+        }
         let value = it.next().ok_or(format!("{flag} needs a value"))?;
         let num = |v: &str| v.parse::<u64>().map_err(|_| format!("{flag}: '{v}' is not a number"));
         match flag.as_str() {
@@ -92,15 +108,15 @@ fn main() -> ExitCode {
 
 fn dispatch(args: &Args) -> Result<ExitCode, String> {
     if args.command == "replay" {
-        return replay(&args.scenario);
+        return replay(&args.target);
     }
-    let scenario = pax_data::load_scenario(&args.scenario).map_err(|e| e.to_string())?;
+    let scenario = pax_data::load_scenario(&args.target).map_err(|e| e.to_string())?;
     match args.command.as_str() {
         "run" => run(scenario.world, &scenario.commands, args.days.unwrap_or(365), args.every, args.market.as_deref()),
         "record" => {
             // D11: keep the existing file's length unless --days says otherwise, and
             // never record less than the scenario's minimum (past its last command).
-            let path = golden_path(&args.scenario);
+            let path = golden_path(&args.target);
             let existing = golden::existing_len(&path).map_err(|e| format!("{}: {e}", path.display()))?;
             let min = golden::min_days(&scenario.commands);
             let days = args.days.or(existing).unwrap_or(min);
@@ -115,7 +131,7 @@ fn dispatch(args: &Args) -> Result<ExitCode, String> {
             println!("recorded {days} day hashes to {}", path.display());
             Ok(ExitCode::SUCCESS)
         }
-        "verify" => verify(scenario.world, &scenario.commands, &golden_path(&args.scenario)),
+        "verify" => verify(scenario.world, &scenario.commands, &golden_path(&args.target)),
         "bench" => bench(scenario.world, args.days.unwrap_or(30), args.scale, args.regions),
         "report" => report::run(scenario.world, &scenario.commands, args.days.unwrap_or(365), args.every),
         other => Err(format!("unknown command '{other}'\n{USAGE}")),

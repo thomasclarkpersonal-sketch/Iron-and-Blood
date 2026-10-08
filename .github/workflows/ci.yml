@@ -102,7 +102,7 @@ jobs:
       - name: Session replay through pax_cli (M3-9, the server's determinism gate)
         run: |
           cargo build --release -p pax_cli
-          PAX_CLI=target/release/pax_cli cargo test --release -p pax_server --test session_replay
+          PAX_CLI=target/release/pax_cli PAX_CLI_REQUIRED=1 cargo test --release -p pax_server --test session_replay
 
   bench:
     # D13 / MILESTONE_1 T1: fail a PR that makes the daily tick > 20% slower.
@@ -168,7 +168,7 @@ jobs:
           cargo build --release -p pax_cli
           cli=target/release/pax_cli
           if [ -f "$cli.exe" ]; then cli="$cli.exe"; fi
-          PAX_CLI="$cli" cargo test --release -p pax_server --test session_replay
+          PAX_CLI="$cli" PAX_CLI_REQUIRED=1 cargo test --release -p pax_server --test session_replay
 
   fuzz:
     # M3-10: coverage-guided fuzzing of the client frame reader, for a fixed budget.
