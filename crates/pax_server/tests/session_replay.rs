@@ -155,16 +155,7 @@ fn a_two_player_game_saves_replays_and_reloads_through_the_lobby() {
     let (final_day, final_hash) = current_state(&mut host);
     assert_eq!(final_day, day);
     host.save_game("two");
-    loop {
-        match host.next() {
-            Got::SaveResult { error, .. } => {
-                assert_eq!(error, "");
-                break;
-            }
-            Got::Closed => panic!("server closed the connection"),
-            _ => {}
-        }
-    }
+    assert_eq!(until_saved(&mut host), "");
 
     // The save replays to the server's state, and its log names both players.
     let path = saves.join("two.toml");
@@ -186,13 +177,7 @@ fn a_two_player_game_saves_replays_and_reloads_through_the_lobby() {
     play_until(&mut host, final_day + 10);
     host.load_game("two");
     for c in [&mut host, &mut guest] {
-        loop {
-            match c.next() {
-                Got::Lobby { started: false, .. } => break,
-                Got::Closed => panic!("server closed the connection"),
-                _ => {}
-            }
-        }
+        until_lobby_reopened(c);
     }
     // Both kept their nations; they ready again and the host starts.
     host.set_ready(true);

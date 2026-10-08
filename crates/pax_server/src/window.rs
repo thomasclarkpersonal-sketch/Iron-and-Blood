@@ -48,6 +48,12 @@ impl UpdateWindow {
         skipped
     }
 
+    /// Days ran that the session hasn't been sent, and the window has room: an update
+    /// is owed (and waits only for the throttle, M4-7).
+    pub(crate) fn owed(&self) -> bool {
+        self.days_since_update > 0 && self.has_room()
+    }
+
     fn has_room(&self) -> bool {
         self.in_flight.len() < UPDATE_WINDOW
     }

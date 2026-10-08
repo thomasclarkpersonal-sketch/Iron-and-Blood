@@ -72,8 +72,8 @@ Loading a save goes through the lobby, and players reclaim their nations.
 - Saves are written only to the server's save directory, with file names restricted to `[A-Za-z0-9_-]`.
 
 **Bandwidth.** The target is **≤ 100 KB/s per remote client** at speed 3.
-- Remote sessions get at most 4 updates per second, coalesced.
-- `MapView` is sent when the subscription changes and then every 5th update, because map colours don't need daily refresh.
+- Remote sessions get at most 4 updates per second, coalesced (`--updates-per-second`).
+- `MapView` is sent when the subscription changes and then every 5th update, because map colours don't need daily refresh (`--map-every`).
 - The summary and panels are sent every update. M3's measured sizes (about 8 KB summary, about 80 KB map at 10,000 provinces) put this well inside the target.
 
 ## Tasks
@@ -87,7 +87,7 @@ Loading a save goes through the lobby, and players reclaim their nations.
 | M4-4 ✅ | **Lag and drop rules:** fairness pause, drop, `Goodbye`, resume tokens and rejoin | M4-1 | Tests with a scripted client that stalls, recovers, disconnects and resumes. **Done (protocol 1.5):** the connection task reports a client silent past `--pause-after` (5 s) and its return; a running game pauses for everyone, with `ServerState.waiting_for`, and resumes at its speed when everyone is back or dropped. In multiplayer `--drop-after` (30 s) replaces D22's 10 s. Every `Welcome` carries an unguessable resume token (64 bits from the OS's secure random source); in a started game a player who leaves keeps their seat for it, shown in the lobby as `away`, and a kick or a load drops kept seats. The client's bridge decodes all of it and has `PaxClient.resume(token)`. The TCP test plays a real stall, return and drop |
 | M4-5 ✅ | **Multiplayer saves:** the command log records the player for each command; loading goes through the lobby | M4-2 | The replay test covers a two-player session. **Done:** the log already recorded each command's player; a multiplayer load now goes back to the lobby (claims the loaded game has are kept, others become unclaimed, never sandbox; nobody ready; the host starts again), and players are never dropped by a load. `session_replay.rs` plays a two-player game, saves, replays it (in-process and through `pax_cli replay`), then loads it through the lobby back to the saved state |
 | M4-6 | **Transport security:** TLS for non-local binds, server password, per-session rate limit | M4-1 | Self-signed certificate for player-hosted games, with its fingerprint shown to join. Then lift M4-1's rule that `--players` above 1 binds loopback only. The server password must also authenticate the host: `--admin NAME` (M4-3) trusts a name the client asserts |
-| M4-7 | **Bandwidth controls:** per-session update-rate cap; `MapView` refresh policy | M4-1 | Measured at long-term scale over a simulated 50 ms/1% loss link |
+| M4-7 ✅ | **Bandwidth controls:** per-session update-rate cap; `MapView` refresh policy | M4-1 | Measured at long-term scale over a simulated 50 ms/1% loss link. **Done:** a remote session (its peer isn't loopback) gets at most 4 updates a second, coalesced, and its `MapView` with the `Subscribe` answer and every 5th update (`throttle.rs`; both are settings, `--updates-per-second` and `--map-every`); the sim loop wakes to send a held day, so a pause never strands one. **Measured** (`game::tests::remote_bandwidth_budget`, 2026-10-09): at 10,000 provinces and about 1M POP rows with every view subscribed, an update is 90.8 KB with the map and 10.7 KB without, so a remote client gets 53.5 KB/s at speed 3 and 107 KB/s at Fastest (the cap's ceiling). The measurement is of encoded sizes under the policy; the 50 ms/1% loss link was not simulated, which TCP's retransmits don't change in volume, only in latency |
 | M4-8 | **Dedicated server:** Dockerfile and compose file | M4-6 | See "Docker" below |
 | M4-9 | **Client:** lobby screen, player list, "waiting for player" overlay, reconnect, host controls | M4-2 to M4-4 | |
 | M4-10 | **Docs:** D24 accepted; NETWORK_PROTOCOL (lobby, security); REPO_SETUP or a hosting guide; this file's status | all | |
@@ -110,7 +110,7 @@ The draft Dockerfile needs these fixes before it is useful:
 2. **Host controls:** the host pauses, changes speed, saves and kicks; a non-host can only pause.
 3. **Slow and lost players:** a player whose connection stalls triggers a fairness pause within 5 s, is dropped after 30 s while the others continue, and can rejoin with the resume token to reclaim their nation.
 4. **Saves:** a two-player game saves, reloads through the lobby, and its replayed command log reproduces the original `state_hash` (CI). ✅ `session_replay.rs` (M4-5).
-5. **Bandwidth:** ≤ 100 KB/s per remote client at speed 3 at long-term scale, measured and recorded.
+5. **Bandwidth:** ≤ 100 KB/s per remote client at speed 3 at long-term scale, measured and recorded. ✅ 53.5 KB/s (M4-7).
 6. **Security:** TLS on non-local binds; fuzzing covers the lobby messages; command rate limits are enforced.
 7. **Dedicated server:** `docker compose up` starts it with a persistent saves volume.
 8. **Tick budget (D13, from M3):** `two_states` replicated to about 1M POP rows ticks within 100 ms/day on 8 threads, measured and recorded in D13's "Measured" column (M4-11). ✅ ≈91 ms/day.

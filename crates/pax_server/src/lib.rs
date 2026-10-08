@@ -29,6 +29,8 @@ mod queue;
 mod request;
 mod session;
 mod sim;
+mod throttle;
+pub use throttle::Bandwidth;
 mod view;
 mod window;
 
@@ -53,6 +55,14 @@ pub const PAUSE_AFTER: Duration = Duration::from_secs(5);
 /// D24's default drop: a multiplayer session silent this long is closed, and its
 /// seat waits for its resume token (`--drop-after`). It replaces D22's 10 s rule.
 pub const DROP_AFTER: Duration = Duration::from_secs(30);
+
+/// D24's default update rate for a remote session: at most this many `DayUpdate`s a
+/// second (`--updates-per-second`, M4-7).
+pub const UPDATES_PER_SECOND: u32 = 4;
+
+/// D24's default map refresh for a remote session: its `MapView` goes out with every
+/// this-many-th update, and whenever its subscription changes (`--map-every`, M4-7).
+pub const MAP_EVERY: u32 = 5;
 
 /// How to run a server.
 #[derive(Clone, Debug)]
@@ -86,6 +96,10 @@ pub struct Config {
     pub admin: Option<String>,
     /// Where `SaveGame` writes and `LoadGame` reads `<name>.toml` (D23).
     pub saves_dir: PathBuf,
+    /// How often a remote session gets an update, and its map (D24, M4-7):
+    /// `--updates-per-second` and `--map-every`, by default [`UPDATES_PER_SECOND`]
+    /// and [`MAP_EVERY`]. Local sessions are never throttled.
+    pub bandwidth: Bandwidth,
 }
 
 impl Config {
@@ -93,6 +107,7 @@ impl Config {
     /// launcher):
     /// * the fairness pause is multiplayer only, and comes before the drop (D24), or
     ///   the connection task would drop a client when it should pause the game;
+    /// * a remote session gets updates, and a map, at some rate (M4-7);
     /// * D24's TLS rule: several players bind loopback only until M4-6 brings TLS.
     pub fn validate(&self) -> Result<(), ConfigError> {
         if let Some(pause) = self.pause_after {
@@ -102,6 +117,9 @@ impl Config {
             if pause >= self.idle_timeout {
                 return Err(ConfigError::PauseNotBeforeDrop);
             }
+        }
+        if self.bandwidth.updates_per_second == 0 || self.bandwidth.map_every == 0 {
+            return Err(ConfigError::NoUpdates);
         }
         if self.max_players > 1 && !self.bind.ip().is_loopback() {
             return Err(ConfigError::MultiplayerNeedsTls { players: self.max_players, bind: self.bind });
@@ -139,6 +157,7 @@ impl Config {
             max_players: 1,
             sandbox: true,
             admin: None,
+            bandwidth: Bandwidth::default(),
         }
     }
 }
@@ -150,6 +169,9 @@ pub enum ConfigError {
     PauseInSinglePlayer,
     /// The pause must come before the drop, or clients are dropped instead.
     PauseNotBeforeDrop,
+    /// `--updates-per-second` or `--map-every` is 0: a remote session would never
+    /// get an update, or never a map.
+    NoUpdates,
     /// D24: TLS off localhost, and M4-6 hasn't brought it yet.
     MultiplayerNeedsTls { players: u16, bind: SocketAddr },
 }
@@ -161,6 +183,7 @@ impl std::fmt::Display for ConfigError {
                 write!(f, "a fairness pause (--pause-after) is for multiplayer (--players above 1)")
             }
             ConfigError::PauseNotBeforeDrop => write!(f, "--pause-after must be shorter than --drop-after"),
+            ConfigError::NoUpdates => write!(f, "--updates-per-second and --map-every must be at least 1"),
             ConfigError::MultiplayerNeedsTls { players, bind } => write!(
                 f,
                 "--players {players} on {bind} needs TLS (D24), which arrives with M4-6: until then, bind 127.0.0.1"

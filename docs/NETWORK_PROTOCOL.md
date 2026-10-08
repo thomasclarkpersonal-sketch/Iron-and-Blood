@@ -137,6 +137,7 @@ sequenceDiagram
 - At most **3** `DayUpdate`s may be unacknowledged. When the window is full, the server stops sending to that client but keeps simulating. When an `Ack` frees the window, it sends only the latest day, with `skipped` set to the number of days skipped.
 - The simulation never waits for a client in single player. A slow client sees fewer updates; it never sees stale ones.
 - `ServerState`, `CommandResult` and replies bypass the window. They are small and must not wait behind updates.
+- **Remote sessions (D24, M4-7):** a session whose peer is not on the server's machine gets at most 4 updates a second (`--updates-per-second`); the days in between are coalesced (`skipped`), and a day held by the cap still goes out when its time comes, even if the game pauses meanwhile. Its `MapView` goes out with the answer to `Subscribe` and then with every 5th update (`--map-every`); the updates in between have no `map`, and the client keeps the colours it has. Local sessions (single player, or a player on the server's machine) get every update with the map.
 
 ## 6. Single player: how the client runs the server
 
@@ -147,6 +148,7 @@ sequenceDiagram
 - **Several players (M4-1, M4-3):** run the server yourself, for example `pax_server --scenario <dir> --bind 127.0.0.1:7777 --players 2`, and have each client connect to it.
   - **The host** is the first player to join. When the host leaves, the remaining player with the lowest id becomes host. On a dedicated server, `--admin NAME` makes the client named `NAME` the host instead, whenever it joins; while it is away there is no host (D24).
   - `--pause-after S` and `--drop-after S` set D24's lag thresholds (5 and 30 by default).
+  - `--updates-per-second N` and `--map-every N` set D24's bandwidth for remote sessions (4 and 5 by default, M4-7).
   - TLS and a server password are still to come (M4-6). D24 requires TLS off localhost, so until M4-6 the server refuses `--players` above 1 on any other address: multiplayer is for testing on one machine until then.
 
 ## 7. Conversions and units

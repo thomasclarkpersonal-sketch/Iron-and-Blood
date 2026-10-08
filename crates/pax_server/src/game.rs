@@ -213,7 +213,7 @@ mod tests {
             let start = std::time::Instant::now();
             for _ in 0..DAYS {
                 game.step(Vec::new());
-                let _ = view::day_update(&game.views(), &sub, wire::Speed::Fastest, 0);
+                let _ = view::day_update(&game.views(), &sub, wire::Speed::Fastest, 0, true);
             }
             let day_ms = per_day(start);
             let server_ms = day_ms - tick_ms - hash_ms;
@@ -222,5 +222,50 @@ mod tests {
             );
             assert!(server_ms <= tick_ms * 0.1, "stats and the update took {server_ms:.1} ms, over 10% of the tick");
         });
+    }
+
+    /// M4's definition of done, item 5 (D24, M4-7): a remote client's bandwidth at
+    /// speed 3 at D13's long-term scale, with every view subscribed. It encodes a real
+    /// update with and without the `MapView`, then applies the throttle's policy with D24's
+    /// default settings: at most four updates a second, the map in every fifth. Run by hand:
+    /// `cargo test -p pax_server --release -- --ignored remote_bandwidth --nocapture`
+    #[test]
+    #[ignore]
+    fn remote_bandwidth_budget() {
+        let crate::Bandwidth { updates_per_second, map_every } = crate::Bandwidth::default();
+        use crate::view::{self, Subscription};
+        use pax_protocol::{Pacing, wire};
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two_states");
+        let mut scenario = pax_data::load_scenario(&dir).unwrap();
+        // two_states has 4 provinces: 2,500 copies give D24's 10,000.
+        let regions = 2_500;
+        let scale = pax_data::bench::scale_for_rows(&scenario.world, 1_000_000, regions);
+        scenario.world = pax_data::bench::replicate_with_nations(&scenario.world, scale, regions, Some(200));
+        let provinces = scenario.world.geography.province_count();
+        let mut game = Game::new(scenario);
+        game.step(Vec::new());
+        let sub =
+            Subscription { map_mode: wire::MapMode::Population, map_good: 0, market: Some(7), province: Some(11) }
+                .checked(game.world())
+                .unwrap();
+        let views = game.views();
+        let with_map = view::day_update(&views, &sub, wire::Speed::Normal, 0, true).len() as f64;
+        let without = view::day_update(&views, &sub, wire::Speed::Normal, 0, false).len() as f64;
+        let per_update = (without * f64::from(map_every - 1) + with_map) / f64::from(map_every);
+        let rate = |speed: wire::Speed| -> f64 {
+            let days_per_second = match pax_protocol::pacing(speed) {
+                Pacing::Every(d) if !d.is_zero() => 1.0 / d.as_secs_f64(),
+                _ => f64::INFINITY,
+            };
+            days_per_second.min(f64::from(updates_per_second)) * per_update / 1000.0
+        };
+        // Speed 3 is `Normal`, two days a second (D23's pacing table).
+        let (speed3, fastest) = (rate(wire::Speed::Normal), rate(wire::Speed::Fastest));
+        println!(
+            "{provinces} provinces: update {:.1} KB with the map, {:.1} KB without; remote client {speed3:.1} KB/s at speed 3, {fastest:.1} KB/s at Fastest",
+            with_map / 1000.0,
+            without / 1000.0
+        );
+        assert!(speed3 <= 100.0, "{speed3:.1} KB/s at speed 3, over D24's 100 KB/s");
     }
 }
