@@ -11,9 +11,11 @@
 ##   --server=PATH          pax_server binary (default: ../target/debug/pax_server)
 ##   --nation=N             play nation N (default: sandbox)
 ##   --map-mode=N           start in map mode N (a PaxKeys.MAP_MODE_* value)
+##   --tab=N                start on side-panel tab N (0 World, 1 Nation, 2 Market, 3 Province)
+##   --select=N             select province N at start
 ##   --screenshot=PATH      run to day 30, pause, save a screenshot and quit
-##   --smoke                headless check: select a province, switch to the Price map,
-##                          run to day 40, check the views arrived, print SMOKE OK, quit
+##   --smoke                headless check: select a province, switch to the Price map, set a policy,
+##                          run to day 40, check the views and the policy, print SMOKE OK, quit
 extends Control
 
 const PaxKeys := preload("res://pax_keys.gd")
@@ -24,6 +26,9 @@ const Format := preload("res://ui/format.gd")
 const MapView := preload("res://ui/map_view.gd")
 const MapModes := preload("res://ui/map_modes.gd")
 const MapColors := preload("res://ui/map_colors.gd")
+const NationPanel := preload("res://ui/nation_panel.gd")
+const MarketPanel := preload("res://ui/market_panel.gd")
+const ProvincePanel := preload("res://ui/province_panel.gd")
 
 const SMOKE_DAYS := 40
 const SCREENSHOT_DAYS := 30
@@ -37,12 +42,20 @@ var start_screen: Control
 var game: Control
 var top_bar: TopBar
 var summary: SummaryPanel
+var tabs: TabContainer
+var nation_panel: NationPanel
+var market_panel: MarketPanel
+var province_panel: ProvincePanel
 var map_view: MapView
 var map_modes: MapModes
 var province_info: Label
 var overlay: DebugOverlay
 var lost: Label
 
+## The policy the smoke test sets (income tax of nation 0), in per mille.
+const SMOKE_TAX_PER_MILLE := 123
+## The smoke test's command, once accepted: its `client_seq`.
+var _smoke_command: Variant = null
 ## The province panel's province, or `null` for none (D22: no sentinels).
 var selected_province: Variant = null
 var _started_ms := 0
@@ -91,21 +104,36 @@ func _handle(event: Dictionary) -> void:
 			welcome = event
 			top_bar.set_session(welcome)
 			summary.set_session(welcome)
+			nation_panel.set_session(welcome)
+			market_panel.set_session(welcome)
+			province_panel.set_session(welcome)
 			_load_map()
 			_subscribe()
+			var select := _arg("--select=")
+			if select.is_valid_int():
+				_select_province(int(select))
 			if _flag("--smoke"):
 				# Exercise the subscription path: a province panel and a value map mode.
 				_select_province(0)
 				map_modes.select(PaxKeys.MAP_MODE_PRICE)
+				_smoke_command = client.submit_policy(PaxKeys.POLICY_INCOME_TAX, 0,
+					PaxClient.rate_from_per_mille(SMOKE_TAX_PER_MILLE))
 			if _flag("--smoke") or _arg("--screenshot=") != "":
 				client.set_speed(PaxKeys.SPEED_FASTEST)
 		PaxKeys.DAY_UPDATE:
 			last_update = event
 			top_bar.show_day(event)
 			summary.show_update(event)
+			nation_panel.show_update(event)
+			market_panel.show_update(event)
+			province_panel.show_update(event)
 			overlay.show_update(event)
 			_show_map(event)
 			_check_scripted_runs(event[PaxKeys.DAY])
+		PaxKeys.COMMAND_RESULT:
+			nation_panel.show_result(event)
+			if event[PaxKeys.CLIENT_SEQ] == _smoke_command and event[PaxKeys.COMMAND_ERROR] != PaxKeys.COMMAND_ERROR_NONE:
+				_finish(1, "SMOKE FAILED: the policy command was refused: %s" % event)
 		PaxKeys.SERVER_STATE:
 			top_bar.show_speed(event[PaxKeys.SPEED])
 		PaxKeys.CLOSED:
@@ -120,7 +148,11 @@ func _check_scripted_runs(day: int) -> void:
 		if map == null or map[PaxKeys.MODE] != PaxKeys.MAP_MODE_PRICE or province == null or province[PaxKeys.PROVINCE_ID] != 0:
 			_finish(1, "SMOKE FAILED: the update lacks the subscribed views: map %s, province %s" % [map, province])
 			return
-		print("SMOKE OK: day %d, state %s, %s, price map and province panel" % [
+		var tax: int = last_update[PaxKeys.NATION_TABLE][PaxKeys.INCOME_TAX_RATE_RAW][0]
+		if _smoke_command == null or tax != PaxClient.rate_from_per_mille(SMOKE_TAX_PER_MILLE):
+			_finish(1, "SMOKE FAILED: the income tax policy didn't apply (rate %d)" % tax)
+			return
+		print("SMOKE OK: day %d, state %s, %s, price map, province panel and a policy" % [
 			day, Format.hash_hex(last_update[PaxKeys.STATE_HASH]), welcome[PaxKeys.SCENARIO]])
 		_finish(0, "")
 	var shot := _arg("--screenshot=")
@@ -201,6 +233,8 @@ func _select_province(province: int) -> void:
 	selected_province = province
 	map_view.set_selected(province)
 	_subscribe()
+	if tabs.current_tab == 0:
+		tabs.current_tab = 3 # the province panel
 
 
 func _connection_lost(reason: String) -> void:
@@ -265,9 +299,30 @@ func _build_ui() -> void:
 	province_info = Label.new()
 	map_column.add_child(province_info)
 	body.add_child(map_column)
+	tabs = TabContainer.new()
+	tabs.custom_minimum_size.x = 540
 	summary = SummaryPanel.new()
-	summary.custom_minimum_size.x = 540
-	body.add_child(summary)
+	summary.name = "World"
+	tabs.add_child(summary)
+	nation_panel = NationPanel.new()
+	nation_panel.name = "Nation"
+	nation_panel.policy_requested.connect(func(policy: String, nation: int, rate_raw: int) -> void:
+		client.submit_policy(policy, nation, rate_raw))
+	tabs.add_child(nation_panel)
+	market_panel = MarketPanel.new()
+	market_panel.name = "Market"
+	tabs.add_child(market_panel)
+	province_panel = ProvincePanel.new()
+	province_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var province_scroll := ScrollContainer.new()
+	province_scroll.name = "Province"
+	province_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	province_scroll.add_child(province_panel)
+	tabs.add_child(province_scroll)
+	var tab := _arg("--tab=")
+	if tab.is_valid_int():
+		tabs.current_tab = int(tab)
+	body.add_child(tabs)
 	game.add_child(body)
 	add_child(game)
 	if start_mode.is_valid_int():
