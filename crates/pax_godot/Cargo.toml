@@ -19,6 +19,10 @@ pax_protocol.workspace = true
 # The map reader the server validates maps with (no engine, no wire types).
 pax_map.workspace = true
 flatbuffers.workspace = true
+# TLS to a multiplayer server elsewhere (D24, M4-6), pinned to the server's
+# certificate; the workspace's rustls, as the server uses.
+rustls.workspace = true
+ring.workspace = true
 # Pinned exactly: godot-rust is pre-1.0 and breaks between minor versions. api-4-7
 # builds against Godot 4.7's API, and the extension then loads in Godot 4.7 and later.
 godot = { version = "=0.5.5", features = ["api-4-7"] }

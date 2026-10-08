@@ -11,7 +11,7 @@
 //! * **Closing:** a protocol error, a `Goodbye` or a closed socket ends the
 //!   connection for good, with a reason for the connection-lost screen.
 
-use std::io::{ErrorKind, Read, Write};
+use std::io::ErrorKind;
 use std::net::{SocketAddr, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -21,6 +21,7 @@ use pax_protocol::wire;
 
 use crate::decode::{SaveRequest, ServerEvent, ServerStream};
 use crate::encode;
+use crate::transport::{self, Transport};
 
 /// Send a `Ping` after this long without sending anything: a fifth of the server's
 /// idle timeout (`pax_protocol::IDLE_TIMEOUT`), so a paused game is never dropped.
@@ -37,7 +38,8 @@ pub struct Polled {
 /// A connection to a server: non-blocking, polled.
 #[derive(Debug)]
 pub struct Connection {
-    stream: TcpStream,
+    /// Plain TCP, or TLS pinned to the server's certificate (M4-6).
+    transport: Transport,
     reader: ServerStream,
     /// Bytes not yet accepted by the socket, in order.
     outbox: Vec<u8>,
@@ -55,13 +57,32 @@ pub struct Connection {
 }
 
 impl Connection {
-    /// Connects to `addr`, waiting at most `timeout`.
+    /// Connects to `addr` over plain TCP, waiting at most `timeout`: a local server
+    /// (single player, or a multiplayer server on this machine).
     pub fn connect(addr: SocketAddr, timeout: Duration) -> std::io::Result<Connection> {
-        let stream = TcpStream::connect_timeout(&addr, timeout)?;
-        stream.set_nodelay(true)?;
-        stream.set_nonblocking(true)?;
-        Ok(Connection {
-            stream,
+        Ok(Connection::over(Transport::Plain(Connection::socket(addr, timeout)?)))
+    }
+
+    /// Connects to `addr` over TLS, trusting only the certificate whose SHA-256 is
+    /// `fingerprint` (D24, M4-6): a multiplayer server elsewhere. The handshake runs
+    /// as the connection is polled; a wrong certificate ends it with a reason.
+    pub fn connect_tls(addr: SocketAddr, timeout: Duration, fingerprint: &str) -> std::io::Result<Connection> {
+        let pinned = transport::normalise(fingerprint).ok_or_else(|| {
+            std::io::Error::new(ErrorKind::InvalidInput, "a fingerprint is 64 hex digits (the server prints it)")
+        })?;
+        Ok(Connection::over(Transport::tls(Connection::socket(addr, timeout)?, pinned)?))
+    }
+
+    fn socket(addr: SocketAddr, timeout: Duration) -> std::io::Result<TcpStream> {
+        let socket = TcpStream::connect_timeout(&addr, timeout)?;
+        socket.set_nodelay(true)?;
+        socket.set_nonblocking(true)?;
+        Ok(socket)
+    }
+
+    fn over(transport: Transport) -> Connection {
+        Connection {
+            transport,
             reader: ServerStream::default(),
             outbox: Vec::new(),
             last_sent: Instant::now(),
@@ -71,7 +92,7 @@ impl Connection {
             closed: None,
             password: None,
             reported: false,
-        })
+        }
     }
 
     pub fn is_open(&self) -> bool {
@@ -90,7 +111,7 @@ impl Connection {
 
     fn flush(&mut self) {
         while !self.outbox.is_empty() {
-            match self.stream.write(&self.outbox) {
+            match self.transport.write(&self.outbox) {
                 Ok(0) => return self.close("the server closed the connection".to_owned()),
                 Ok(n) => {
                     self.outbox.drain(..n);
@@ -100,12 +121,16 @@ impl Connection {
                 Err(e) => return self.close(format!("connection lost: {e}")),
             }
         }
+        // TLS records rustls is still holding (a handshake's, or a full socket's).
+        if let Err(e) = self.transport.flush() {
+            self.close(format!("connection lost: {e}"));
+        }
     }
 
     fn close(&mut self, reason: String) {
         if self.closed.is_none() {
             self.closed = Some(reason);
-            let _ = self.stream.shutdown(std::net::Shutdown::Both);
+            let _ = self.transport.socket().shutdown(std::net::Shutdown::Both);
         }
     }
 
@@ -130,7 +155,7 @@ impl Connection {
         self.flush();
         let mut buf = [0u8; 64 * 1024];
         while self.closed.is_none() {
-            match self.stream.read(&mut buf) {
+            match self.transport.read(&mut buf) {
                 Ok(0) => self.close("the server closed the connection".to_owned()),
                 Ok(n) => {
                     for event in self.reader.push(&buf[..n]) {

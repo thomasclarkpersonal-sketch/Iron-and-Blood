@@ -461,7 +461,7 @@ The state → national → sphere → global roll-up in the old ECONOMY_SYSTEM w
   - 30 s drops the session, and its nation keeps its current policies. In multiplayer this replaces D22's 10 s liveness rule, which would otherwise drop a client before the fairness pause could help it; single player keeps D22's rule;
   - a resume token (64 bits from the OS's secure random source) reclaims the nation. In a started game, any player who leaves keeps their seat (player id and nation) for their token: the server can't tell a crash from a quit. A kept seat counts toward the player limit, nobody else can take its nation, and the lobby shows it as away. A kick or a load drops kept seats (M4-4).
 - **Transport:**
-  - TLS whenever the server is not bound to localhost;
+  - TLS whenever the server is not bound to localhost (rustls, M4-6). A player-hosted server makes a self-signed certificate at start (`--tls-self-signed`); a dedicated one loads PEM files (`--tls-cert`, `--tls-key`). Clients pin the certificate's SHA-256, which the server prints and the host shares. No certificate authority is involved, and clients still check the handshake's signatures against the pinned certificate;
   - an optional server password, sent in `Hello` (`--password-file`; M4-6). A wrong or missing one is `Rejected`, and passwords are compared in constant time. On a dedicated server the admin also proves who they are with an admin password (`--admin-password-file`, required with `--admin`): a name alone proves nothing;
   - a per-session command rate limit (default 20 per second, `--commands-per-second`): more get `RateLimited` (M4-6).
 

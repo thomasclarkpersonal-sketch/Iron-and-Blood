@@ -19,7 +19,9 @@ pub mod encode;
 pub mod keys;
 pub mod map;
 pub mod rates;
+pub mod transport;
 
+use std::net::ToSocketAddrs;
 use std::path::Path;
 use std::time::Duration;
 
@@ -125,17 +127,28 @@ impl PaxClient {
     /// Connects to a running server. Returns an error message, or `""`.
     #[func]
     fn connect_to(&mut self, host: GString, port: i64) -> GString {
-        let Ok(port) = u16::try_from(port) else { return rejected(format!("port {port} out of range")) };
-        // A new session: nothing of the previous one carries over, including a
-        // launched server and its scenario directory (call `set_scenario_dir` after).
+        match self.new_session(&host, port) {
+            Ok(addr) => self.connect_addr(addr),
+            Err(e) => e,
+        }
+    }
+
+    /// Starts a new session to `host:port`: nothing of the previous one carries over,
+    /// including a launched server and its scenario directory (call
+    /// `set_scenario_dir` after). Resolves the address the same way for every
+    /// connect: a host name, an IPv4 or an IPv6 address. The error is the message
+    /// for the caller.
+    fn new_session(&mut self, host: &GString, port: i64) -> Result<std::net::SocketAddr, GString> {
+        let Ok(port) = u16::try_from(port) else { return Err(rejected(format!("port {port} out of range"))) };
         self.connection = None;
         self.server = None;
         self.welcome = None;
         self.map = None;
         self.scenario_dir = None;
-        match format!("{host}:{port}").parse() {
-            Ok(addr) => self.connect_addr(addr),
-            Err(e) => rejected(format!("bad address: {e}")),
+        match (host.to_string(), port).to_socket_addrs().map(|mut a| a.next()) {
+            Ok(Some(addr)) => Ok(addr),
+            Ok(None) => Err(rejected(format!("{host} has no address"))),
+            Err(e) => Err(rejected(format!("bad address {host}: {e}"))),
         }
     }
 
@@ -147,6 +160,26 @@ impl PaxClient {
                 GString::new()
             }
             _ => rejected("not connected".to_owned()),
+        }
+    }
+
+    /// Connects to a multiplayer server elsewhere over TLS (D24, M4-6), trusting only
+    /// the certificate whose SHA-256 is `fingerprint`: what the server printed, as
+    /// the host shared it (any case, `:` and spaces allowed). Returns an error message
+    /// (nothing connected), or `""`; a wrong certificate ends the connection with a
+    /// reason as it is polled.
+    #[func]
+    fn connect_secure(&mut self, host: GString, port: i64, fingerprint: GString) -> GString {
+        let addr = match self.new_session(&host, port) {
+            Ok(addr) => addr,
+            Err(e) => return e,
+        };
+        match Connection::connect_tls(addr, Duration::from_secs(5), &fingerprint.to_string()) {
+            Ok(c) => {
+                self.connection = Some(c);
+                GString::new()
+            }
+            Err(e) => rejected(format!("cannot connect to {addr}: {e}")),
         }
     }
 
