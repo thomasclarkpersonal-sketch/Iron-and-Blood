@@ -207,7 +207,6 @@ pub(crate) async fn accept_loop(
             Ok((stream, peer)) => {
                 let session = next_session;
                 next_session += 1;
-                info!(session, %peer, "connection");
                 // Small, latency-sensitive messages: don't wait to coalesce them.
                 let _ = stream.set_nodelay(true);
                 // `to_canonical`: on a dual-stack socket, a local IPv4 client is ::ffff:127.0.0.1.
@@ -215,14 +214,23 @@ pub(crate) async fn accept_loop(
                 let sim = sim.clone();
                 match tls.clone() {
                     None => {
+                        info!(session, %peer, "connection");
                         tokio::spawn(connection(stream, session, sim, timing, remote));
                     }
                     Some(acceptor) => {
                         tokio::spawn(async move {
                             match tokio::time::timeout(HANDSHAKE_TIMEOUT, acceptor.accept(stream)).await {
-                                Ok(Ok(stream)) => connection(stream, session, sim, timing, remote).await,
-                                Ok(Err(e)) => info!(session, error = %e, "TLS handshake failed"),
-                                Err(_) => info!(session, "TLS handshake timed out"),
+                                Ok(Ok(stream)) => {
+                                    info!(session, %peer, "connection");
+                                    connection(stream, session, sim, timing, remote).await
+                                }
+                                // A port probe, such as the Docker health check (M4-8),
+                                // closes without a word: not worth a line every 30 s.
+                                Ok(Err(e)) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
+                                    debug!(session, %peer, "closed before the TLS handshake")
+                                }
+                                Ok(Err(e)) => info!(session, %peer, error = %e, "TLS handshake failed"),
+                                Err(_) => info!(session, %peer, "TLS handshake timed out"),
                             }
                         });
                     }

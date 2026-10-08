@@ -6,12 +6,8 @@ M4 builds on [Milestone 3](MILESTONE_3.md) without replacing it: the same server
 
 **Prerequisite:** M3's definition of done, in particular the session replay test and the measured `DayUpdate` sizes.
 
-> [!IMPORTANT]
-> **Reminder: set up the Dockerfile in M4.** The early draft is kept at [`docs/drafts/Dockerfile.m4-draft`](drafts/Dockerfile.m4-draft), out of the repository root so tools don't pick it up. It **does not build**:
-> - it compiles `schemas/protocol.fbs`, which has been split into `common.fbs`, `client.fbs` and `server.fbs`;
-> - it installs Debian's flatc 2.0.8, which doesn't match the pinned 24.3.25 runtime crate.
->
-> Don't use it, and don't wire it into CI or releases. Task **M4-8** turns it into a working root `Dockerfile` (see "Docker (M4-8)" below).
+> [!NOTE]
+> **Docker (M4-8) is done:** the root `Dockerfile`, `compose.yaml` and `docker/entrypoint.sh` replace the old draft. See "Docker (M4-8)" below.
 
 ## What changes from M3
 
@@ -88,14 +84,14 @@ Loading a save goes through the lobby, and players reclaim their nations.
 | M4-5 ✅ | **Multiplayer saves:** the command log records the player for each command; loading goes through the lobby | M4-2 | The replay test covers a two-player session. **Done:** the log already recorded each command's player; a multiplayer load now goes back to the lobby (claims the loaded game has are kept, others become unclaimed, never sandbox; nobody ready; the host starts again), and players are never dropped by a load. `session_replay.rs` plays a two-player game, saves, replays it (in-process and through `pax_cli replay`), then loads it through the lobby back to the saved state |
 | M4-6 ✅ | **Transport security:** TLS for non-local binds, server password, per-session rate limit | M4-1 | Self-signed certificate for player-hosted games, with its fingerprint shown to join. Then lift M4-1's rule that `--players` above 1 binds loopback only. The server password must also authenticate the host: `--admin NAME` (M4-3) trusts a name the client asserts. **M4-6a done:** a server password and an admin password, from files, sent in `Hello` (protocol 1.6) and compared in constant time; the admin is host only with the admin password (`--admin` requires it); D24's per-session rate limit (20 commands a second, `RateLimited`).  **M4-6b done:** TLS for every connection when the server has a certificate: self-signed at start (`--tls-self-signed`) or from PEM files (`--tls-cert`, `--tls-key`); the server prints the SHA-256 and writes it to `--fingerprint-file`; clients pin it (`PaxClient.join_game`, M4-9) and still verify the handshake's signatures; several players off localhost need TLS. The bridge's test plays over TLS against a real server and refuses a wrong certificate |
 | M4-7 ✅ | **Bandwidth controls:** per-session update-rate cap; `MapView` refresh policy | M4-1 | Measured at long-term scale over a simulated 50 ms/1% loss link. **Done:** a remote session (its peer isn't loopback) gets at most 4 updates a second, coalesced, and its `MapView` with the `Subscribe` answer and every 5th update (`throttle.rs`; both are settings, `--updates-per-second` and `--map-every`); the sim loop wakes to send a held day, so a pause never strands one. **Measured** (`game::tests::remote_bandwidth_budget`, 2026-10-09): at 10,000 provinces and about 1M POP rows with every view subscribed, an update is 90.8 KB with the map and 10.7 KB without, so a remote client gets 53.5 KB/s at speed 3 and 107 KB/s at Fastest (the cap's ceiling). The measurement is of encoded sizes under the policy; the 50 ms/1% loss link was not simulated, which TCP's retransmits don't change in volume, only in latency |
-| M4-8 | **Dedicated server:** Dockerfile and compose file | M4-6 | See "Docker" below |
+| M4-8 ✅ | **Dedicated server:** Dockerfile and compose file | M4-6 | See "Docker" below. **Done:** the root `Dockerfile` (cargo-chef layers, non-root, saves and TLS volumes, a TCP health check), `docker/entrypoint.sh` and `compose.yaml`; CI builds the image and starts it until it is healthy |
 | M4-9 ✅ | **Client:** lobby screen, player list, "waiting for player" overlay, reconnect, host controls | M4-2 to M4-4 | **Done:** the start screen hosts (a server on this machine for 2 to 8 players, over TLS with a fresh certificate, which the host joins too) or joins a game (address, port, the fingerprint to pin, a password); the lobby screen lists the players with their nations, ready marks, host and away flags, claims a nation, readies, and gives the host Start and Kick; the top bar names who the game is waiting for and enables only Pause for a non-host; the connection-lost screen offers **Rejoin** with the resume token. CI runs `--smoke-host`, which hosts over TLS, goes through the lobby and plays. ![lobby](images/m4-9-lobby.png) |
-| M4-10 | **Docs:** D24 accepted; NETWORK_PROTOCOL (lobby, security); REPO_SETUP or a hosting guide; this file's status | all | |
+| M4-10 ✅ | **Docs:** D24 accepted; NETWORK_PROTOCOL (lobby, security); REPO_SETUP or a hosting guide; this file's status | all | **Done:** D24 accepted (M4-0); NETWORK_PROTOCOL's lobby, lag, rejoin and security sections; [HOSTING.md](HOSTING.md), the hosting guide; this file's status against the definition of done |
 | M4-11 ✅ | **Tick budget at M2 content (D13):** profile the per-good and per-market loops and bring `two_states` at about 1M POP rows under 100 ms/day on 8 threads | M3 done | Carried over from M3's definition of done (item 4). First fix the `bench --scale` month-end overflow and share one `pax_data::bench` world-building helper with `server_day_budget`, so the two measurements describe the same world. The cost grows with goods and markets, so it must hold before content grows towards D13's 50 goods. **Done:** timing each system showed the market's settlement (about 70 ms) and the payouts dominating, both bound by i128 division. `Fixed::mul`, `mul_ceil`, `div`, `mul_div` and `allocate_raw` now take an i64 path when the intermediate fits, with identical results (tests compare both paths of each with the i128 formulas, on values either side of the i64 boundary; every golden hash is unchanged). `two_states` at about 1M rows: 138 → 91 ms/day; D13's 4-good world: 49 → 31 ms/day |
 
 ### Docker (M4-8)
 
-The draft Dockerfile needs these fixes before it is useful:
+**Done.** `docker compose up` starts a dedicated server on port 7777 for 4 players (`PAX_PLAYERS`), with saves and the TLS certificate on volumes. The draft's problems, each fixed:
 - **Generated code:** don't run flatc in the image. Use `pax_protocol`'s checked-in generated code (M3-1). Debian bookworm's `flatbuffers-compiler` is 2.0.8, which doesn't match the 24.3.25 runtime crate.
 - **`.dockerignore`:** add one excluding `target/` and `.git/`. Without it, `COPY . .` sends gigabytes of build output into the build.
 - **Dependency caching:** cache dependencies in their own layer (e.g. `cargo-chef`), so a code change doesn't rebuild every dependency.
@@ -103,6 +99,8 @@ The draft Dockerfile needs these fixes before it is useful:
 - **Saves volume:** put saves on a volume (`/app/saves`).
 - **Configuration:** take settings through arguments or environment: scenario, bind address, password, admin name, `--sandbox`.
 - **Health check:** use a TCP probe on the port.
+- **TLS (M4-6):** the entrypoint makes a certificate once, into the `tls` volume, so the fingerprint players pin stays the same across restarts; a mounted `cert.pem` and `key.pem` are used instead. The server prints the fingerprint, and writes it to `/app/tls/fingerprint`.
+- **Settings:** `PAX_PLAYERS`, `PAX_SCENARIO`, `PAX_PORT`, `PAX_PASSWORD_FILE`, `PAX_ADMIN` with `PAX_ADMIN_PASSWORD_FILE`, `PAX_COMMANDS_PER_SECOND`, `PAX_PAUSE_AFTER`, `PAX_DROP_AFTER`, `PAX_UPDATES_PER_SECOND`, `PAX_MAP_EVERY`; more `pax_server` arguments after the image name.
 
 ## Definition of done
 
@@ -112,8 +110,21 @@ The draft Dockerfile needs these fixes before it is useful:
 4. **Saves:** a two-player game saves, reloads through the lobby, and its replayed command log reproduces the original `state_hash` (CI). ✅ `session_replay.rs` (M4-5).
 5. **Bandwidth:** ≤ 100 KB/s per remote client at speed 3 at long-term scale, measured and recorded. ✅ 53.5 KB/s (M4-7).
 6. **Security:** TLS on non-local binds; fuzzing covers the lobby messages; command rate limits are enforced. ✅ M4-6 (TLS, passwords, rate limit); the hostile-input test and the cargo-fuzz target decode every request, the lobby's included.
-7. **Dedicated server:** `docker compose up` starts it with a persistent saves volume.
+7. **Dedicated server:** `docker compose up` starts it with a persistent saves volume. ✅ M4-8.
 8. **Tick budget (D13, from M3):** `two_states` replicated to about 1M POP rows ticks within 100 ms/day on 8 threads, measured and recorded in D13's "Measured" column (M4-11). ✅ ≈91 ms/day.
+
+### Status against the definition of done
+
+| # | Status | Evidence |
+|---|---|---|
+| 1 | Built and tested on one machine; **a playtest with three players on two machines remains** | Hosting and joining over TLS from the client (M4-9), each player commanding only their nation: `NotPermitted` otherwise (`tests/multiplayer.rs`, M4-1, M4-3). CI's `--smoke-host` hosts over TLS, goes through the lobby and plays |
+| 2 | Met | The host sets the speed, saves, loads and kicks; a non-host can only pause (`sim.rs` tests, `tests/multiplayer.rs`; M4-3) |
+| 3 | Met | A real stall pauses everyone and is named in `ServerState.waiting_for`; a return resumes; 30 s of silence drops the player while the other plays on (`tests/multiplayer.rs`, with real time); the resume token reclaims the nation (`sim.rs`; M4-4). The thresholds are settings with D24's defaults, which a playtest should confirm |
+| 4 | Met | `session_replay.rs`: a two-player game saves, replays through `pax_cli replay` to its `state_hash`, and reloads through the lobby (M4-5) |
+| 5 | Met | 53.5 KB/s per remote client at speed 3, at 10,000 provinces and about 1M POP rows with every view (`game::tests::remote_bandwidth_budget`, M4-7) |
+| 6 | Met | TLS whenever several players are off localhost; passwords; 20 commands a second (whether other requests count too is an open follow-up, below); the hostile-input test and the cargo-fuzz target cover every request, the lobby's included (M4-6) |
+| 7 | Met | `docker compose up`: saves and the TLS certificate on volumes; CI builds the image and waits until it is healthy (M4-8) |
+| 8 | Met | ≈91 ms/day at about 1M POP rows on 8 threads (D13, M4-11) |
 
 ## Open follow-ups (owner decisions)
 

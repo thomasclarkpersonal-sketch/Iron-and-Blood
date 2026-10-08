@@ -55,6 +55,7 @@ New to the project? Start with **[Onboarding](docs/ONBOARDING.md)**: a codebase 
 * [Milestone 2](docs/MILESTONE_2.md): M2 status, decisions waiting on you, next tasks.
 * [Milestone 3](docs/MILESTONE_3.md): playable single player: `pax_server`, Godot client, saves (closed).
 * [Milestone 4](docs/MILESTONE_4.md): multiplayer: lobby, authority, lag rules, hosting.
+* [Hosting a multiplayer game](docs/HOSTING.md): from the client, or a dedicated server with Docker.
 * [Network protocol](docs/NETWORK_PROTOCOL.md): the wire format between server and client.
 * [System Architecture Overview](docs/ARCHITECTURE.md): engine design and the tick schedule.
 * [Backend Schema](docs/BACKEND_SCHEMA.md): workspace, SoA tables, systems.
@@ -77,6 +78,6 @@ New to the project? Start with **[Onboarding](docs/ONBOARDING.md)**: a codebase 
 * **Development environment:** WSL/Linux; CI also verifies determinism on Windows and macOS.
 * **Network:** server-authoritative; size-prefixed FlatBuffers over TCP (D10, D22). Single player in M3, multiplayer in M4. See [NETWORK_PROTOCOL.md](docs/NETWORK_PROTOCOL.md).
 * **Frontend:** Godot 4, with a GDScript UI and a Rust GDExtension bridge for the protocol (D12). The engine is client-agnostic.
-* **Containerization:** Docker for dedicated multiplayer servers in M4. Single player launches `pax_server` directly, and the headless tools need no container.
+* **Containerization:** Docker for dedicated multiplayer servers (M4-8: `docker compose up`, see `compose.yaml`). Single player launches `pax_server` directly, and the headless tools need no container.
 
 > The PDFs in `Reference Books/` are copyrighted and git-ignored. Keep them local; do not commit or redistribute them.
