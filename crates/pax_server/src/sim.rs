@@ -145,7 +145,6 @@ impl Sim {
                 Ok(seat) => {
                     info!(session, player = seat.player, nation = ?seat.nation(), "resumed");
                     self.welcome(session, seat);
-                    self.lobby_changed();
                 }
                 Err(refusal) => self.reject(session, &self.refusal(refusal)),
             }
@@ -176,7 +175,6 @@ impl Sim {
         let host = self.sessions.is_host(session);
         info!(session, name, player = seat.player, ?requested_nation, host, "welcomed");
         self.welcome(session, seat);
-        self.lobby_changed();
     }
 
     /// What a client is told when the table refuses it (`Rejected`, or a lobby
@@ -245,7 +243,7 @@ impl Sim {
             return self.lobby_notice(session, &format!("unknown nation {n}: the scenario has {nations}"));
         }
         match self.sessions.claim(session, nation) {
-            Ok(()) => self.lobby_changed(),
+            Ok(()) => {}
             Err(refusal) => self.lobby_notice(session, &self.refusal(refusal)),
         }
     }
@@ -255,7 +253,7 @@ impl Sim {
             return;
         }
         match self.sessions.set_ready(session, ready) {
-            Ok(()) => self.lobby_changed(),
+            Ok(()) => {}
             Err(refusal) => self.lobby_notice(session, &self.refusal(refusal)),
         }
     }
@@ -273,8 +271,8 @@ impl Sim {
             return self.lobby_notice(session, "not every player is ready");
         }
         self.phase = Phase::Playing;
+        self.sessions.mark_lobby_changed();
         info!(session, players = self.sessions.players(), "the game starts");
-        self.lobby_changed();
     }
 
     /// Replaces the session's subscription and answers with a `DayUpdate` for the
@@ -531,7 +529,6 @@ impl Sim {
             s.window = UpdateWindow::default();
             self.welcome(id, seat);
         }
-        self.lobby_changed();
     }
 
     /// The host ends another player's session (D24). Anything else is ignored: a
@@ -543,7 +540,7 @@ impl Sim {
         // An away player's kept seat is dropped, which frees their nation (D24).
         if self.sessions.forget(player) {
             info!(session, player, "kicked an away player");
-            return self.lobby_changed();
+            return;
         }
         let Some(target) = self.sessions.session_of(player).filter(|&t| t != session) else {
             return debug!(session, player, "ignored kick");
@@ -555,15 +552,14 @@ impl Sim {
         if let Some(v) = self.sessions.unseat(target) {
             self.seat_ended(target, v);
         }
-        self.lobby_changed();
     }
 
     /// A player's seat ended: they left, were kicked, or a load dropped them. The
     /// table has already passed the host role on (D24). When the last player
     /// leaves, nobody is watching, so the clock stops (D23), and a server the
     /// client launched stops too. Every path that ends a seat comes through here.
-    /// It doesn't tell the lobby: the request handler does, once, when the table is
-    /// final, so a batch of changes (a load) never shows half done.
+    /// It doesn't tell the lobby: `Sim::handle` does, once per event, after the
+    /// table's last change, so a batch of changes (a load) never shows half done.
     fn seat_ended(&mut self, session: u64, v: Vacated) {
         self.unstalled(session, v.seat.player);
         if let Some(next) = v.new_host {
@@ -645,7 +641,6 @@ impl Sim {
                 // In a started multiplayer game the seat waits for the resume token.
                 if let Some(v) = self.sessions.remove(session, self.phase == Phase::Playing) {
                     self.seat_ended(session, v);
-                    self.lobby_changed();
                 }
             }
             Inbound::Stalled { session } => self.stalled(session),
@@ -657,6 +652,10 @@ impl Sim {
             Inbound::Shutdown => self.stop = true,
             #[cfg(test)]
             Inbound::Crash => panic!("injected crash for a test"),
+        }
+        // The lobby, once per event, after its last change (see `SessionTable`).
+        if self.sessions.take_lobby_change() {
+            self.lobby_changed();
         }
         !self.stop
     }

@@ -18,7 +18,6 @@
 use std::collections::BTreeMap;
 use std::hash::{BuildHasher, RandomState};
 
-use crate::encode::LobbyEntry;
 use crate::net::{ConnHandle, Outbound};
 use crate::view::CheckedSubscription;
 use crate::window::UpdateWindow;
@@ -149,6 +148,24 @@ pub(crate) struct SessionTable {
     host: Option<u64>,
     /// How the host is elected and succeeded (D24).
     host_rule: HostRule,
+    /// Something the lobby shows changed since [`Self::take_lobby_change`]: a seat,
+    /// a claim, a ready mark, the host or a kept seat. Every writer below sets it, so
+    /// the sim tells the lobby once per event, after its last change (M4-2).
+    lobby_dirty: bool,
+}
+
+/// One player as the lobby shows them (`LobbyPlayer`, D24): what the table says, for
+/// `encode::lobby_state` to put on the wire.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LobbyEntry {
+    pub player: u16,
+    pub name: String,
+    pub nation: Option<u32>,
+    pub sandbox: bool,
+    pub ready: bool,
+    pub host: bool,
+    /// Left the started game; the seat waits for their resume token (D24).
+    pub away: bool,
 }
 
 impl SessionTable {
@@ -161,6 +178,7 @@ impl SessionTable {
             issued: 0,
             host: None,
             host_rule,
+            lobby_dirty: false,
         }
     }
 
@@ -184,6 +202,7 @@ impl SessionTable {
     pub(crate) fn remove(&mut self, id: u64, keep: bool) -> Option<Vacated> {
         let row = self.rows.remove(&id)?;
         let seat = row.seat?;
+        self.lobby_dirty = true;
         if keep {
             self.reserved.insert(row.token, Reservation { seat, name: row.name });
         }
@@ -196,6 +215,7 @@ impl SessionTable {
     /// is not kept.
     pub(crate) fn unseat(&mut self, id: u64) -> Option<Vacated> {
         let seat = self.rows.get_mut(&id)?.seat.take()?;
+        self.lobby_dirty = true;
         Some(self.vacated(id, seat))
     }
 
@@ -207,6 +227,7 @@ impl SessionTable {
         debug_assert!(row.seat.is_none(), "net lets a session say Hello only once");
         row.seat = Some(seat);
         row.ready = true;
+        self.lobby_dirty = true;
         row.token = token;
         row.name = name;
         self.elect(id);
@@ -218,12 +239,25 @@ impl SessionTable {
     pub(crate) fn forget(&mut self, player: u16) -> bool {
         let before = self.reserved.len();
         self.reserved.retain(|_, r| r.seat.player != player);
-        self.reserved.len() < before
+        let forgot = self.reserved.len() < before;
+        self.lobby_dirty |= forgot;
+        forgot
     }
 
     /// Drops every kept seat: a load replaced the game, whose nations they hold.
     pub(crate) fn forget_all(&mut self) {
+        self.lobby_dirty |= !self.reserved.is_empty();
         self.reserved.clear();
+    }
+
+    /// Whether the lobby changed since the last call, and clears the mark.
+    pub(crate) fn take_lobby_change(&mut self) -> bool {
+        std::mem::take(&mut self.lobby_dirty)
+    }
+
+    /// The lobby changed outside the table (the game started).
+    pub(crate) fn mark_lobby_changed(&mut self) {
+        self.lobby_dirty = true;
     }
 
     /// The session's resume token (0 before it is seated).
@@ -303,6 +337,7 @@ impl SessionTable {
         row.seat = Some(seat);
         row.name = name.to_owned();
         row.ready = false;
+        self.lobby_dirty = true;
         let token = self.new_token();
         self.rows.get_mut(&id).expect("just seated").token = token;
         self.elect(id);
@@ -325,6 +360,7 @@ impl SessionTable {
         if seat.claim != claim {
             seat.claim = claim;
             row.ready = false;
+            self.lobby_dirty = true;
         }
         Ok(())
     }
@@ -337,6 +373,7 @@ impl SessionTable {
         if ready && seat.claim == Claim::Unclaimed {
             return Err(Refusal::NoClaim);
         }
+        self.lobby_dirty |= row.ready != ready;
         row.ready = ready;
         Ok(())
     }

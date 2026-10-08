@@ -6,6 +6,8 @@ use pax_data::map::MapData;
 use pax_engine::World;
 use pax_protocol::wire::{self, ServerPayload};
 
+use crate::session::LobbyEntry;
+
 fn finish(
     mut b: FlatBufferBuilder<'_>,
     kind: ServerPayload,
@@ -155,19 +157,6 @@ pub fn save_list(names: &[String]) -> Vec<u8> {
     let names = b.create_vector(&names);
     let l = wire::SaveList::create(&mut b, &wire::SaveListArgs { names: Some(names) });
     finish(b, ServerPayload::SaveList, l.as_union_value())
-}
-
-/// One player as the lobby shows them (`LobbyPlayer`, D24).
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct LobbyEntry {
-    pub player: u16,
-    pub name: String,
-    pub nation: Option<u32>,
-    pub sandbox: bool,
-    pub ready: bool,
-    pub host: bool,
-    /// Left the started game; the seat waits for their resume token (D24).
-    pub away: bool,
 }
 
 /// The lobby (M4-2): every player, whether the game started, and, for the one
