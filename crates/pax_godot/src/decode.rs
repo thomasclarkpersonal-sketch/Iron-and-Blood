@@ -134,9 +134,8 @@ pub struct NationTableView {
     pub transfer_rate_raw: Vec<i64>,
     pub consumption_rate_raw: Vec<i64>,
     pub population: Vec<u64>,
-    /// Mean militancy per nation (added in protocol 1.1). `None` from a server that
-    /// predates the field, including early 1.1 builds: an absent addition means no
-    /// data (NETWORK_PROTOCOL §8), so check for it, never for `protocol_minor`.
+    /// Mean militancy per nation (protocol 1.2). `None` from an older server, which
+    /// doesn't send it: an absent addition means no data (NETWORK_PROTOCOL §8).
     pub militancy: Option<Vec<f64>>,
 }
 
@@ -769,7 +768,7 @@ mod tests {
         assert_eq!(u.nations.militancy, None, "an older server sends no militancy; that is no data, not an error");
     }
 
-    /// Protocol 1.1's militancy column, when sent, is checked like any other column.
+    /// Protocol 1.2's militancy column, when sent, is checked like any other column.
     #[test]
     fn decodes_the_militancy_column_and_checks_its_length() {
         let mut s = ServerStream::default();

@@ -98,7 +98,7 @@ func _check(update: Dictionary) -> void:
 	if map == null or map[PaxKeys.MODE] != PaxKeys.MAP_MODE_PRICE or province == null or province[PaxKeys.PROVINCE_ID] != 0:
 		_fail("the update lacks the subscribed views: map %s, province %s" % [map, province])
 		return
-	# The nation panel shows militancy, which this server sends (protocol 1.1).
+	# The nation panel shows militancy, which this server sends (protocol 1.2).
 	if update[PaxKeys.NATION_TABLE][PaxKeys.MILITANCY] == null:
 		_fail("the nation table lacks militancy")
 		return

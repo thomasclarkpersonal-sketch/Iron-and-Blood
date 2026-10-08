@@ -90,7 +90,7 @@ sequenceDiagram
 |---|---|---|
 | `day`, `speed`, `skipped`, `state_hash` | yes | bytes |
 | `WorldSummary`: population, workforce, unemployed, spending, wages, taxes, transfers, deprived, mean life needs and militancy | yes | < 200 B |
-| `NationTable`: treasury, the three policy rates, population and (from protocol 1.1) mean militancy, per nation | yes | ~10 KB for 200 nations |
+| `NationTable`: treasury, the three policy rates, population and (from protocol 1.2) mean militancy, per nation | yes | ~10 KB for 200 nations |
 | `MapView`: one value per province for the subscribed `MapMode` | if subscribed | ~80 KB for 10,000 provinces |
 | `MarketDetail`: price, supply, demand and traded per good for one market | if subscribed | ~1.6 KB for 50 goods |
 | `ProvinceDetail`: POPs, labour pools and producers of one province | if subscribed | ~1–3 KB |
@@ -147,7 +147,7 @@ FlatBuffers stays compatible across versions only if changes follow these rules.
 - **Never delete** a field; mark it `(deprecated)`.
 - **Add union members and enum values only at the end.** Never renumber them. Receivers must ignore an unknown union member or enum value, not crash on it.
 - A change that breaks these rules bumps `protocol_major`. A compatible addition bumps `protocol_minor`.
-- A receiver treats a field added in a later minor version as *no data* when it is absent, never as an error: a newer client must still read an older server. History: 1.1 (M3) added `StaticData.map_dir` and `NationTable.militancy`.
+- A receiver treats a field added in a later minor version as *no data* when it is absent, never as an error: a newer client must still read an older server. History: 1.1 (M3) added `StaticData.map_dir`; 1.2 (M3) added `NationTable.militancy`.
 - Rust code is generated with **flatc 24.3.25**, matching the `flatbuffers` crate version, into the `pax_protocol` crate. It is checked in, and CI regenerates it and fails on any difference. Mismatched compiler and runtime versions produce code that doesn't compile.
 
 ## 9. Testing

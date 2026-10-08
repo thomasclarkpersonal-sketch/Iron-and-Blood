@@ -89,7 +89,7 @@ impl<'a> NationTable<'a> {
     unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'a, u64>>>(NationTable::VT_POPULATION, None)}
   }
   /// Population-weighted mean militancy of the nation's POPs, in [0, 1] (D19). 0
-  /// for a nation nobody lives in. Added in protocol 1.1 (M3's definition of done:
+  /// for a nation nobody lives in. Added in protocol 1.2 (M3's definition of done:
   /// the nation panel shows militancy respond to policy).
   #[inline]
   pub fn militancy(&self) -> Option<flatbuffers::Vector<'a, Fixed>> {
