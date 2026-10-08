@@ -55,6 +55,11 @@ pub enum Got {
         day: u64,
         speed: Speed,
     },
+    SaveResult {
+        name: String,
+        error: String,
+    },
+    SaveList(Vec<String>),
     Other(String),
     /// The server closed the connection.
     Closed,
@@ -142,6 +147,26 @@ impl Client {
         self.send(&mut b, ClientPayload::SubmitCommand, s.as_union_value());
     }
 
+    pub fn save_game(&mut self, name: &str) {
+        let mut b = FlatBufferBuilder::new();
+        let name = b.create_string(name);
+        let s = SaveGame::create(&mut b, &SaveGameArgs { name: Some(name) });
+        self.send(&mut b, ClientPayload::SaveGame, s.as_union_value());
+    }
+
+    pub fn load_game(&mut self, name: &str) {
+        let mut b = FlatBufferBuilder::new();
+        let name = b.create_string(name);
+        let l = LoadGame::create(&mut b, &LoadGameArgs { name: Some(name) });
+        self.send(&mut b, ClientPayload::LoadGame, l.as_union_value());
+    }
+
+    pub fn list_saves(&mut self) {
+        let mut b = FlatBufferBuilder::new();
+        let l = ListSaves::create(&mut b, &ListSavesArgs {});
+        self.send(&mut b, ClientPayload::ListSaves, l.as_union_value());
+    }
+
     pub fn ping(&mut self, nonce: u64) {
         let mut b = FlatBufferBuilder::new();
         let p = Ping::create(&mut b, &PingArgs { nonce });
@@ -214,6 +239,15 @@ fn decode(frame: &[u8]) -> Got {
     }
     if let Some(r) = msg.payload_as_command_result() {
         return Got::CommandResult { client_seq: r.client_seq(), error: r.error(), applies_on_day: r.applies_on_day() };
+    }
+    if let Some(r) = msg.payload_as_save_result() {
+        return Got::SaveResult {
+            name: r.name().unwrap_or_default().to_owned(),
+            error: r.error().unwrap_or_default().to_owned(),
+        };
+    }
+    if let Some(l) = msg.payload_as_save_list() {
+        return Got::SaveList(l.names().map(|n| n.iter().map(str::to_owned).collect()).unwrap_or_default());
     }
     if let Some(s) = msg.payload_as_server_state() {
         return Got::ServerState { day: s.day(), speed: s.speed() };

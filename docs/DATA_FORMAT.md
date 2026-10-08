@@ -155,8 +155,41 @@ label = [170, 150]           # pixel [x, y] where its name is drawn
 Load errors:
 - a province of the scenario missing, listed twice, or unknown to it;
 - two provinces sharing a colour, or one using the background colour;
-- a pixel whose colour is neither a province's nor the background;
+- a pixel whose colour is neither a province's nor the background (the first five such colours are listed, then a count of the rest);
 - a province with no pixels, or a label outside its own pixels;
 - an image that isn't 8-bit RGB or RGBA PNG.
 
 The two files are part of the scenario's content hash, and together they are `StaticData.map_hash` (D22). `scripts/draw_two_states_map.py` regenerates the `two_states` map.
+
+## Save files (`saves/<name>.toml`, D23)
+
+Written by the server's `SaveGame` and read by `LoadGame` (`pax_data::save`). A save is the scenario plus every command that applied, plus checkpoints proving a replay reaches the same state:
+
+```toml
+format = 1
+scenario = "scenarios/two_states"   # as the server was started
+content_hash = "0x9a1c0e5b7d2f3a11" # the scenario's content hash, hex (TOML integers are signed 64-bit)
+day = 360                           # the day the game was saved on
+snapshot = "first_war.world"        # binary snapshot of that day, next to this file (D10)
+snapshot_hash = "0x2c4e8a01f9b3d775" # its World::state_hash
+
+[[checkpoint]]                      # World::state_hash when world.day reached `day` (every 30 days)
+day = 30
+state_hash = "0x51f04c2a9be17d3e"
+
+[[command]]                         # the command-log format above, plus `player`
+day = 12
+player = 0                          # absent: one of the scenario's scripted commands
+type = "set_income_tax"
+nation = "lowland_kingdom"
+rate = 0.150000
+```
+
+- Commands are listed in the order they applied, so days never decrease. Every command's day is before `day`.
+- Loading is refused if:
+  - the format is unknown;
+  - the scenario's files changed (`content_hash`);
+  - any command is invalid by the engine's rule (`World::validate`, D21);
+  - a replay reaches a different state at any checkpoint.
+- Save names are 1 to 64 characters of `[A-Za-z0-9_-]`.
+- **Snapshots.** `<name>.world` is the binary world snapshot (format in `pax_data::snapshot`'s documentation). Loading reads it instead of replaying, and it must match the save's day and `snapshot_hash`. `snapshot` and `snapshot_hash` appear together or not at all. A save without them loads by replay.

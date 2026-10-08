@@ -2,10 +2,11 @@
 //! that applied to it (D21, D23), and everything the views derive from it (D22).
 //!
 //! [`Game`] owns the world, which is read-only from outside. Every method that
-//! changes the world appends what applied to the log and rebuilds [`Today`] in the
-//! same step. So a world change that isn't logged, or that leaves the views stale,
+//! changes the world appends what applied to the log, records the D23 checkpoints
+//! and rebuilds [`Today`] in the same step. So a world change that isn't logged, or that leaves the views stale,
 //! can't be written (AGENTS.md §1, D7). Saves are built from this log (D23).
 
+use pax_data::save::{CHECKPOINT_DAYS, SaveData, SavedCommand};
 use pax_data::{DayStep, Scenario};
 use pax_engine::views::ProvinceStats;
 use pax_engine::{Command, CommandError, DayReport, World};
@@ -33,29 +34,30 @@ impl Today {
     }
 }
 
-/// A command that applied: the game's history (D21). Saves are the scenario plus
-/// this log (D23).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct Logged {
-    /// The day at whose start it applied.
-    pub day: u64,
-    /// `None` for the scenario's own scripted commands (`commands.toml`).
-    pub player: Option<u16>,
-    pub command: Command,
-}
-
 /// The scenario being played, its history, and its derived [`Today`].
 pub(crate) struct Game {
     scenario: Scenario,
-    /// Every command that applied, in application order.
-    log: Vec<Logged>,
+    /// Every command that applied, in application order: the game's history (D21),
+    /// and what a save is built from (D23).
+    log: Vec<SavedCommand>,
+    /// `(day, World::state_hash)` each time `world.day` reached a multiple of
+    /// `CHECKPOINT_DAYS`: what saves are verified against (D23).
+    checkpoints: Vec<(u64, u64)>,
     today: Today,
 }
 
 impl Game {
     pub(crate) fn new(scenario: Scenario) -> Game {
         let today = Today::of(&scenario.world, None);
-        Game { scenario, log: Vec::new(), today }
+        Game { scenario, log: Vec::new(), checkpoints: Vec::new(), today }
+    }
+
+    /// A loaded save (D23): its world, history and checkpoints, with [`Today`]
+    /// rebuilt. `report` is the last replayed day's, or `None` when loaded from a
+    /// snapshot.
+    pub(crate) fn resume(scenario: Scenario, save: SaveData, report: Option<DayReport>) -> Game {
+        let today = Today::of(&scenario.world, report);
+        Game { scenario, log: save.commands, checkpoints: save.checkpoints, today }
     }
 
     pub(crate) fn world(&self) -> &World {
@@ -66,11 +68,27 @@ impl Game {
         &self.scenario
     }
 
-    /// Every command that applied so far, in application order. (Saves read it from
-    /// M3-6 on.)
+    /// Every command that applied so far, in application order.
     #[cfg(test)]
-    pub(crate) fn log(&self) -> &[Logged] {
+    pub(crate) fn log(&self) -> &[SavedCommand] {
         &self.log
+    }
+
+    #[cfg(test)]
+    pub(crate) fn checkpoints(&self) -> &[(u64, u64)] {
+        &self.checkpoints
+    }
+
+    /// The game as a save (D23): the scenario, as `scenario_dir` names it, plus its
+    /// history. Commands queued for the next tick haven't applied, so they aren't in it.
+    pub(crate) fn save_data(&self, scenario_dir: &std::path::Path) -> SaveData {
+        SaveData {
+            scenario: scenario_dir.to_path_buf(),
+            content_hash: self.scenario.content_hash,
+            day: self.scenario.world.day,
+            checkpoints: self.checkpoints.clone(),
+            commands: self.log.clone(),
+        }
     }
 
     /// Runs one day through the shared day step ([`pax_data::step_day`]): the
@@ -87,18 +105,25 @@ impl Game {
             pax_data::step_day(&mut self.scenario.world, &self.scenario.commands, &commands);
         for (command, result) in outcomes.scripted {
             match result {
-                Ok(()) => self.log.push(Logged { day, player: None, command }),
+                Ok(()) => self.log.push(SavedCommand { day, player: None, command }),
                 Err(e) => tracing::warn!(day, ?command, %e, "scripted command rejected"),
             }
         }
+        // `step_day` returns one outcome per player command, index-aligned.
+        assert_eq!(outcomes.players.len(), players.len(), "one outcome per player command");
         let mut rejected = Vec::new();
         for (p, result) in players.into_iter().zip(outcomes.players) {
             match result {
-                Ok(()) => self.log.push(Logged { day, player: Some(p.player), command: p.command }),
+                Ok(()) => self.log.push(SavedCommand { day, player: Some(p.player), command: p.command }),
                 Err(e) => rejected.push((p, e)),
             }
         }
         self.today = Today::of(&self.scenario.world, Some(report));
+        let day = self.scenario.world.day;
+        if day.is_multiple_of(CHECKPOINT_DAYS) {
+            // The hash Today just computed (D10): no second pass.
+            self.checkpoints.push((day, self.today.state_hash));
+        }
         rejected
     }
 

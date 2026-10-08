@@ -51,12 +51,20 @@ jobs:
               exit 1
             fi
           done
-          # pax_server is the only crate that sees both engine and wire types.
-          for crate in pax_data pax_cli; do
+          # pax_server is the only crate that sees both engine and wire types. The list
+          # of engine-side crates is derived, so a new member is checked automatically.
+          members=$(cargo metadata --no-deps --format-version 1 |
+            python3 -c 'import json, sys; print(*(p["name"] for p in json.load(sys.stdin)["packages"]))')
+          for crate in $members; do
+            [ "$crate" = pax_server ] && continue
+            if [ "$crate" != pax_engine ] && ! deps "$crate" | grep -q '^pax_engine '; then
+              continue
+            fi
             if deps "$crate" | grep -qE '^(pax_protocol|flatbuffers) '; then
               echo "::error::$crate links wire types; only pax_server may see both engine and wire (AGENTS.md section 2)."
               exit 1
             fi
+            echo "$crate: engine-side, no wire types"
           done
           # The shared content hash carries nobody's types.
           if [ -n "$(deps pax_content)" ]; then

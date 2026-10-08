@@ -214,7 +214,12 @@ All parsing lives in `pax_data`, so the format can change without touching the e
   - Cap'n Proto's distinctive feature, RPC with promise pipelining, doesn't fit a one-way stream of messages in each direction. Its built-in framing replaces only our 4-byte length prefix.
   - FlatBuffers has an official, mature C# library, which keeps D12's C# fallback cheap if the GDExtension route fails.
   - The FlatBuffers schema was already written, compiled and measured.
-- The binary *save* format is still open. Saves are replayed command logs until M3-6 measures load time (D23).
+- **Binary save format** (decided in M3-6b, as D23 scheduled once replay proved too slow): a versioned, little-endian, column-by-column dump of the `World` (`pax_data::snapshot`, magic `PAXW`).
+  - It is written next to each save, and loading reads it instead of replaying.
+  - It stores no definitions; those come from the scenario, whose content hash must match.
+  - A loaded snapshot must reproduce the state hash it recorded, so it can only restore exactly what was written.
+  - The writer names every column of every table, so a new column fails to compile until the format carries it.
+  - It is a save format only, never sent over the wire, and the engine stays serde-free.
 
 ## D11. Determinism harness and golden files
 
@@ -361,7 +366,7 @@ The state → national → sphere → global roll-up in the old ECONOMY_SYSTEM w
   - A scenario may name a `commands` file (`[[command]]` entries with `day`, `type`, `nation`, `rate`; see DATA_FORMAT.md).
   - `pax_data::run_logged` replays it, and `pax_cli` applies it in `run`, `report`, `record` and `verify`. Golden hashes therefore pin the commands too.
   - `two_states` replays a two-command policy timeline.
-- **Save files** become "scenario + command log + day". D23 defines the save file and how it loads. A binary save format is still open (D10).
+- **Save files** become "scenario + command log + day". D23 defines the save file and how it loads, and D10 the binary snapshot that makes loading fast.
 
 ## D22. Wire protocol and client sessions
 
@@ -400,20 +405,27 @@ The state → national → sphere → global roll-up in the old ECONOMY_SYSTEM w
   - Outbound: 256 frames per connection. A full outbound queue disconnects the client.
 - **Speed:** paused, or speeds 1–5 at 0.5, 1, 2 and 5 days per second, and as fast as the tick allows (about 10 days/s at the D13 budget). Speed and pause are **server controls, not engine commands**: they change no results, so they appear in neither the command log nor the state hash.
 - **Command order within a tick:** the scenario's own scripted commands for the day (`commands.toml`) apply first, then players' commands in stamp order `(day, player, sequence)` (D10). The applied-command log holds both kinds, with scripted commands marked as having no player. Saves are built from this log (below). The order lives in one function, `pax_data::step_day`, which `pax_cli`, the tests and the server all call. A server test pins it to every scenario's `golden.hashes` (D11).
-- **Replays apply the saved log alone.** The scenario's scripted commands for logged days are in it, so a replay never applies `commands.toml` again for those days. Scripted commands for later days still come from the scenario. The tick and the save loader therefore apply each command exactly once.
+- **Replays apply the saved log alone.** The scenario's scripted commands for logged days are in it, so a replay never applies `commands.toml` again for those days. Scripted commands for later days still come from the scenario. The tick and the save loader therefore apply each command exactly once, and both run the day through `pax_data::step_day`.
 - **The clock stops when the player leaves.** When the welcomed session closes, the server pauses; a game never runs unobserved.
 - **Flow control:** each client may have at most 3 unacknowledged `DayUpdate`s.
   - While its window is full, the server keeps simulating but sends that client nothing.
   - When the client acknowledges, the server sends only the latest day, with `skipped` counting the days skipped.
   - In single player the simulation never waits for the client. Multiplayer fairness rules are in D24.
-- **Saves:** `saves/<name>.toml` contains:
+- **Saves:** `<saves dir>/<name>.toml` (`pax_data::save`; the server's `--saves DIR`, default `saves/`). It contains:
   - the scenario path and content hash;
   - the current day;
-  - the command log, in the DATA_FORMAT command format (D21), plus the player per command (M4);
+  - every applied command, in the DATA_FORMAT command format (D21), plus the player who sent it (absent for the scenario's scripted commands);
   - `state_hash` checkpoints every 30 days.
 
-  Loading replays the log from the scenario and verifies each checkpoint. A mismatch is an error, never accepted silently.
-- **Load time** therefore equals replay time. M3-6 measures it at the D13 long-term scale. If a 20-year game takes more than 30 s to load, binary state checkpoints (D10's open save format) become an M3 task.
+  Rules:
+  - **Names** are 1 to 64 characters of `[A-Za-z0-9_-]`, so a name can't escape the saves directory. Anything else gets an error `SaveResult`.
+  - **Loading** reloads the scenario, refuses it if its content hash changed, replays every logged command on its day, and verifies every checkpoint. A mismatch is an error, and the running game is left untouched.
+  - A successful load pauses the game and sends every session a new `Welcome`. Commands queued for the next tick are discarded, because they never applied.
+  - The scenario's scripted commands for days already played are in the log; later ones still come from the scenario, so nothing applies twice.
+- **Load time:** replay runs at tick speed, about 35 ms per day at the D13 long-term scale, so roughly 4 minutes for a 20-year game. That is over the 30-second limit, so each save also writes a binary snapshot of the saved day (D10, M3-6b).
+  - Loading reads the snapshot. Measured at 990k POP rows / 3,000 markets: 40 MB, written in 83 ms, loaded and verified in 51 ms, at any game length.
+  - A save that names a missing or damaged snapshot is an error, never a silent fallback to replay.
+  - Replay (`pax_data::save::load_by_replay`) remains the determinism check: it verifies every checkpoint and must end exactly at the snapshot.
 
 ## D24. Multiplayer authority
 

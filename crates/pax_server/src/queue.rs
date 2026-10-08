@@ -34,6 +34,12 @@ impl CommandQueue {
         self.pending.push(Pending { session, player, sequence, client_seq, command });
     }
 
+    /// Drops everything queued, e.g. when a load replaces the game (D23). The
+    /// sequence keeps increasing, so stamps stay unique for the whole session.
+    pub(crate) fn discard(&mut self) {
+        self.pending.clear();
+    }
+
     /// Everything queued, in stamp order. The queue is left empty.
     pub(crate) fn take(&mut self) -> Vec<Pending> {
         let mut pending = std::mem::take(&mut self.pending);

@@ -44,6 +44,8 @@ pub struct Config {
     pub idle_timeout: Duration,
     /// Stop when the welcomed client leaves: the client launched this server.
     pub exit_when_idle: bool,
+    /// Where `SaveGame` writes and `LoadGame` reads `<name>.toml` (D23).
+    pub saves_dir: PathBuf,
 }
 
 impl Config {
@@ -54,6 +56,7 @@ impl Config {
             bind: SocketAddr::from(([127, 0, 0, 1], 0)),
             idle_timeout: Duration::from_secs(10),
             exit_when_idle: false,
+            saves_dir: PathBuf::from("saves"),
         }
     }
 }
@@ -129,7 +132,7 @@ impl Server {
         // as a connection whose replies pile up is closed (net.rs).
         let (to_sim, inbound) = flume::bounded(net::INBOUND_QUEUE);
         runtime.spawn(net::accept_loop(listener, to_sim.clone(), config.idle_timeout));
-        let mut sim = sim::Sim::new(scenario, config.exit_when_idle);
+        let mut sim = sim::Sim::new(scenario, &config);
         let sim = std::thread::Builder::new().name("pax-sim".to_owned()).spawn(move || {
             // A panic is caught only to tell the clients and the caller; the default
             // hook has already printed it with its location.

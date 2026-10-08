@@ -131,3 +131,21 @@ pub fn server_state(day: u64, speed: wire::Speed, changed_by: u16) -> Vec<u8> {
     let s = wire::ServerState::create(&mut b, &wire::ServerStateArgs { day, speed, changed_by });
     finish(b, ServerPayload::ServerState, s.as_union_value())
 }
+
+/// The answer to `SaveGame` (and to a failed `LoadGame`): `error` is empty on success.
+pub fn save_result(name: &str, error: &str) -> Vec<u8> {
+    let mut b = FlatBufferBuilder::new();
+    let name = b.create_string(name);
+    let error = b.create_string(error);
+    let r = wire::SaveResult::create(&mut b, &wire::SaveResultArgs { name: Some(name), error: Some(error) });
+    finish(b, ServerPayload::SaveResult, r.as_union_value())
+}
+
+/// The answer to `ListSaves`: save names, sorted.
+pub fn save_list(names: &[String]) -> Vec<u8> {
+    let mut b = FlatBufferBuilder::new();
+    let names: Vec<_> = names.iter().map(|n| b.create_string(n)).collect();
+    let names = b.create_vector(&names);
+    let l = wire::SaveList::create(&mut b, &wire::SaveListArgs { names: Some(names) });
+    finish(b, ServerPayload::SaveList, l.as_union_value())
+}

@@ -13,9 +13,11 @@
 
 use flume::{Receiver, RecvTimeoutError, TryRecvError};
 use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use pax_data::Scenario;
+use pax_data::save;
 use pax_protocol::{PROTOCOL_MAJOR, PROTOCOL_MINOR, wire};
 use tracing::{debug, info};
 
@@ -50,24 +52,31 @@ struct Seat {
 
 pub(crate) struct Sim {
     game: Game,
+    /// The scenario directory as the server was started with it (or as the loaded
+    /// save names it): what a save records so it can be loaded again.
+    scenario_dir: PathBuf,
+    saves_dir: PathBuf,
     sessions: BTreeMap<u64, Session>,
     /// The single welcomed session (M3 is single player, D10).
     active: Option<u64>,
     /// Stop when the welcomed session leaves (the client launched this server).
     exit_when_idle: bool,
-    /// The speed and the next tick. Only [`Sim::set_clock`] changes the speed.
+    /// The speed and the next tick. [`Sim::set_clock`] changes the speed and announces
+    /// it; the one exception is a load, whose new `Welcome` carries the speed.
     clock: Clock,
     /// Commands accepted for the next tick, stamped on arrival.
     queue: CommandQueue,
 }
 
 impl Sim {
-    pub(crate) fn new(scenario: Scenario, exit_when_idle: bool) -> Self {
+    pub(crate) fn new(scenario: Scenario, config: &crate::Config) -> Self {
         Sim {
             game: Game::new(scenario),
+            scenario_dir: config.scenario.clone(),
+            saves_dir: config.saves_dir.clone(),
             sessions: BTreeMap::new(),
             active: None,
-            exit_when_idle,
+            exit_when_idle: config.exit_when_idle,
             clock: Clock::Paused,
             queue: CommandQueue::default(),
         }
@@ -114,16 +123,7 @@ impl Sim {
         s.seat = Some(Seat { player: 0, nation: requested_nation });
         self.active = Some(session);
         info!(session, name, ?requested_nation, "welcomed");
-        let info = WelcomeInfo {
-            player: 0,
-            resume_token: 0, // resuming a dropped session is M4 (D24)
-            nation: requested_nation,
-            scenario: &self.game.scenario().name,
-            content_hash: self.game.scenario().content_hash,
-            map_hash: self.game.scenario().map.as_ref().map(|m| m.map_hash),
-            speed: self.clock.speed(),
-        };
-        self.send(session, Outbound::Frame(encode::welcome(self.game.world(), &info)));
+        self.welcome(session, Seat { player: 0, nation: requested_nation });
     }
 
     /// Replaces the session's subscription and answers with a `DayUpdate` for the
@@ -239,9 +239,98 @@ impl Sim {
         }
     }
 
+    /// `saves/<name>.toml` for a valid save name. A name is 1 to 64 characters of
+    /// `[A-Za-z0-9_-]`, so it can never escape the saves directory (D23).
+    fn save_path(&self, name: Option<&str>) -> Result<PathBuf, String> {
+        let name = name.ok_or("a save needs a name")?;
+        let valid =
+            (1..=64).contains(&name.len()) && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-');
+        if !valid {
+            return Err(format!("'{name}' is not a save name: use 1 to 64 letters, digits, '_' or '-'"));
+        }
+        Ok(self.saves_dir.join(format!("{name}.toml")))
+    }
+
+    /// Writes the game as the scenario plus every applied command (D23). Commands
+    /// queued for the next tick haven't applied yet, so they aren't saved.
+    fn save_game(&self, session: u64, name: Option<String>) {
+        let label = name.clone().unwrap_or_default();
+        let world = self.game.world();
+        let result = self.save_path(name.as_deref()).and_then(|path| {
+            let data = self.game.save_data(&self.scenario_dir);
+            data.write(&path, world).map_err(|e| format!("could not write {}: {e}", path.display()))
+        });
+        info!(session, name = %label, ?result, "save");
+        let error = result.err().unwrap_or_default();
+        self.send(session, Outbound::Frame(encode::save_result(&label, &error)));
+    }
+
+    fn list_saves(&self, session: u64) {
+        let mut names: Vec<String> = std::fs::read_dir(&self.saves_dir)
+            .into_iter()
+            .flatten()
+            .filter_map(|entry| {
+                let path = entry.ok()?.path();
+                let name = path.file_stem()?.to_str()?.to_owned();
+                (path.extension()? == "toml" && self.save_path(Some(&name)).is_ok()).then_some(name)
+            })
+            .collect();
+        names.sort();
+        self.send(session, Outbound::Frame(encode::save_list(&names)));
+    }
+
+    /// Replaces the running game with a saved one (D23): replays it, verifying every
+    /// checkpoint, then pauses and sends every session a new `Welcome`, because the
+    /// scenario and its tables may differ (NETWORK_PROTOCOL §3). Commands queued for
+    /// the next tick are discarded. On any error the running game is left untouched.
+    fn load_game(&mut self, session: u64, name: Option<String>) {
+        let label = name.clone().unwrap_or_default();
+        let loaded = self.save_path(name.as_deref()).and_then(|path| load_from(&path));
+        let loaded = match loaded {
+            Ok(loaded) => loaded,
+            Err(error) => {
+                info!(session, name = %label, %error, "load failed");
+                return self.send(session, Outbound::Frame(encode::save_result(&label, &error)));
+            }
+        };
+        info!(session, name = %label, day = loaded.save.day, "loaded");
+        let save::LoadedSave { scenario, save, last_report } = loaded;
+        self.scenario_dir = save.scenario.clone();
+        // The world, its history and its derived views are replaced together (game.rs).
+        self.game = Game::resume(scenario, save, last_report);
+        self.queue.discard();
+        // Not `set_clock`: the `Welcome` below announces the speed with the new game.
+        self.clock = Clock::Paused;
+        let nations = self.game.world().nations.key.len();
+        let ids: Vec<u64> = self.sessions.iter().filter(|(_, s)| s.seat.is_some()).map(|(&id, _)| id).collect();
+        for id in ids {
+            let Some(s) = self.sessions.get_mut(&id) else { continue };
+            let seat = s.seat.as_mut().expect("filtered to welcomed sessions");
+            // A nation the loaded scenario doesn't have falls back to sandbox (M3).
+            seat.nation = seat.nation.filter(|&n| (n as usize) < nations);
+            let seat = *seat;
+            s.subscription = CheckedSubscription::default();
+            s.window = UpdateWindow::default();
+            self.welcome(id, seat);
+        }
+    }
+
+    fn welcome(&self, session: u64, seat: Seat) {
+        let info = WelcomeInfo {
+            player: seat.player,
+            resume_token: 0, // resuming a dropped session is M4 (D24)
+            nation: seat.nation,
+            scenario: &self.game.scenario().name,
+            content_hash: self.game.scenario().content_hash,
+            map_hash: self.game.scenario().map.as_ref().map(|m| m.map_hash),
+            speed: self.clock.speed(),
+        };
+        self.send(session, Outbound::Frame(encode::welcome(self.game.world(), &info)));
+    }
+
     /// Every command applied so far, in application order.
     #[cfg(test)]
-    pub(crate) fn log(&self) -> &[crate::game::Logged] {
+    pub(crate) fn log(&self) -> &[save::SavedCommand] {
         self.game.log()
     }
 
@@ -271,7 +360,11 @@ impl Sim {
                 Request::SubmitCommand { client_seq, command } => self.submit(session, client_seq, command),
                 Request::SetSpeed { speed } => self.set_speed(session, speed),
                 Request::Ack { day } => self.ack(session, day),
-                other => debug!(session, ?other, "not handled until M3-6"),
+                Request::SaveGame { name } => self.save_game(session, name),
+                Request::LoadGame { name } => self.load_game(session, name),
+                Request::ListSaves => self.list_saves(session),
+                // Hello is handled before the admission choke point; Ping by the network task.
+                Request::Hello { .. } | Request::Ping { .. } => {}
             },
             Inbound::Closed { session } => {
                 let seat = self.sessions.remove(&session).and_then(|s| s.seat);
@@ -292,6 +385,14 @@ impl Sim {
         }
         true
     }
+}
+
+/// Loads a save, as a message for the client on failure.
+fn load_from(path: &Path) -> Result<save::LoadedSave, String> {
+    if !path.exists() {
+        return Err(format!("there is no save {}", path.display()));
+    }
+    save::load(path).map_err(|e| e.messages.join("; "))
 }
 
 impl Sim {
@@ -366,6 +467,8 @@ mod tests {
         Result { seq: u32, error: wire::CommandError, day: u64 },
         Update { day: u64, skipped: u32 },
         State(wire::Speed),
+        Saved { name: String, error: String },
+        Saves(Vec<String>),
         Close,
     }
 
@@ -388,6 +491,13 @@ mod tests {
                         Sent::Update { day: u.day(), skipped: u.skipped() }
                     } else if let Some(s) = m.payload_as_server_state() {
                         Sent::State(s.speed())
+                    } else if let Some(r) = m.payload_as_save_result() {
+                        Sent::Saved {
+                            name: r.name().unwrap_or_default().into(),
+                            error: r.error().unwrap_or_default().into(),
+                        }
+                    } else if let Some(l) = m.payload_as_save_list() {
+                        Sent::Saves(l.names().unwrap().iter().map(str::to_owned).collect())
                     } else {
                         panic!("unexpected {:?}", m.payload_type())
                     }
@@ -398,9 +508,30 @@ mod tests {
     }
 
     /// `two_states` with one welcomed session playing `nation` (`None`: sandbox).
-    fn welcomed(nation: Option<u32>) -> (Sim, Receiver<Outbound>) {
+    /// A fresh saves directory for one test, removed when dropped.
+    struct SavesDir(PathBuf);
+
+    impl Drop for SavesDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn test_saves_dir() -> SavesDir {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        static NEXT: AtomicU32 = AtomicU32::new(0);
+        let n = NEXT.fetch_add(1, Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!("pax-sim-saves-{}-{n}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        SavesDir(dir)
+    }
+
+    fn welcomed(nation: Option<u32>) -> (Sim, Receiver<Outbound>, SavesDir) {
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two_states");
-        let mut sim = Sim::new(pax_data::load_scenario(&dir).unwrap(), false);
+        let saves = test_saves_dir();
+        let mut config = crate::Config::local(&dir);
+        config.saves_dir = saves.0.clone();
+        let mut sim = Sim::new(pax_data::load_scenario(&dir).unwrap(), &config);
         let (conn, mut rx) = ConnHandle::for_test();
         sim.handle(Inbound::Connected { session: SESSION, conn });
         let hello = Request::Hello {
@@ -412,7 +543,7 @@ mod tests {
         };
         sim.handle(Inbound::Request { session: SESSION, request: hello });
         assert_eq!(drain(&mut rx), [Sent::Welcome]);
-        (sim, rx)
+        (sim, rx, saves)
     }
 
     fn submit(sim: &mut Sim, seq: u32, command: Option<WireCommand>) {
@@ -425,19 +556,19 @@ mod tests {
 
     #[test]
     fn an_accepted_command_applies_at_the_next_tick_and_is_logged() {
-        let (mut sim, mut rx) = welcomed(None);
+        let (mut sim, mut rx, _saves) = welcomed(None);
         submit(&mut sim, 7, tax(1, 150_000));
         assert_eq!(drain(&mut rx), [Sent::Result { seq: 7, error: wire::CommandError::None, day: 0 }]);
         assert_ne!(sim.game.world().nations.income_tax_rate[1], Fixed::from_raw(150_000), "not before the tick");
         sim.tick();
         assert_eq!(sim.game.world().nations.income_tax_rate[1], Fixed::from_raw(150_000));
         let applied = Command::SetIncomeTax { nation: 1, rate: Fixed::from_raw(150_000) };
-        assert_eq!(sim.log(), [crate::game::Logged { day: 0, player: Some(0), command: applied }]);
+        assert_eq!(sim.log(), [save::SavedCommand { day: 0, player: Some(0), command: applied }]);
     }
 
     #[test]
     fn commands_are_checked_in_order_well_formed_permitted_valid() {
-        let (mut sim, mut rx) = welcomed(Some(0));
+        let (mut sim, mut rx, _saves) = welcomed(Some(0));
         submit(&mut sim, 1, None);
         submit(&mut sim, 2, Some(WireCommand::SetIncomeTax { nation: 0, rate_raw: None }));
         // Out of range *and* another nation's: permission is checked first (D24).
@@ -462,7 +593,7 @@ mod tests {
 
     #[test]
     fn scripted_commands_apply_first_on_their_day_and_are_logged_as_scripted() {
-        let (mut sim, _rx) = welcomed(None);
+        let (mut sim, _rx, _saves) = welcomed(None);
         for _ in 0..360 {
             sim.tick();
         }
@@ -478,7 +609,7 @@ mod tests {
 
     #[test]
     fn a_session_that_stops_acknowledging_gets_at_most_the_window() {
-        let (mut sim, mut rx) = welcomed(None);
+        let (mut sim, mut rx, _saves) = welcomed(None);
         for _ in 0..10 {
             sim.advance();
         }
@@ -503,7 +634,7 @@ mod tests {
 
     #[test]
     fn speed_changes_are_announced_and_schedule_ticks() {
-        let (mut sim, mut rx) = welcomed(None);
+        let (mut sim, mut rx, _saves) = welcomed(None);
         assert_eq!(sim.clock, Clock::Paused, "a new game starts paused");
         sim.handle(Inbound::Request { session: SESSION, request: Request::SetSpeed { speed: wire::Speed::Normal } });
         assert_eq!(drain(&mut rx), [Sent::State(wire::Speed::Normal)]);
@@ -523,7 +654,7 @@ mod tests {
 
     #[test]
     fn the_clock_stops_when_the_player_leaves() {
-        let (mut sim, _rx) = welcomed(None);
+        let (mut sim, _rx, _saves) = welcomed(None);
         sim.handle(Inbound::Request { session: SESSION, request: Request::SetSpeed { speed: wire::Speed::Fast } });
         sim.handle(Inbound::Closed { session: SESSION });
         assert_eq!(sim.clock, Clock::Paused);
@@ -536,12 +667,18 @@ mod tests {
         for name in ["mini_valley", "two_states"] {
             let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios").join(name);
             let golden = pax_data::golden::read(&dir.join("golden.hashes")).unwrap();
-            let mut sim = Sim::new(pax_data::load_scenario(&dir).unwrap(), false);
+            let saves = test_saves_dir();
+            let mut config = crate::Config::local(&dir);
+            config.saves_dir = saves.0.clone();
+            let mut sim = Sim::new(pax_data::load_scenario(&dir).unwrap(), &config);
             for (day, &expected) in golden.iter().enumerate() {
                 sim.tick();
                 assert_eq!(sim.game.views().state_hash, expected, "{name}: day {} differs from golden", day + 1);
             }
             assert!(sim.log().iter().all(|l| l.player.is_none()), "{name}: only scripted commands applied");
+            for &(day, hash) in sim.game.checkpoints() {
+                assert_eq!(hash, golden[day as usize - 1], "{name}: the day {day} checkpoint differs from golden");
+            }
         }
     }
 
@@ -549,7 +686,7 @@ mod tests {
     /// order they arrived in (arrival order between players is a network race).
     #[test]
     fn commands_apply_in_stamp_order_not_arrival_order() {
-        let (mut sim, _rx) = welcomed(None);
+        let (mut sim, _rx, _saves) = welcomed(None);
         let rate = |raw| Command::SetIncomeTax { nation: 0, rate: Fixed::from_raw(raw) };
         // Player 1's command arrives first; player 0's two follow.
         for (player, raw) in [(1, 100_000), (0, 110_000), (0, 120_000)] {
@@ -560,5 +697,93 @@ mod tests {
         assert_eq!(applied, [(Some(0), rate(110_000)), (Some(0), rate(120_000)), (Some(1), rate(100_000))]);
         // The last command in stamp order wins: player 1's.
         assert_eq!(sim.game.world().nations.income_tax_rate[0], Fixed::from_raw(100_000));
+    }
+
+    fn request(sim: &mut Sim, request: Request) {
+        sim.handle(Inbound::Request { session: SESSION, request });
+    }
+
+    #[test]
+    fn a_loaded_save_continues_exactly_like_the_original_game() {
+        let (mut sim, mut rx, _saves) = welcomed(None);
+        submit(&mut sim, 1, tax(1, 175_000));
+        for _ in 0..65 {
+            sim.tick();
+        }
+        submit(&mut sim, 2, tax(0, 90_000));
+        sim.tick();
+        let (saved_day, saved_hash, saved_log) =
+            (sim.game.world().day, sim.game.world().state_hash(), sim.log().to_vec());
+        request(&mut sim, Request::SaveGame { name: Some("autumn".into()) });
+        drain(&mut rx);
+        // The original game runs on 20 more days.
+        for _ in 0..20 {
+            sim.tick();
+        }
+        let later_hash = sim.game.world().state_hash();
+
+        request(&mut sim, Request::LoadGame { name: Some("autumn".into()) });
+        assert_eq!(drain(&mut rx), [Sent::Welcome], "a load answers with a new Welcome");
+        assert_eq!((sim.game.world().day, sim.game.world().state_hash()), (saved_day, saved_hash));
+        assert_eq!(sim.log(), saved_log.as_slice());
+        assert_eq!(sim.clock, Clock::Paused, "a loaded game starts paused");
+        // Continuing from the save reaches the same state as the original game did.
+        for _ in 0..20 {
+            sim.tick();
+        }
+        assert_eq!(sim.game.world().state_hash(), later_hash);
+    }
+
+    #[test]
+    fn bad_save_names_are_refused_and_nothing_is_written() {
+        let (mut sim, mut rx, _saves) = welcomed(None);
+        for name in [None, Some(""), Some("../escape"), Some("a b"), Some(&*"x".repeat(65))] {
+            request(&mut sim, Request::SaveGame { name: name.map(str::to_owned) });
+            match drain(&mut rx).as_slice() {
+                [Sent::Saved { error, .. }] => assert!(!error.is_empty(), "{name:?} should be refused"),
+                other => panic!("{other:?}"),
+            }
+        }
+        assert!(!sim.saves_dir.exists(), "no file may be written for a refused name");
+    }
+
+    #[test]
+    fn saves_are_listed_by_name() {
+        let (mut sim, mut rx, _saves) = welcomed(None);
+        for name in ["zeta", "alpha", "mid_1"] {
+            request(&mut sim, Request::SaveGame { name: Some(name.into()) });
+        }
+        drain(&mut rx);
+        request(&mut sim, Request::ListSaves);
+        assert_eq!(drain(&mut rx), [Sent::Saves(vec!["alpha".into(), "mid_1".into(), "zeta".into()])]);
+    }
+
+    #[test]
+    fn a_damaged_or_missing_save_is_refused_and_the_game_is_untouched() {
+        let (mut sim, mut rx, _saves) = welcomed(None);
+        for _ in 0..31 {
+            sim.tick();
+        }
+        request(&mut sim, Request::SaveGame { name: Some("t".into()) });
+        drain(&mut rx);
+        // Damage the snapshot: flip one byte near the end (a nation's basket value).
+        let snapshot = sim.saves_dir.join("t.world");
+        let mut bytes = std::fs::read(&snapshot).unwrap();
+        let last = bytes.len() - 1;
+        bytes[last] ^= 0x40;
+        std::fs::write(&snapshot, bytes).unwrap();
+        let before = sim.game.world().state_hash();
+        request(&mut sim, Request::LoadGame { name: Some("t".into()) });
+        match drain(&mut rx).as_slice() {
+            [Sent::Saved { error, .. }] => assert!(error.contains("hash"), "{error}"),
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(sim.game.world().state_hash(), before);
+        // A save whose snapshot is gone is refused too: no silent fallback.
+        std::fs::remove_file(&snapshot).unwrap();
+        request(&mut sim, Request::LoadGame { name: Some("t".into()) });
+        assert!(matches!(drain(&mut rx).as_slice(), [Sent::Saved { error, .. }] if error.contains("t.world")));
+        request(&mut sim, Request::LoadGame { name: Some("nope".into()) });
+        assert!(matches!(drain(&mut rx).as_slice(), [Sent::Saved { error, .. }] if error.contains("there is no save")));
     }
 }

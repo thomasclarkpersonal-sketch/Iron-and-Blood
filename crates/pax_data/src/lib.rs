@@ -18,6 +18,8 @@ mod schema;
 
 #[cfg(feature = "bench")]
 pub mod bench;
+pub mod save;
+pub mod snapshot;
 
 use pax_content::ContentHash;
 use std::collections::BTreeMap;
@@ -55,7 +57,7 @@ impl fmt::Display for LoadError {
 impl std::error::Error for LoadError {}
 
 impl LoadError {
-    fn single(message: String) -> LoadError {
+    pub(crate) fn single(message: String) -> LoadError {
         LoadError { messages: vec![message] }
     }
 }
@@ -68,11 +70,11 @@ pub struct DefSources<'a> {
     pub rules: &'a str,
 }
 
-fn read(path: &Path) -> Result<String, LoadError> {
+pub(crate) fn read(path: &Path) -> Result<String, LoadError> {
     std::fs::read_to_string(path).map_err(|e| LoadError::single(format!("{}: {e}", path.display())))
 }
 
-fn parse<T: serde::de::DeserializeOwned>(name: &str, text: &str) -> Result<T, LoadError> {
+pub(crate) fn parse<T: serde::de::DeserializeOwned>(name: &str, text: &str) -> Result<T, LoadError> {
     toml::from_str(text).map_err(|e| LoadError::single(format!("{name}: {e}")))
 }
 
@@ -170,28 +172,42 @@ pub fn parse_commands(world: &World, text: &str) -> Result<CommandLog, LoadError
             errors.0.push(format!("{ctx}: unknown nation '{}'", c.nation));
             continue;
         };
-        let rate = c.rate.0;
-        let command = match c.kind.as_str() {
-            "set_income_tax" => Command::SetIncomeTax { nation, rate },
-            "set_transfer_rate" => Command::SetTransferRate { nation, rate },
-            "set_consumption_rate" => Command::SetConsumptionRate { nation, rate },
-            other => {
-                errors.0.push(format!(
-                    "{ctx}: unknown type '{other}' (expected set_income_tax, set_transfer_rate or set_consumption_rate)"
-                ));
-                continue;
-            }
-        };
-        // The engine's own rule decides validity (World::validate). Commands of
-        // the same log don't interact today (each sets one rate), so validating
-        // against the initial world is exact.
-        if let Err(e) = world.validate(command) {
-            errors.0.push(format!("{ctx}: {e}"));
-            continue;
+        match command_of(world, &c.kind, nation, c.rate.0) {
+            Ok(command) => log.by_day.entry(c.day).or_default().push(command),
+            Err(e) => errors.0.push(format!("{ctx}: {e}")),
         }
-        log.by_day.entry(c.day).or_default().push(command);
     }
     errors.finish(log)
+}
+
+/// The command a `[[command]]` entry describes, checked by the engine's single
+/// validity rule (D21). Shared by command logs and save files (D23), so the two
+/// formats can't drift apart. Commands of one log don't interact today (each sets
+/// one rate), so validating against the initial world is exact.
+pub(crate) fn command_of(world: &World, kind: &str, nation: usize, rate: Fixed) -> Result<Command, String> {
+    let command = match kind {
+        "set_income_tax" => Command::SetIncomeTax { nation, rate },
+        "set_transfer_rate" => Command::SetTransferRate { nation, rate },
+        "set_consumption_rate" => Command::SetConsumptionRate { nation, rate },
+        other => {
+            return Err(format!(
+                "unknown type '{other}' (expected set_income_tax, set_transfer_rate or set_consumption_rate)"
+            ));
+        }
+    };
+    world.validate(command).map_err(|e| e.to_string())?;
+    Ok(command)
+}
+
+/// The `[[command]]` fields that describe `command`: its type name, nation and
+/// rate. The inverse of [`command_of`]; exhaustive, so a new engine command fails
+/// to compile here until the file formats can express it.
+pub(crate) fn describe_command(command: &Command) -> (&'static str, usize, Fixed) {
+    match *command {
+        Command::SetIncomeTax { nation, rate } => ("set_income_tax", nation, rate),
+        Command::SetTransferRate { nation, rate } => ("set_transfer_rate", nation, rate),
+        Command::SetConsumptionRate { nation, rate } => ("set_consumption_rate", nation, rate),
+    }
 }
 
 /// Loads a scenario directory (containing `scenario.toml`) and its definitions.
