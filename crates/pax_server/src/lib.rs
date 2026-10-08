@@ -37,7 +37,6 @@ mod window;
 
 pub use secret::Secret;
 pub use throttle::Bandwidth;
-pub use tls::fingerprint;
 
 /// A connection task's input side, for the cargo-fuzz target only (`fuzz/`, M3-10):
 /// it fuzzes exactly what a connection runs on its socket's bytes.

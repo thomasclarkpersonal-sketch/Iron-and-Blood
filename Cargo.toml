@@ -23,6 +23,12 @@ toml = "1.1"
 # Pinned exactly, once for the whole workspace: generated protocol code only works
 # with the runtime of the flatc version that produced it (scripts/gen-protocol.sh, D22).
 flatbuffers = "=24.3.25"
+# TLS (D24, M4-6), once for the whole workspace: the server and the client's bridge
+# must agree on the rustls build (its protocol versions and backend), or a pinned
+# handshake could fail only between the two. The ring backend builds on every CI
+# platform without extra tools.
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
+ring = "0.17"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

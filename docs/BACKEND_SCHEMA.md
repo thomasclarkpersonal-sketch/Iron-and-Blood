@@ -148,13 +148,14 @@ All systems are plain functions over `&mut World`, called by `tick::step` in the
 
 | Server module | What it does |
 |---|---|
-| `net.rs` | One tokio task per connection. `RequestReader` turns bytes into requests and enforces the `Hello` rules; the rest goes to the sim thread over a bounded channel. In multiplayer it also reports a client that stalls and comes back (D24's fairness pause, M4-4) |
+| `net.rs` | One tokio task per connection. `RequestReader` turns bytes into requests and enforces the `Hello` rules; the rest goes to the sim thread over a bounded channel. In multiplayer it also reports a client that stalls and comes back (D24's fairness pause, M4-4). With TLS, each connection does the handshake first, within `HANDSHAKE_TIMEOUT` (10 s); a failed or slow one is dropped before it becomes a session (M4-6) |
 | `request.rs`, `encode.rs`, `commands.rs` | Wire ↔ owned values. Engine ↔ wire conversions are exhaustive matches, with no `_` arm (NETWORK_PROTOCOL §5) |
 | `sim.rs` | The sim thread: the handshake and admission, subscriptions, command checks, speed, flow control, saves; D24's fairness pause and the lobby, sent when it differs from what players last saw |
 | `session.rs` | The session table (M4-1): one row per connection, with its subscription, window and seat (player id and nation); player ids, who holds a nation, the host (elected and succeeded by `HostRule`, M4-3), lobby claims and ready marks (M4-2), broadcasts; seats kept for players who left a started game, with their resume tokens (OS randomness), and stall marks for the fairness pause (M4-4); each row's recent commands for D24's rate limit (`SessionTable::admit_command`), and `HostRule::Admin` holding the admin's name and password (M4-6) |
 | `game.rs` | `Game`: the world, its applied-command log and checkpoints, and the day's derived views (`Today`), all changed in one step |
 | `secret.rs` | Passwords (D24, M4-6): `Secret`, whose `Debug` never prints the text and whose equality is constant-time |
 | `throttle.rs` | Bandwidth for remote sessions (D24, M4-7): at most 4 updates a second, the `MapView` every 5th, by default (`Config::bandwidth`) |
+| `tls.rs` | TLS for multiplayer off localhost (D24, M4-6): the certificate, self-signed at start (`--tls-self-signed`) or from PEM files (`--tls-cert`, `--tls-key`); its SHA-256 fingerprint, which clients pin; rustls with the ring backend |
 | `queue.rs`, `clock.rs`, `window.rs` | Command stamping `(player, sequence)`, the game clock (D23), the 3-update flow-control window |
 | `view.rs` | The views, built from `pax_engine::views` (the engine owns every rule a view applies) |
 

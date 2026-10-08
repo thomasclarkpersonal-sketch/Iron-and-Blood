@@ -29,13 +29,17 @@ impl std::fmt::Debug for Tls {
     }
 }
 
-/// The SHA-256 of a certificate (DER), in lowercase hex: what clients pin.
-pub fn fingerprint(certificate: &[u8]) -> String {
+/// The SHA-256 of a certificate (DER), in lowercase hex: what clients pin. The
+/// client's bridge computes it the same way (`pax_godot::transport::fingerprint`);
+/// its TLS test pins what a real server printed, so the two can't drift apart.
+pub(crate) fn fingerprint(certificate: &[u8]) -> String {
     ring::digest::digest(&ring::digest::SHA256, certificate).as_ref().iter().map(|b| format!("{b:02x}")).collect()
 }
 
 /// A fresh self-signed certificate, for a player-hosted game.
 pub(crate) fn self_signed() -> Result<Tls, String> {
+    // The name is cosmetic: clients pin the fingerprint and ignore the name (the
+    // bridge sends the same one as SNI, `pax_godot::transport`).
     let generated = rcgen::generate_simple_self_signed(vec!["pax-server".to_owned()])
         .map_err(|e| format!("cannot make a certificate: {e}"))?;
     let certificate = generated.cert.der().clone();

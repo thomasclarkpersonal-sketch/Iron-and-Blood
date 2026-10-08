@@ -51,7 +51,9 @@ impl Transport {
             .dangerous()
             .with_custom_certificate_verifier(Arc::new(Pinned { pinned, provider }))
             .with_no_client_auth();
-        // The name only fills SNI: trust comes from the pinned fingerprint.
+        // The name only fills SNI, and matches what the server's self-signed
+        // certificate names (`pax_server::tls`): trust comes from the pinned
+        // fingerprint, never from the name.
         let name = ServerName::try_from("pax-server").expect("a valid DNS name");
         let tls = ClientConnection::new(Arc::new(config), name).map_err(io::Error::other)?;
         Ok(Transport::Tls { tls: Box::new(tls), socket })
