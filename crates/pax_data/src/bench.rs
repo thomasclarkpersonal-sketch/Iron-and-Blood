@@ -19,14 +19,18 @@ use pax_engine::world::{Geography, NewProducer};
 /// overflow `u32`. Nothing guards against it: `pax_cli bench` uses this as its
 /// default run length with `--scale` and only warns when asked for more, so a caller
 /// that needs the whole run to measure the scaled world must stay within it.
+///
+/// It relies on compaction running only at month end (`tick.rs`); if compaction ever
+/// gets its own schedule, this is the function to change.
 pub fn days_before_compaction(base: &World) -> u64 {
     // The day ticks before the month-end one; that day itself compacts.
     pax_engine::systems::demographics::days_until_month_end(base)
 }
 
-/// The `scale` that brings `base`, copied `regions` times, to about `rows` POP rows.
-/// One place for the arithmetic, so `pax_cli bench` callers and the server's budget
-/// test build the same kind of world (D13's "Measured" rows).
+/// The `scale` that brings `base`, copied `regions` times, to about `rows` POP rows:
+/// `rows / (base rows × regions)`, the arithmetic behind D13's documented `--scale`
+/// values (`pax_cli bench` takes `--scale` itself). `server_day_budget` uses it, so
+/// its world matches those rows.
 pub fn scale_for_rows(base: &World, rows: u64, regions: u32) -> u32 {
     let per_copy = base.pops.len() as u64 * u64::from(regions);
     u32::try_from((rows / per_copy.max(1)).max(1)).expect("a scale that fits u32")

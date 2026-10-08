@@ -142,6 +142,44 @@ mod tests {
         }
     }
 
+    /// M4-11: both of `allocate_raw`'s paths (i64 when every `total × w` fits, i128
+    /// otherwise) give exactly the i128 reference's shares, with totals and weights
+    /// that land on both sides of the i64 boundary.
+    #[test]
+    fn both_paths_match_the_i128_reference() {
+        let mut s: u64 = 0x9E37_79B9_7F4A_7C15;
+        let mut next = || {
+            s ^= s << 13;
+            s ^= s >> 7;
+            s ^= s << 17;
+            s
+        };
+        let (mut fast, mut wide) = (0, 0);
+        for _ in 0..3_000 {
+            let n = (next() % 50 + 1) as usize;
+            // Magnitudes from tiny to near i64::MAX for both total and weights.
+            let magnitude = |v: u64, bits: u64| (v >> 1) as i64 >> (62 - bits % 62);
+            let weights: Vec<i64> = (0..n).map(|_| magnitude(next(), next())).collect();
+            let total = magnitude(next(), next());
+            if weights.iter().all(|&w| w == 0) {
+                continue;
+            }
+            let max = weights.iter().copied().max().unwrap_or(0);
+            let sum: i128 = weights.iter().map(|&w| w as i128).sum();
+            if total.checked_mul(max).is_some() && i64::try_from(sum).is_ok() {
+                fast += 1;
+            } else {
+                wide += 1;
+            }
+            assert_eq!(
+                allocate_raw(total, &weights).unwrap(),
+                allocate_by_sorting(total, &weights),
+                "{total} {weights:?}"
+            );
+        }
+        assert!(fast > 200 && wide > 200, "both paths exercised: {fast} fast, {wide} wide");
+    }
+
     #[test]
     fn conservation_over_many_random_splits() {
         // Cheap deterministic pseudo-random sweep (no external crates).
