@@ -129,6 +129,9 @@ keys! {
     // Pong.
     NONCE = "nonce",
     // SaveResult, SaveList.
+    /// The request a SaveResult answers: `REQUEST_SAVE` or `REQUEST_LOAD` (the bridge
+    /// pairs answers with requests, so GDScript needn't guess).
+    REQUEST = "request",
     NAME = "name",
     NAMES = "names",
 
@@ -203,6 +206,10 @@ pub fn gdscript() -> String {
     out.push_str("\n## Policy names for PaxClient.submit_policy.\n");
     for p in crate::encode::Policy::ALL {
         out.push_str(&format!("const POLICY_{} := \"{}\"\n", p.name().to_uppercase(), p.name()));
+    }
+    out.push_str("\n## The requests a SaveResult answers (REQUEST).\n");
+    for r in crate::decode::SaveRequest::ALL {
+        out.push_str(&format!("const REQUEST_{} := \"{}\"\n", r.name().to_uppercase(), r.name()));
     }
     out
 }

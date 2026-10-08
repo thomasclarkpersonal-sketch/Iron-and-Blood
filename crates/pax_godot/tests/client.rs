@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use pax_godot::connection::{Connection, LocalServer};
-use pax_godot::decode::ServerEvent;
+use pax_godot::decode::{SaveRequest, ServerEvent};
 use pax_godot::encode::Policy;
 use pax_protocol::wire::{CommandError, MapMode, Speed};
 
@@ -112,7 +112,10 @@ fn play(c: &mut Tester) {
 
     c.save_game("bridge");
     let saved = c.wait_for(|e| matches!(e, ServerEvent::SaveResult { .. }));
-    assert_eq!(saved, ServerEvent::SaveResult { name: "bridge".into(), error: String::new() });
+    assert_eq!(
+        saved,
+        ServerEvent::SaveResult { request: SaveRequest::Save, name: "bridge".into(), error: String::new() }
+    );
     c.list_saves();
     let listed = c.wait_for(|e| matches!(e, ServerEvent::SaveList { .. }));
     assert_eq!(listed, ServerEvent::SaveList { names: vec!["bridge".into()] });
@@ -122,12 +125,17 @@ fn play(c: &mut Tester) {
     c.save_game("quick");
     c.load_game("quick");
     let saved = c.wait_for(|e| matches!(e, ServerEvent::SaveResult { .. }));
-    assert_eq!(saved, ServerEvent::SaveResult { name: "quick".into(), error: String::new() });
+    assert_eq!(
+        saved,
+        ServerEvent::SaveResult { request: SaveRequest::Save, name: "quick".into(), error: String::new() }
+    );
     c.wait_for(|e| matches!(e, ServerEvent::Welcome(_)));
     // A failed load answers SaveResult, and the session goes on.
     c.load_game("missing");
     let failed = c.wait_for(|e| matches!(e, ServerEvent::SaveResult { .. }));
-    assert!(matches!(failed, ServerEvent::SaveResult { error, .. } if error.contains("no save")));
+    assert!(
+        matches!(failed, ServerEvent::SaveResult { request: SaveRequest::Load, error, .. } if error.contains("no save"))
+    );
     c.subscribe(MapMode::Population, 0, None, None);
     c.wait_for(|e| matches!(e, ServerEvent::DayUpdate(_)));
 }

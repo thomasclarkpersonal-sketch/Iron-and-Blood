@@ -68,7 +68,7 @@ static func legend(mode: int, values: PackedFloat64Array, good: String) -> Strin
 		PaxKeys.MAP_MODE_POPULATION:
 			return "Population %s – %s" % [Format.count(int(lo)), Format.count(int(hi))]
 		PaxKeys.MAP_MODE_PRICE:
-			return "Price of %s %.2f – %.2f" % [good.capitalize(), lo, hi]
+			return "Price of %s %s – %s" % [good.capitalize(), Format.price(lo), Format.price(hi)]
 		PaxKeys.MAP_MODE_UNEMPLOYMENT:
 			return "Unemployment 0% (green) – 100% (red)"
 		PaxKeys.MAP_MODE_LIFE_NEEDS:

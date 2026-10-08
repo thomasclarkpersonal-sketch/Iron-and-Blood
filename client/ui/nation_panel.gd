@@ -28,6 +28,8 @@ var _nation := 0
 var _chooser: OptionButton
 var _figures: Label
 var _sliders: Array[HSlider] = []
+## Whether each slider is being dragged: then it doesn't follow the server's rate.
+var _dragging: Array[bool] = []
 var _values: Array[Label] = []
 var _status: Label
 var _last_update: Dictionary = {}
@@ -58,13 +60,17 @@ func _init() -> void:
 		var policy: String = entry[0]
 		slider.value_changed.connect(func(v: float) -> void:
 			value.text = Format.rate(PaxClient.rate_from_per_mille(int(v))))
+		var index := _sliders.size()
+		slider.drag_started.connect(func() -> void: _dragging[index] = true)
 		slider.drag_ended.connect(func(changed: bool) -> void:
+			_dragging[index] = false
 			if changed:
 				policy_requested.emit(policy, _nation, PaxClient.rate_from_per_mille(int(slider.value))))
 		row.add_child(slider)
 		row.add_child(value)
 		add_child(row)
 		_sliders.append(slider)
+		_dragging.append(false)
 		_values.append(value)
 	_status = Label.new()
 	_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -90,7 +96,7 @@ func show_update(update: Dictionary) -> void:
 		Format.count(t[PaxKeys.POPULATION][_nation]), Format.money(t[PaxKeys.TREASURY][_nation])]
 	for i in POLICIES.size():
 		var slider := _sliders[i]
-		if not slider.has_focus():
+		if not _dragging[i]:
 			# The server's rate, at the slider step at or below it.
 			slider.set_value_no_signal(PaxClient.rate_per_mille(t[POLICIES[i][2]][_nation]))
 			_values[i].text = Format.rate(t[POLICIES[i][2]][_nation])

@@ -386,7 +386,8 @@ fn event_dictionary(event: ServerEvent) -> VarDictionary {
         }
         // An identifier: its bits are kept as-is in Godot's signed 64-bit int.
         ServerEvent::Pong { nonce } => d.set(keys::NONCE, nonce as i64),
-        ServerEvent::SaveResult { name, error } => {
+        ServerEvent::SaveResult { request, name, error } => {
+            d.set(keys::REQUEST, request.name());
             d.set(keys::NAME, &GString::from(&name));
             d.set(keys::ERROR, &GString::from(&error));
         }

@@ -5,6 +5,8 @@ const PaxKeys := preload("res://pax_keys.gd")
 
 ## The player asked for `speed` (a `PaxKeys.SPEED_*`).
 signal speed_requested(speed: int)
+## The player opened the save/load menu.
+signal saves_requested
 
 ## The speeds, in button order (D23). Labels and tooltips come from the server's
 ## pacing table (`PaxKeys.SPEED_DAY_MS`), so they can't disagree with it.
@@ -48,6 +50,10 @@ func _init() -> void:
 	row.add_child(spacer)
 	_session = Label.new()
 	row.add_child(_session)
+	var saves := Button.new()
+	saves.text = "Saves"
+	saves.pressed.connect(func() -> void: saves_requested.emit())
+	row.add_child(saves)
 	add_child(row)
 
 

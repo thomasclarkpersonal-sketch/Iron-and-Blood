@@ -27,3 +27,13 @@ static func percent(x: float) -> String:
 ## does Fixed arithmetic.
 static func rate(raw: int) -> String:
 	return percent(PaxClient.rate_fraction(raw))
+
+
+## A price or a wage (money per unit or per worker).
+static func price(x: float) -> String:
+	return "%.3f" % x
+
+
+## An amount of goods.
+static func amount(x: float) -> String:
+	return "%.1f" % x

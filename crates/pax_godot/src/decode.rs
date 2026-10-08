@@ -208,6 +208,8 @@ pub enum ServerEvent {
         nonce: u64,
     },
     SaveResult {
+        /// The request it answers: a `SaveGame`, or a `LoadGame` that failed.
+        request: SaveRequest,
         name: String,
         error: String,
     },
@@ -477,6 +479,18 @@ pub enum SaveRequest {
     Load,
 }
 
+impl SaveRequest {
+    pub const ALL: [SaveRequest; 2] = [SaveRequest::Save, SaveRequest::Load];
+
+    /// The name GDScript sees in a `SaveResult`'s `REQUEST` (`PaxKeys.REQUEST_*`).
+    pub fn name(self) -> &'static str {
+        match self {
+            SaveRequest::Save => "save",
+            SaveRequest::Load => "load",
+        }
+    }
+}
+
 /// The server's side of one connection, as seen by the client. Feed it bytes in any
 /// chunking. It yields events until the first error, and then nothing ever again:
 /// the caller must disconnect (D22).
@@ -590,10 +604,11 @@ impl ServerStream {
                 let r = required(msg.payload_as_save_result(), "SaveResult body")?;
                 // The answer to the oldest save request: a save, or a load that failed
                 // (the session keeps its tables).
-                if self.outstanding.pop_front().is_none() {
+                let Some(request) = self.outstanding.pop_front() else {
                     return Err(invalid("a SaveResult without a SaveGame or LoadGame".to_owned()));
-                }
+                };
                 ServerEvent::SaveResult {
+                    request,
                     name: required(r.name(), "SaveResult name")?.to_owned(),
                     // The server always sends it: empty means success.
                     error: required(r.error(), "SaveResult error")?.to_owned(),
@@ -817,7 +832,7 @@ mod tests {
         s.expect(SaveRequest::Load);
         let failed = save_result_frame("x", "there is no save");
         assert!(
-            matches!(s.push(&failed).as_slice(), [ServerEvent::SaveResult { error, .. }] if error.contains("no save"))
+            matches!(s.push(&failed).as_slice(), [ServerEvent::SaveResult { request: SaveRequest::Load, error, .. }] if error.contains("no save"))
         );
         // A Welcome now is no longer expected.
         assert!(s.push(&welcome_frame(PROTOCOL_MAJOR, 2, 2, true)).is_empty());
@@ -836,7 +851,7 @@ mod tests {
         bytes.extend(welcome_frame(PROTOCOL_MAJOR, 3, 3, true));
         let events = s.push(&bytes);
         assert!(
-            matches!(events.as_slice(), [ServerEvent::SaveResult { .. }, ServerEvent::Welcome(w)] if w.provinces.len() == 3)
+            matches!(events.as_slice(), [ServerEvent::SaveResult { request: SaveRequest::Save, .. }, ServerEvent::Welcome(w)] if w.provinces.len() == 3)
         );
         assert_eq!(s.error(), None);
         // Nothing is outstanding now, so another SaveResult is a protocol error.
