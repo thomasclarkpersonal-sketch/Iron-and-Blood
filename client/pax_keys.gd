@@ -83,6 +83,7 @@ const APPLIES_ON_DAY := "applies_on_day"
 const ERROR := "error"
 const CHANGED_BY := "changed_by"
 const NONCE := "nonce"
+const REQUEST := "request"
 const NAME := "name"
 const NAMES := "names"
 const WIDTH := "width"
@@ -120,3 +121,7 @@ const SPEED_DAY_MS := [null, 2000, 1000, 500, 200, 0]
 const POLICY_INCOME_TAX := "income_tax"
 const POLICY_TRANSFER := "transfer"
 const POLICY_CONSUMPTION := "consumption"
+
+## The requests a SaveResult answers (REQUEST).
+const REQUEST_SAVE := "save"
+const REQUEST_LOAD := "load"

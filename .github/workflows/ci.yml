@@ -186,8 +186,8 @@ jobs:
 
   client-smoke:
     # M3-8: the real client, headless. It launches pax_server through the bridge,
-    # plays to day 40 at full speed and quits; any script error, protocol error or
-    # lost connection fails it (client/main.gd, --smoke).
+    # plays a policy and a save/list/load round trip at full speed and quits; any script
+    # error, protocol error or lost connection fails it (client/smoke.gd, --smoke).
     name: Client smoke test (headless Godot)
     runs-on: ubuntu-latest
     env:

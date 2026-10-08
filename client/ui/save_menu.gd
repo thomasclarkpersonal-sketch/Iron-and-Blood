@@ -66,11 +66,13 @@ func show_list(names: PackedStringArray) -> void:
 
 func show_result(result: Dictionary) -> void:
 	var error: String = result[PaxKeys.ERROR]
+	var saving: bool = result[PaxKeys.REQUEST] == PaxKeys.REQUEST_SAVE
 	if error == "":
+		# Only a save succeeds with a SaveResult; a load succeeds with a Welcome.
 		_status.text = "Saved as %s." % result[PaxKeys.NAME]
 		refresh_requested.emit()
 	else:
-		_status.text = error
+		_status.text = "%s failed: %s" % ["Save" if saving else "Load", error]
 
 
 func show_status(text: String) -> void:

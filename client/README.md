@@ -26,7 +26,7 @@ Command-line options go after `--`:
 | `--select=N` | Select province `N` at start |
 | `--open-saves` | Open the save/load menu at start |
 | `--screenshot=PATH` | Run to day 30, save a screenshot with the debug overlay, quit (or, if the connection is lost, screenshot the connection-lost screen and fail) |
-| `--smoke` | Headless check: select a province, switch to the Price map, set a policy, save, list and load at day 20, run to day 40, check the views, the policy and the reload, print `SMOKE OK …`, quit (CI runs this) |
+| `--smoke` | Headless check (`smoke.gd`): select a province, switch to the Price map, set a policy, save, list and load at day 20, run to day 40, check the views, the policy and the reload, print `SMOKE OK …`, quit (CI runs this). A stalled run names the stage it stalled at |
 
 Examples:
 
@@ -48,6 +48,7 @@ godot --headless --path client --import && godot --headless --path client -- --s
 | Path | What |
 |---|---|
 | `main.gd`, `main.tscn` | The app: start screen, session, routing events to the UI |
+| `smoke.gd` | The `--smoke` run, handed every event after main.gd has routed it |
 | `ui/` | One script per UI part: `top_bar.gd`, `summary_panel.gd`, `debug_overlay.gd`; the map (`map_view.gd` with `map.gdshader`, `map_modes.gd`, `map_colors.gd`); the side panels (`nation_panel.gd` with the policy sliders, `market_panel.gd`, `province_panel.gd`, sharing `table.gd`); `save_menu.gd` and `lost_screen.gd`; `format.gd` for display formatting |
 | `pax_keys.gd` | Every Dictionary key and event tag the bridge uses, and every value GDScript passes back: wire enums (`MAP_MODE_*`, `SPEED_*`, `COMMAND_ERROR_*`, from the schema) and policy names. Generated from `crates/pax_godot/src/keys.rs`; don't edit it. The bridge rejects (and logs) any argument outside them, never coercing it |
 | `pax_godot.gdextension` | Where Godot finds the bridge library for each platform (`target/{debug,release}`) |
