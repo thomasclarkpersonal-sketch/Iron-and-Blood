@@ -545,13 +545,15 @@ impl Sim {
         // The world, its history and its derived views are replaced together (game.rs).
         self.game = Game::resume(scenario, save, last_report);
         self.queue.discard();
-        // Kept seats hold the old game's nations.
         self.paused_for_fairness = None;
         // The new Welcomes reset every client: the lobby goes out again after them.
         self.last_lobby = None;
         // Not `set_clock`: the `Welcome` below announces the speed with the new game.
         self.clock = Clock::Paused;
         let nations = self.game.world().nations.key.len();
+        // A load drops every kept seat, whatever the phase: they hold the old game's
+        // nations, so an old resume token reclaims nothing in the new one (D24).
+        self.sessions.forget_all();
         // A seat is never widened to sandbox, which commands every nation. Each phase
         // has its own rule for a seat whose nation the loaded game lacks:
         match self.phase {
@@ -563,7 +565,6 @@ impl Sim {
             }
             // Single player has no lobby: that seat ends.
             Phase::SinglePlayer => {
-                self.sessions.forget_all();
                 for id in self.sessions.welcomed() {
                     let seat = self.sessions.seat(id).expect("welcomed sessions have a seat");
                     if let Some(n) = seat.nation().filter(|&n| n as usize >= nations) {
@@ -1265,6 +1266,28 @@ mod tests {
         }
         submit(&mut sim, 3, tax(0, 100_000));
         assert!(matches!(drain(&mut a).as_slice(), [Sent::Result { error: wire::CommandError::NotStarted, .. }]));
+    }
+
+    /// A load drops every kept seat: an old resume token reclaims nothing in the
+    /// loaded game (D24, NETWORK_PROTOCOL §3.9), and the seat's nation is free.
+    #[test]
+    fn a_load_drops_the_seats_kept_for_tokens() {
+        let (mut sim, _saves) = multiplayer(2);
+        let (mut a, _) = join(&mut sim, 1, Some(0));
+        let (_b, _) = join(&mut sim, 2, Some(1));
+        start(&mut sim, &[1, 2]);
+        let token = sim.sessions.token(2).expect("a seated player has a token").get();
+        sim.handle(Inbound::Request { session: 1, request: Request::SaveGame { name: Some("s".into()) } });
+        sim.handle(Inbound::Closed { session: 2 });
+        sim.handle(Inbound::Request { session: 1, request: Request::LoadGame { name: Some("s".into()) } });
+        drain(&mut a);
+        let (conn, mut rx) = ConnHandle::for_test();
+        sim.handle(Inbound::Connected { session: 3, conn });
+        let hello =
+            Request::Hello { major: PROTOCOL_MAJOR, minor: 0, name: None, requested_nation: None, resume_token: token };
+        sim.handle(Inbound::Request { session: 3, request: hello });
+        assert_eq!(drain(&mut rx), [Sent::Rejected, Sent::Close], "the kept seat went with the old game");
+        assert_eq!(join(&mut sim, 4, Some(1)).1, [Sent::Welcome { player: 1 }], "its nation is free");
     }
 
     /// In single player there is no lobby: a seat whose nation the loaded game lacks

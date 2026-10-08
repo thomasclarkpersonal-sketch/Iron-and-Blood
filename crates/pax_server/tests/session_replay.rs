@@ -131,30 +131,6 @@ fn a_saved_session_replays_to_the_servers_final_state() {
     std::fs::remove_dir_all(&saves).unwrap();
 }
 
-/// Reads until the lobby shows `players` players, all ready.
-fn until_all_ready(c: &mut Client, players: usize) {
-    loop {
-        match c.next() {
-            Got::Lobby { players: p, .. } if p.len() == players && p.iter().all(|p| p.2) => return,
-            Got::DayUpdate { day, .. } => c.ack(day),
-            Got::Closed => panic!("server closed the connection"),
-            _ => {}
-        }
-    }
-}
-
-/// Reads until the lobby says the game started.
-fn until_started(c: &mut Client) {
-    loop {
-        match c.next() {
-            Got::Lobby { started: true, .. } => return,
-            Got::DayUpdate { day, .. } => c.ack(day),
-            Got::Closed => panic!("server closed the connection"),
-            _ => {}
-        }
-    }
-}
-
 /// M4-5, M4's definition of done (item 4): a two-player game saves, its log records
 /// who played each command, replaying it reproduces the server's state, and loading
 /// it goes back through the lobby to the same state.
@@ -162,22 +138,11 @@ fn until_started(c: &mut Client) {
 fn a_two_player_game_saves_replays_and_reloads_through_the_lobby() {
     let saves = std::env::temp_dir().join(format!("pax-mp-replay-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&saves);
-    let mut config = Config::local(scenario("two_states"));
+    let mut config = Config::multiplayer(scenario("two_states"), 2);
     config.saves_dir = saves.clone();
-    config.max_players = 2;
-    config.sandbox = false;
-    let server = start(config);
-    let mut host = Client::connect(server.local_addr());
-    host.hello(Some(0));
-    assert!(matches!(host.next(), Got::Welcome { player: 0, .. }), "the host is seated first");
-    let mut guest = Client::connect(server.local_addr());
-    guest.hello(Some(1));
-    host.set_ready(true);
-    guest.set_ready(true);
-    until_all_ready(&mut host, 2);
-    host.start_game();
-    until_started(&mut host);
-    until_started(&mut guest);
+    // The test drives one client at a time, so the other is silent: no fairness pause.
+    config.pause_after = None;
+    let (server, mut host, mut guest) = started_game(config);
 
     // Each player commands their own nation, on several days.
     set_tax(&mut host, 1, 0, 150_000, 0);
