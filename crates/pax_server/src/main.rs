@@ -78,7 +78,7 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> Result<(Config, Option<
         return Err("--pause-after and --drop-after are multiplayer settings (--players above 1)".to_owned());
     }
     // The rules every way of building a server shares (`Config::validate`).
-    config.validate()?;
+    config.validate().map_err(|e| e.to_string())?;
     Ok((config, port_file))
 }
 

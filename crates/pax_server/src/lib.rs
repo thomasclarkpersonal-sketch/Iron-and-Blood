@@ -94,20 +94,17 @@ impl Config {
     /// * the fairness pause is multiplayer only, and comes before the drop (D24), or
     ///   the connection task would drop a client when it should pause the game;
     /// * D24's TLS rule: several players bind loopback only until M4-6 brings TLS.
-    pub fn validate(&self) -> Result<(), String> {
+    pub fn validate(&self) -> Result<(), ConfigError> {
         if let Some(pause) = self.pause_after {
             if self.max_players <= 1 {
-                return Err("a fairness pause (--pause-after) is for multiplayer (--players above 1)".to_owned());
+                return Err(ConfigError::PauseInSinglePlayer);
             }
             if pause >= self.idle_timeout {
-                return Err("--pause-after must be shorter than --drop-after".to_owned());
+                return Err(ConfigError::PauseNotBeforeDrop);
             }
         }
         if self.max_players > 1 && !self.bind.ip().is_loopback() {
-            return Err(format!(
-                "--players {} on {} needs TLS (D24), which arrives with M4-6: until then, bind 127.0.0.1",
-                self.max_players, self.bind
-            ));
+            return Err(ConfigError::MultiplayerNeedsTls { players: self.max_players, bind: self.bind });
         }
         Ok(())
     }
@@ -129,11 +126,39 @@ impl Config {
     }
 }
 
+/// A rule a [`Config`] breaks (`Config::validate`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ConfigError {
+    /// A fairness pause is for multiplayer (D24).
+    PauseInSinglePlayer,
+    /// The pause must come before the drop, or clients are dropped instead.
+    PauseNotBeforeDrop,
+    /// D24: TLS off localhost, and M4-6 hasn't brought it yet.
+    MultiplayerNeedsTls { players: u16, bind: SocketAddr },
+}
+
+impl std::fmt::Display for ConfigError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ConfigError::PauseInSinglePlayer => {
+                write!(f, "a fairness pause (--pause-after) is for multiplayer (--players above 1)")
+            }
+            ConfigError::PauseNotBeforeDrop => write!(f, "--pause-after must be shorter than --drop-after"),
+            ConfigError::MultiplayerNeedsTls { players, bind } => write!(
+                f,
+                "--players {players} on {bind} needs TLS (D24), which arrives with M4-6: until then, bind 127.0.0.1"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for ConfigError {}
+
 /// Why a server couldn't start.
 #[derive(Debug)]
 pub enum StartError {
     /// The configuration breaks a rule (`Config::validate`).
-    Config(String),
+    Config(ConfigError),
     Scenario(pax_data::LoadError),
     Io(std::io::Error),
 }
@@ -273,10 +298,10 @@ mod tests {
         config.max_players = 2;
         config.pause_after = Some(Duration::from_secs(40));
         config.idle_timeout = Duration::from_secs(30);
-        assert!(matches!(Server::start(config.clone()), Err(StartError::Config(e)) if e.contains("shorter")));
+        assert!(matches!(Server::start(config.clone()), Err(StartError::Config(ConfigError::PauseNotBeforeDrop))));
         config.pause_after = Some(Duration::from_secs(5));
         config.bind = SocketAddr::from(([0, 0, 0, 0], 0));
-        assert!(matches!(Server::start(config), Err(StartError::Config(e)) if e.contains("TLS")));
+        assert!(matches!(Server::start(config), Err(StartError::Config(ConfigError::MultiplayerNeedsTls { .. }))));
     }
 
     /// A panic on the sim thread reaches the client (Goodbye) and the caller (Err),

@@ -374,8 +374,7 @@ impl Sim {
             self.paused_for_fairness = Some(speed);
         }
         // The server's doing, not a player's: `changed_by` keeps the last player.
-        self.clock = Clock::Paused;
-        self.sessions.broadcast(&self.server_state());
+        self.set_clock(Clock::Paused, None);
     }
 
     /// Someone the fairness pause waited for is back, or their seat ended. When

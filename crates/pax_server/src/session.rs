@@ -337,7 +337,7 @@ impl SessionTable {
     /// seat.
     pub(crate) fn sit(&mut self, id: u64, name: &str, claim: Claim, max_players: usize) -> Result<Seat, Refusal> {
         // Kept seats count: their players may come back (D24).
-        if self.players() + self.reserved.len() >= max_players {
+        if self.all_seats().count() >= max_players {
             return Err(Refusal::Full);
         }
         if let Some((nation, player)) = claim.nation().and_then(|n| self.holder(n).map(|p| (n, p))) {
@@ -431,6 +431,13 @@ impl SessionTable {
         self.rows.values()
     }
 
+    /// Every occupied seat: playing, or kept for a player who left (D24). The one
+    /// definition of occupancy, for player ids, nations and the player limit;
+    /// [`Self::players`] counts only those playing.
+    fn all_seats(&self) -> impl Iterator<Item = Seat> + '_ {
+        self.rows.values().filter_map(|s| s.seat).chain(self.reserved.values().map(|r| r.seat))
+    }
+
     /// The welcomed sessions' ids, in session order.
     pub(crate) fn welcomed(&self) -> Vec<u64> {
         self.rows.iter().filter(|(_, s)| s.seat.is_some()).map(|(&id, _)| id).collect()
@@ -449,8 +456,7 @@ impl SessionTable {
     /// player who comes back without their resume token gets it; with the token, they
     /// get their old seat back ([`Self::resume`]).
     pub(crate) fn free_player(&self) -> u16 {
-        let seated = self.rows.values().filter_map(|s| s.seat);
-        let mut taken: Vec<u16> = seated.chain(self.reserved.values().map(|r| r.seat)).map(|s| s.player).collect();
+        let mut taken: Vec<u16> = self.all_seats().map(|s| s.player).collect();
         taken.sort_unstable();
         let mut player = 0;
         for t in taken {
@@ -465,11 +471,7 @@ impl SessionTable {
     /// The player holding `nation`, playing or away with a kept seat. Sandbox seats
     /// hold none.
     pub(crate) fn holder(&self, nation: u32) -> Option<u16> {
-        let seated = self.rows.values().filter_map(|s| s.seat);
-        seated
-            .chain(self.reserved.values().map(|r| r.seat))
-            .find(|s| s.claim == Claim::Nation(nation))
-            .map(|s| s.player)
+        self.all_seats().find(|s| s.claim == Claim::Nation(nation)).map(|s| s.player)
     }
 
     /// Sends `out` to one session; a closed or unknown session is ignored.
