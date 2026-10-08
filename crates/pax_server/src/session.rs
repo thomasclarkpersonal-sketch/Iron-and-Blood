@@ -16,6 +16,7 @@
 //! order.
 
 use std::collections::BTreeMap;
+use std::hash::{BuildHasher, RandomState};
 
 use crate::encode::LobbyEntry;
 use crate::net::{ConnHandle, Outbound};
@@ -36,6 +37,8 @@ pub(crate) struct Session {
     name: String,
     /// Marked ready in the lobby (M4-2). Cleared whenever the claim changes.
     ready: bool,
+    /// The resume token its `Welcome` carries (D24); 0 until seated.
+    token: u64,
 }
 
 /// Why the session table refused a seat ([`SessionTable::sit`]) or a lobby request
@@ -48,6 +51,9 @@ pub(crate) enum Refusal {
     NationTaken { nation: u32, player: u16 },
     /// Only a player holding a nation (or a sandbox seat) can be ready (M4-2).
     NoClaim,
+    /// No seat is kept for this resume token: it was never issued, the player was
+    /// kicked, or a load replaced the game.
+    UnknownToken,
 }
 
 /// Who is host (D24). The table applies the whole rule, electing and succeeding.
@@ -121,8 +127,23 @@ impl Seat {
     }
 }
 
+/// A started game's seat whose player left: kept for their resume token, so they can
+/// reclaim it (D24). It still holds its player id and nation, and counts toward the
+/// player limit.
+#[derive(Clone, Debug)]
+struct Reservation {
+    seat: Seat,
+    name: String,
+}
+
 pub(crate) struct SessionTable {
     rows: BTreeMap<u64, Session>,
+    /// Seats kept for players who left a started game, by resume token.
+    reserved: BTreeMap<u64, Reservation>,
+    /// Resume tokens: a keyed hash of a counter, with keys the OS chose for this
+    /// process, so a token can't be guessed from another (D24). Not simulation state.
+    token_keys: RandomState,
+    issued: u64,
     /// The session that sets the speed, saves, loads and kicks (D24). Always a
     /// welcomed session, or `None`.
     host: Option<u64>,
@@ -133,7 +154,14 @@ pub(crate) struct SessionTable {
 impl SessionTable {
     /// An empty table whose host follows `host_rule`.
     pub(crate) fn new(host_rule: HostRule) -> Self {
-        SessionTable { rows: BTreeMap::new(), host: None, host_rule }
+        SessionTable {
+            rows: BTreeMap::new(),
+            reserved: BTreeMap::new(),
+            token_keys: RandomState::new(),
+            issued: 0,
+            host: None,
+            host_rule,
+        }
     }
 
     /// A new connection, not yet welcomed.
@@ -145,23 +173,79 @@ impl SessionTable {
             window: UpdateWindow::default(),
             name: String::new(),
             ready: false,
+            token: 0,
         };
         self.rows.insert(id, row);
     }
 
     /// Removes a closed connection's row. If it was playing, its seat ends: see
-    /// [`Vacated`].
-    pub(crate) fn remove(&mut self, id: u64) -> Option<Vacated> {
-        let seat = self.rows.remove(&id)?.seat?;
+    /// [`Vacated`]. With `keep`, the seat is kept for the player's resume token (a
+    /// started multiplayer game, D24).
+    pub(crate) fn remove(&mut self, id: u64, keep: bool) -> Option<Vacated> {
+        let row = self.rows.remove(&id)?;
+        let seat = row.seat?;
+        if keep {
+            self.reserved.insert(row.token, Reservation { seat, name: row.name });
+        }
         Some(self.vacated(id, seat))
     }
 
     /// Ends the session's seat while its connection is still open (a kick, a load
     /// without its nation): it no longer plays, and the admission choke point drops
-    /// whatever it still sends. Its row stays until its connection closes.
+    /// whatever it still sends. Its row stays until its connection closes. The seat
+    /// is not kept.
     pub(crate) fn unseat(&mut self, id: u64) -> Option<Vacated> {
         let seat = self.rows.get_mut(&id)?.seat.take()?;
         Some(self.vacated(id, seat))
+    }
+
+    /// Seats a connected session in the seat kept for `token` (D24): the same player
+    /// id and nation. The token stays valid, for a later drop.
+    pub(crate) fn resume(&mut self, id: u64, token: u64) -> Result<Seat, Refusal> {
+        let Reservation { seat, name } = self.reserved.remove(&token).ok_or(Refusal::UnknownToken)?;
+        let row = self.rows.get_mut(&id).expect("a session is connected before it says Hello");
+        debug_assert!(row.seat.is_none(), "net lets a session say Hello only once");
+        row.seat = Some(seat);
+        row.ready = true;
+        row.token = token;
+        row.name = name;
+        self.elect(id);
+        Ok(seat)
+    }
+
+    /// Drops the seat kept for an away `player`, if any (a kick, D24). Returns
+    /// whether there was one.
+    pub(crate) fn forget(&mut self, player: u16) -> bool {
+        let before = self.reserved.len();
+        self.reserved.retain(|_, r| r.seat.player != player);
+        self.reserved.len() < before
+    }
+
+    /// Drops every kept seat: a load replaced the game, whose nations they hold.
+    pub(crate) fn forget_all(&mut self) {
+        self.reserved.clear();
+    }
+
+    /// The session's resume token (0 before it is seated).
+    pub(crate) fn token(&self, id: u64) -> u64 {
+        self.rows.get(&id).map_or(0, |s| s.token)
+    }
+
+    fn new_token(&mut self) -> u64 {
+        self.issued += 1;
+        // Never 0, which Hello uses for "a new session".
+        self.token_keys.hash_one(self.issued).max(1)
+    }
+
+    /// Elects `id` host if the rule says so and nobody is host (D24).
+    fn elect(&mut self, id: u64) {
+        let elected = match &self.host_rule {
+            HostRule::FirstPlayer => true,
+            HostRule::Admin(admin) => self.rows.get(&id).is_some_and(|s| &s.name == admin),
+        };
+        if elected && self.host.is_none() {
+            self.host = Some(id);
+        }
     }
 
     /// After a seat ended: the host role passes on by D24's rule.
@@ -206,7 +290,8 @@ impl SessionTable {
     /// `max_players` play and nobody holds the nation. The only way a session gets a
     /// seat.
     pub(crate) fn sit(&mut self, id: u64, name: &str, claim: Claim, max_players: usize) -> Result<Seat, Refusal> {
-        if self.players() >= max_players {
+        // Kept seats count: their players may come back (D24).
+        if self.players() + self.reserved.len() >= max_players {
             return Err(Refusal::Full);
         }
         if let Some((nation, player)) = claim.nation().and_then(|n| self.holder(n).map(|p| (n, p))) {
@@ -218,14 +303,9 @@ impl SessionTable {
         row.seat = Some(seat);
         row.name = name.to_owned();
         row.ready = false;
-        // Election (D24): the first player, or the admin by name, when nobody is host.
-        let elected = match &self.host_rule {
-            HostRule::FirstPlayer => true,
-            HostRule::Admin(admin) => name == admin,
-        };
-        if elected && self.host.is_none() {
-            self.host = Some(id);
-        }
+        let token = self.new_token();
+        self.rows.get_mut(&id).expect("just seated").token = token;
+        self.elect(id);
         Ok(seat)
     }
 
@@ -279,8 +359,18 @@ impl SessionTable {
                     sandbox: seat.claim == Claim::Sandbox,
                     ready: s.ready,
                     host: self.host == Some(id),
+                    away: false,
                 })
             })
+            .chain(self.reserved.values().map(|r| LobbyEntry {
+                player: r.seat.player,
+                name: r.name.clone(),
+                nation: r.seat.nation(),
+                sandbox: r.seat.claim == Claim::Sandbox,
+                ready: true,
+                host: false,
+                away: true,
+            }))
             .collect();
         entries.sort_by_key(|e| e.player);
         entries
@@ -310,10 +400,12 @@ impl SessionTable {
         self.rows.values().filter(|s| s.seat.is_some()).count()
     }
 
-    /// The lowest player id no welcomed session holds. A rejoining player gets the
-    /// lowest free id, not necessarily their old one; resume tokens (M4-4) reclaim a seat.
+    /// The lowest player id that neither a welcomed session nor a kept seat holds. A
+    /// player who comes back without their resume token gets it; with the token, they
+    /// get their old seat back ([`Self::resume`]).
     pub(crate) fn free_player(&self) -> u16 {
-        let mut taken: Vec<u16> = self.rows.values().filter_map(|s| s.seat).map(|s| s.player).collect();
+        let seated = self.rows.values().filter_map(|s| s.seat);
+        let mut taken: Vec<u16> = seated.chain(self.reserved.values().map(|r| r.seat)).map(|s| s.player).collect();
         taken.sort_unstable();
         let mut player = 0;
         for t in taken {
@@ -325,9 +417,14 @@ impl SessionTable {
         player
     }
 
-    /// The player holding `nation`, if any. Sandbox seats hold none.
+    /// The player holding `nation`, playing or away with a kept seat. Sandbox seats
+    /// hold none.
     pub(crate) fn holder(&self, nation: u32) -> Option<u16> {
-        self.rows.values().filter_map(|s| s.seat).find(|s| s.claim == Claim::Nation(nation)).map(|s| s.player)
+        let seated = self.rows.values().filter_map(|s| s.seat);
+        seated
+            .chain(self.reserved.values().map(|r| r.seat))
+            .find(|s| s.claim == Claim::Nation(nation))
+            .map(|s| s.player)
     }
 
     /// Sends `out` to one session; a closed or unknown session is ignored.
@@ -365,7 +462,7 @@ mod tests {
         seated(&mut t, 2, 1, Some(0));
         seated(&mut t, 3, 2, Some(1));
         assert_eq!(t.free_player(), 3);
-        t.remove(2);
+        let _ = t.remove(2, false);
         assert_eq!(t.free_player(), 1, "player 1 left: the next player takes id 1");
         assert_eq!((t.players(), t.welcomed()), (2, vec![1, 3]));
         assert_eq!((t.session_of(2), t.session_of(1)), (Some(3), None));
@@ -378,7 +475,7 @@ mod tests {
         seated(&mut t, 9, 1, None);
         seated(&mut t, 5, 2, None);
         assert_eq!(t.host(), Some(7), "the first player");
-        let v = t.remove(7).unwrap();
+        let v = t.remove(7, false).unwrap();
         assert_eq!((v.new_host, v.last, t.host()), (Some(9), false, Some(9)), "player 1 is session 9");
         assert_eq!(t.unseat(5).map(|v| (v.new_host, v.last)), Some((None, false)), "not the host: no change");
         assert_eq!(t.unseat(9).map(|v| (v.new_host, v.last)), Some((None, true)), "nobody left to pass it to");
@@ -394,7 +491,7 @@ mod tests {
         t.connect(2, conn);
         assert!(t.sit(2, "ada", Claim::Unclaimed, 8).is_ok());
         assert_eq!(t.host(), Some(2));
-        assert_eq!(t.remove(2).map(|v| v.new_host), Some(None));
+        assert_eq!(t.remove(2, false).map(|v| v.new_host), Some(None));
         assert_eq!(t.host(), None);
     }
 

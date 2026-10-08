@@ -148,7 +148,7 @@ All systems are plain functions over `&mut World`, called by `tick::step` in the
 
 | Server module | What it does |
 |---|---|
-| `net.rs` | One tokio task per connection. `RequestReader` turns bytes into requests and enforces the `Hello` rules; the rest goes to the sim thread over a bounded channel |
+| `net.rs` | One tokio task per connection. `RequestReader` turns bytes into requests and enforces the `Hello` rules; the rest goes to the sim thread over a bounded channel. In multiplayer it also reports a client that stalls and comes back (D24's fairness pause, M4-4) |
 | `request.rs`, `encode.rs`, `commands.rs` | Wire ↔ owned values. Engine ↔ wire conversions are exhaustive matches, with no `_` arm (NETWORK_PROTOCOL §5) |
 | `sim.rs` | The sim thread: the handshake and admission, subscriptions, command checks, speed, flow control, saves |
 | `session.rs` | The session table (M4-1): one row per connection, with its subscription, window and seat (player id and nation); player ids, who holds a nation, the host (elected and succeeded by `HostRule`, M4-3), lobby claims and ready marks (M4-2), broadcasts |

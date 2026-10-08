@@ -46,6 +46,14 @@ use std::path::PathBuf;
 use std::thread::JoinHandle;
 use std::time::Duration;
 
+/// D24's default fairness pause: a multiplayer game pauses for everyone when a
+/// player has sent nothing for this long (`--pause-after`).
+pub const PAUSE_AFTER: Duration = Duration::from_secs(5);
+
+/// D24's default drop: a multiplayer session silent this long is closed, and its
+/// seat waits for its resume token (`--drop-after`). It replaces D22's 10 s rule.
+pub const DROP_AFTER: Duration = Duration::from_secs(30);
+
 /// How to run a server.
 #[derive(Clone, Debug)]
 pub struct Config {
@@ -55,8 +63,13 @@ pub struct Config {
     /// (NETWORK_PROTOCOL §6).
     pub bind: SocketAddr,
     /// Close a session that sends nothing for this long (the client pings at least
-    /// every 2 s, NETWORK_PROTOCOL §3).
+    /// every 2 s, NETWORK_PROTOCOL §3): D22's 10 s in single player, D24's drop
+    /// (`--drop-after`, 30 s) in multiplayer.
     pub idle_timeout: Duration,
+    /// In multiplayer, pause the game for everyone when a player has sent nothing for
+    /// this long, and resume when they speak again (D24's fairness pause,
+    /// `--pause-after`, 5 s). `None`: no fairness pause (single player).
+    pub pause_after: Option<Duration>,
     /// Stop when the last player leaves: the client launched this server.
     pub exit_when_idle: bool,
     /// How many sessions may play at once; one more is refused with "server full".
@@ -83,6 +96,7 @@ impl Config {
             scenario: scenario.into(),
             bind: SocketAddr::from(([127, 0, 0, 1], 0)),
             idle_timeout: pax_protocol::IDLE_TIMEOUT,
+            pause_after: None,
             exit_when_idle: false,
             saves_dir: PathBuf::from("saves"),
             max_players: 1,
@@ -162,7 +176,8 @@ impl Server {
         // Bounded: a connection whose requests pile up stops being read (backpressure),
         // as a connection whose replies pile up is closed (net.rs).
         let (to_sim, inbound) = flume::bounded(net::INBOUND_QUEUE);
-        runtime.spawn(net::accept_loop(listener, to_sim.clone(), config.idle_timeout));
+        let timing = net::Timing { idle: config.idle_timeout, stall_after: config.pause_after };
+        runtime.spawn(net::accept_loop(listener, to_sim.clone(), timing));
         let mut sim = sim::Sim::new(scenario, &config);
         let sim = std::thread::Builder::new().name("pax-sim".to_owned()).spawn(move || {
             // A panic is caught only to tell the clients and the caller; the default

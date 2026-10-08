@@ -160,7 +160,13 @@ impl Connection {
     }
 
     pub fn hello(&mut self, nation: Option<u32>) {
-        self.send(encode::hello("Iron and Blood (Godot)", nation));
+        self.send(encode::hello("Iron and Blood (Godot)", nation, 0));
+    }
+
+    /// Reclaims the seat a dropped session kept (D24): `token` is its `Welcome`'s
+    /// resume token.
+    pub fn resume(&mut self, token: u64) {
+        self.send(encode::hello("Iron and Blood (Godot)", None, token));
     }
 
     pub fn subscribe(&mut self, mode: wire::MapMode, good: u16, market: Option<u32>, province: Option<u32>) {

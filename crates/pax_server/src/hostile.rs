@@ -151,7 +151,9 @@ const REQUEST_KINDS: u64 = 14;
 
 /// A well-formed request with hostile values. Every kind of request has its own arm;
 /// the draws give each its share (the SubmitCommand arm takes three).
-fn hostile_request(n: &mut Noise) -> Request {
+/// `tokens` are resume tokens the server has issued: a Hello sometimes reclaims a
+/// kept seat with one (D24), sometimes tries a forged one.
+fn hostile_request(n: &mut Noise, tokens: &[u64]) -> Request {
     let nation = |n: &mut Noise| n.int(2) as u32;
     let opt = |n: &mut Noise, below: u64| (!n.chance(3)).then(|| n.int(below) as u32);
     match n.below(REQUEST_KINDS) {
@@ -160,7 +162,11 @@ fn hostile_request(n: &mut Noise) -> Request {
             minor: n.next() as u16,
             name: n.name(),
             requested_nation: opt(n, 2),
-            resume_token: n.next(),
+            resume_token: match n.below(4) {
+                0 if !tokens.is_empty() => tokens[n.index(tokens.len())],
+                1 => n.next(),
+                _ => 0,
+            },
         },
         1..=3 => {
             let rate_raw = (!n.chance(6)).then(|| n.rate());
@@ -223,7 +229,7 @@ fn the_generator_reaches_every_request_kind() {
     let mut noise = Noise::new(7);
     let mut seen = [false; KINDS];
     for _ in 0..10_000 {
-        seen[kind(&hostile_request(&mut noise))] = true;
+        seen[kind(&hostile_request(&mut noise, &[]))] = true;
     }
     let ping = kind(&Request::Ping { nonce: 0 });
     let missed: Vec<usize> = (0..KINDS).filter(|&k| k != ping && !seen[k]).collect();
@@ -259,6 +265,7 @@ fn the_sim_thread_survives_hostile_requests() {
     // but the sim thread is tested without relying on it.
     let mut open: Vec<u64> = Vec::new();
     let mut next_session = 1;
+    let mut tokens: Vec<u64> = Vec::new();
     for round in 0..6_000u64 {
         // The first half plays in the lobby, where hostile claims and starts rarely
         // line everyone up; the second half plays the game itself.
@@ -278,9 +285,14 @@ fn the_sim_thread_survives_hostile_requests() {
                 sim.handle(Inbound::Closed { session });
             }
             2..=5 => sim.tick(),
+            // The net layer's silence reports (D24's fairness pause), in any order.
+            6 | 7 if !open.is_empty() => {
+                let session = open[noise.index(open.len())];
+                sim.handle(if noise.chance(2) { Inbound::Stalled { session } } else { Inbound::Resumed { session } });
+            }
             _ if !open.is_empty() => {
                 let session = open[noise.index(open.len())];
-                let request = hostile_request(&mut noise);
+                let request = hostile_request(&mut noise, &tokens);
                 sim.handle(Inbound::Request { session, request });
             }
             _ => {}
@@ -288,7 +300,14 @@ fn the_sim_thread_survives_hostile_requests() {
         // Keep the test connections' queues from filling.
         if round % 64 == 0 {
             for rx in &mut receivers {
-                while rx.try_recv().is_ok() {}
+                while let Ok(out) = rx.try_recv() {
+                    // Keep the resume tokens the server hands out, to come back with.
+                    if let Outbound::Frame(f) = out
+                        && let Some(w) = pax_protocol::read_server_message(&f).ok().and_then(|m| m.payload_as_welcome())
+                    {
+                        tokens.push(w.resume_token());
+                    }
+                }
             }
         }
     }

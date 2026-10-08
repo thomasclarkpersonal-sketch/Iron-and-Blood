@@ -42,6 +42,8 @@ keys! {
     // Welcome.
     PROTOCOL_MINOR = "protocol_minor",
     PLAYER = "player",
+    /// Welcome: present it to `PaxClient.resume` to reclaim the seat after a drop.
+    RESUME_TOKEN = "resume_token",
     NATION = "nation",
     DAY = "day",
     SPEED = "speed",
@@ -127,6 +129,8 @@ keys! {
     ERROR = "error",
     // ServerState.
     CHANGED_BY = "changed_by",
+    /// Players a fairness pause waits for (ServerState, D24); empty when none.
+    WAITING_FOR = "waiting_for",
     // Pong.
     NONCE = "nonce",
     // SaveResult, SaveList.
@@ -142,6 +146,8 @@ keys! {
     SANDBOX = "sandbox",
     READY = "ready",
     HOST = "host",
+    /// Left the started game; the seat waits for their resume token.
+    AWAY = "away",
     STARTED = "started",
     /// Why this client's last lobby request was refused, or null.
     NOTICE = "notice",

@@ -130,9 +130,12 @@ pub fn command_result(client_seq: u32, error: wire::CommandError, applies_on_day
 }
 
 /// The speed changed (including to and from paused), sent to every session (D23).
-pub fn server_state(day: u64, speed: wire::Speed, changed_by: u16) -> Vec<u8> {
+/// The clock (D23): its speed, who set it, and the players a fairness pause waits
+/// for (D24; empty when none).
+pub fn server_state(day: u64, speed: wire::Speed, changed_by: u16, waiting_for: &[u16]) -> Vec<u8> {
     let mut b = FlatBufferBuilder::new();
-    let s = wire::ServerState::create(&mut b, &wire::ServerStateArgs { day, speed, changed_by });
+    let waiting_for = Some(b.create_vector(waiting_for));
+    let s = wire::ServerState::create(&mut b, &wire::ServerStateArgs { day, speed, changed_by, waiting_for });
     finish(b, ServerPayload::ServerState, s.as_union_value())
 }
 
@@ -163,6 +166,8 @@ pub struct LobbyEntry {
     pub sandbox: bool,
     pub ready: bool,
     pub host: bool,
+    /// Left the started game; the seat waits for their resume token (D24).
+    pub away: bool,
 }
 
 /// The lobby (M4-2): every player, whether the game started, and, for the one
@@ -182,6 +187,7 @@ pub fn lobby_state(players: &[LobbyEntry], started: bool, notice: Option<&str>) 
                     sandbox: p.sandbox,
                     ready: p.ready,
                     host: p.host,
+                    away: p.away,
                 },
             )
         })
