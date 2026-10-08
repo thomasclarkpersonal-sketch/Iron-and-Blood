@@ -17,6 +17,7 @@
 
 use std::collections::BTreeMap;
 
+use crate::encode::LobbyEntry;
 use crate::net::{ConnHandle, Outbound};
 use crate::view::CheckedSubscription;
 use crate::window::UpdateWindow;
@@ -31,15 +32,34 @@ pub(crate) struct Session {
     seat: Option<Seat>,
     /// Which days' updates it is sent (D23 flow control).
     pub window: UpdateWindow,
+    /// The name the client gave in `Hello`, for the lobby. Display only.
+    name: String,
+    /// Marked ready in the lobby (M4-2). Cleared whenever the claim changes.
+    ready: bool,
 }
 
-/// Why [`SessionTable::sit`] refused a seat.
+/// Why the session table refused a seat ([`SessionTable::sit`]) or a lobby request
+/// ([`SessionTable::claim`], [`SessionTable::set_ready`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Refusal {
     /// The server's limit of players are already playing.
     Full,
     /// Another player holds the nation (D24).
-    NationTaken { player: u16 },
+    NationTaken { nation: u32, player: u16 },
+    /// Only a player holding a nation (or a sandbox seat) can be ready (M4-2).
+    NoClaim,
+}
+
+/// Who is host (D24). The table applies the whole rule, electing and succeeding.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum HostRule {
+    /// A player-hosted server: the first player is host, and when the host's seat
+    /// ends, the remaining player with the lowest id.
+    FirstPlayer,
+    /// A dedicated server (`--admin NAME`): the client of that name is host whenever
+    /// it plays, and nobody else ever is. The name is what the client asserts, so
+    /// multiplayer binds loopback only until M4-6 authenticates it.
+    Admin(String),
 }
 
 /// What ending a seat changed. The caller must act on it (D23: when the last player
@@ -60,8 +80,45 @@ pub(crate) struct Seat {
     /// Distinct among the welcomed sessions. It stamps the session's commands, so it
     /// orders them within a day (D24) and names the player in the command log.
     pub player: u16,
-    /// `None`: sandbox, may command every nation (M3; D24 restricts it to `--sandbox`).
-    pub nation: Option<u32>,
+    pub claim: Claim,
+}
+
+/// What a seat commands (D24): one state, so a seat can't be both a nation's and
+/// sandbox. The wire's `nation` and `sandbox` fields come from it (`encode.rs`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Claim {
+    /// In the lobby, before claiming a nation (M4-2): commands nothing.
+    Unclaimed,
+    /// One nation.
+    Nation(u32),
+    /// Every nation (only on a server run with `--sandbox`).
+    Sandbox,
+}
+
+impl Claim {
+    pub(crate) fn nation(self) -> Option<u32> {
+        match self {
+            Claim::Nation(n) => Some(n),
+            Claim::Unclaimed | Claim::Sandbox => None,
+        }
+    }
+}
+
+impl Seat {
+    /// The nation this seat holds, if it holds one.
+    pub(crate) fn nation(&self) -> Option<u32> {
+        self.claim.nation()
+    }
+
+    /// Whether this seat may command `nation` (D24): its own, or any if sandbox. A
+    /// player in the lobby without a claim commands nothing.
+    pub(crate) fn commands(&self, nation: usize) -> bool {
+        match self.claim {
+            Claim::Sandbox => true,
+            Claim::Nation(n) => n as usize == nation,
+            Claim::Unclaimed => false,
+        }
+    }
 }
 
 pub(crate) struct SessionTable {
@@ -69,22 +126,26 @@ pub(crate) struct SessionTable {
     /// The session that sets the speed, saves, loads and kicks (D24). Always a
     /// welcomed session, or `None`.
     host: Option<u64>,
-    /// D24's succession rule: on a player-hosted server, when the host's seat ends,
-    /// the remaining player with the lowest id becomes host. A dedicated server
-    /// (`--admin`) keeps the role for its admin instead.
-    host_passes: bool,
+    /// How the host is elected and succeeded (D24).
+    host_rule: HostRule,
 }
 
 impl SessionTable {
-    /// An empty table. `host_passes`: D24's succession rule applies (player-hosted).
-    pub(crate) fn new(host_passes: bool) -> Self {
-        SessionTable { rows: BTreeMap::new(), host: None, host_passes }
+    /// An empty table whose host follows `host_rule`.
+    pub(crate) fn new(host_rule: HostRule) -> Self {
+        SessionTable { rows: BTreeMap::new(), host: None, host_rule }
     }
 
     /// A new connection, not yet welcomed.
     pub(crate) fn connect(&mut self, id: u64, conn: ConnHandle) {
-        let row =
-            Session { conn, subscription: CheckedSubscription::default(), seat: None, window: UpdateWindow::default() };
+        let row = Session {
+            conn,
+            subscription: CheckedSubscription::default(),
+            seat: None,
+            window: UpdateWindow::default(),
+            name: String::new(),
+            ready: false,
+        };
         self.rows.insert(id, row);
     }
 
@@ -108,7 +169,7 @@ impl SessionTable {
         let mut new_host = None;
         if self.host == Some(id) {
             self.host = None;
-            if self.host_passes {
+            if self.host_rule == HostRule::FirstPlayer {
                 new_host = self.lowest_player();
                 self.host = new_host;
             }
@@ -116,18 +177,13 @@ impl SessionTable {
         Vacated { seat, new_host, last: self.players() == 0 }
     }
 
+    #[cfg(test)]
     pub(crate) fn host(&self) -> Option<u64> {
         self.host
     }
 
     pub(crate) fn is_host(&self, id: u64) -> bool {
         self.host == Some(id)
-    }
-
-    /// Makes a welcomed session the host: the first player, or the admin (D24).
-    pub(crate) fn set_host(&mut self, id: u64) {
-        debug_assert!(self.seat(id).is_some(), "only a welcomed session can be host");
-        self.host = Some(id);
     }
 
     /// The welcomed session with the lowest player id: who becomes host when the
@@ -145,21 +201,89 @@ impl SessionTable {
         self.rows.get_mut(&id)
     }
 
-    /// Seats a connected session as a new player of `nation` (`None`: sandbox, which
-    /// the caller has allowed): the lowest free player id, if fewer than `max_players`
-    /// play and nobody holds the nation. The only way a session gets a seat.
-    pub(crate) fn sit(&mut self, id: u64, nation: Option<u32>, max_players: usize) -> Result<Seat, Refusal> {
+    /// Seats a connected session as a new player named `name`, with `claim` (a
+    /// sandbox claim only if the caller has allowed it). It gets the lowest free player id, if fewer than
+    /// `max_players` play and nobody holds the nation. The only way a session gets a
+    /// seat.
+    pub(crate) fn sit(&mut self, id: u64, name: &str, claim: Claim, max_players: usize) -> Result<Seat, Refusal> {
         if self.players() >= max_players {
             return Err(Refusal::Full);
         }
-        if let Some(player) = nation.and_then(|n| self.holder(n)) {
-            return Err(Refusal::NationTaken { player });
+        if let Some((nation, player)) = claim.nation().and_then(|n| self.holder(n).map(|p| (n, p))) {
+            return Err(Refusal::NationTaken { nation, player });
         }
-        let seat = Seat { player: self.free_player(), nation };
+        let seat = Seat { player: self.free_player(), claim };
         let row = self.rows.get_mut(&id).expect("a session is connected before it says Hello");
         debug_assert!(row.seat.is_none(), "net lets a session say Hello only once");
         row.seat = Some(seat);
+        row.name = name.to_owned();
+        row.ready = false;
+        // Election (D24): the first player, or the admin by name, when nobody is host.
+        let elected = match &self.host_rule {
+            HostRule::FirstPlayer => true,
+            HostRule::Admin(admin) => name == admin,
+        };
+        if elected && self.host.is_none() {
+            self.host = Some(id);
+        }
         Ok(seat)
+    }
+
+    /// In the lobby: the player claims `nation`, or gives up their claim with `None`
+    /// (M4-2). A nation another player holds is refused. Any change clears the
+    /// player's ready mark, so a start never catches a claim mid-change.
+    pub(crate) fn claim(&mut self, id: u64, nation: Option<u32>) -> Result<(), Refusal> {
+        let own = self.seat(id).map(|s| s.player);
+        if let Some((nation, player)) =
+            nation.and_then(|n| self.holder(n).map(|p| (n, p))).filter(|&(_, p)| Some(p) != own)
+        {
+            return Err(Refusal::NationTaken { nation, player });
+        }
+        let row = self.rows.get_mut(&id).expect("only a seated session claims");
+        let seat = row.seat.as_mut().expect("only a seated session claims");
+        let claim = nation.map_or(Claim::Unclaimed, Claim::Nation);
+        if seat.claim != claim {
+            seat.claim = claim;
+            row.ready = false;
+        }
+        Ok(())
+    }
+
+    /// In the lobby: marks the player ready, or not. Only a player who holds a
+    /// nation, or a sandbox seat, can be ready.
+    pub(crate) fn set_ready(&mut self, id: u64, ready: bool) -> Result<(), Refusal> {
+        let row = self.rows.get_mut(&id).expect("only a seated session readies");
+        let seat = row.seat.expect("only a seated session readies");
+        if ready && seat.claim == Claim::Unclaimed {
+            return Err(Refusal::NoClaim);
+        }
+        row.ready = ready;
+        Ok(())
+    }
+
+    /// Whether the host may start the game: someone plays, and every player is ready.
+    pub(crate) fn all_ready(&self) -> bool {
+        self.players() > 0 && self.rows.values().filter(|s| s.seat.is_some()).all(|s| s.ready)
+    }
+
+    /// The lobby as clients see it, in player order.
+    pub(crate) fn lobby(&self) -> Vec<LobbyEntry> {
+        let mut entries: Vec<LobbyEntry> = self
+            .rows
+            .iter()
+            .filter_map(|(&id, s)| {
+                s.seat.map(|seat| LobbyEntry {
+                    player: seat.player,
+                    name: s.name.clone(),
+                    nation: seat.nation(),
+                    sandbox: seat.claim == Claim::Sandbox,
+                    ready: s.ready,
+                    host: self.host == Some(id),
+                })
+            })
+            .collect();
+        entries.sort_by_key(|e| e.player);
+        entries
     }
 
     /// The session's seat, if it was welcomed.
@@ -203,7 +327,7 @@ impl SessionTable {
 
     /// The player holding `nation`, if any. Sandbox seats hold none.
     pub(crate) fn holder(&self, nation: u32) -> Option<u16> {
-        self.rows.values().filter_map(|s| s.seat).find(|s| s.nation == Some(nation)).map(|s| s.player)
+        self.rows.values().filter_map(|s| s.seat).find(|s| s.claim == Claim::Nation(nation)).map(|s| s.player)
     }
 
     /// Sends `out` to one session; a closed or unknown session is ignored.
@@ -229,12 +353,13 @@ mod tests {
     fn seated(table: &mut SessionTable, id: u64, player: u16, nation: Option<u32>) {
         let (conn, _rx) = ConnHandle::for_test();
         table.connect(id, conn);
-        assert_eq!(table.sit(id, nation, 8), Ok(Seat { player, nation }));
+        let claim = nation.map_or(Claim::Unclaimed, Claim::Nation);
+        assert_eq!(table.sit(id, "p", claim, 8), Ok(Seat { player, claim }));
     }
 
     #[test]
     fn player_ids_fill_the_lowest_gap() {
-        let mut t = SessionTable::new(true);
+        let mut t = SessionTable::new(HostRule::FirstPlayer);
         assert_eq!(t.free_player(), 0);
         seated(&mut t, 1, 0, None);
         seated(&mut t, 2, 1, Some(0));
@@ -247,44 +372,69 @@ mod tests {
     }
 
     #[test]
-    fn ending_the_hosts_seat_passes_the_role_or_clears_it() {
-        let mut t = SessionTable::new(true);
-        seated(&mut t, 9, 0, None);
-        seated(&mut t, 5, 1, None);
-        seated(&mut t, 7, 2, None);
-        t.set_host(7);
+    fn the_first_player_is_host_and_the_role_passes_to_the_lowest_id() {
+        let mut t = SessionTable::new(HostRule::FirstPlayer);
+        seated(&mut t, 7, 0, None);
+        seated(&mut t, 9, 1, None);
+        seated(&mut t, 5, 2, None);
+        assert_eq!(t.host(), Some(7), "the first player");
         let v = t.remove(7).unwrap();
-        assert_eq!((v.new_host, v.last, t.host()), (Some(9), false, Some(9)), "player 0 is session 9");
+        assert_eq!((v.new_host, v.last, t.host()), (Some(9), false, Some(9)), "player 1 is session 9");
         assert_eq!(t.unseat(5).map(|v| (v.new_host, v.last)), Some((None, false)), "not the host: no change");
         assert_eq!(t.unseat(9).map(|v| (v.new_host, v.last)), Some((None, true)), "nobody left to pass it to");
         assert_eq!((t.host(), t.unseat(9)), (None, None), "a seat ends once");
+    }
 
-        // A dedicated server keeps the role for its admin.
-        let mut t = SessionTable::new(false);
+    #[test]
+    fn an_admin_is_host_by_name_and_the_role_never_passes() {
+        let mut t = SessionTable::new(HostRule::Admin("ada".into()));
         seated(&mut t, 1, 0, None);
-        seated(&mut t, 2, 1, None);
-        t.set_host(1);
-        assert_eq!(t.remove(1).map(|v| v.new_host), Some(None));
+        assert_eq!(t.host(), None, "the first player isn't host on a dedicated server");
+        let (conn, _rx) = ConnHandle::for_test();
+        t.connect(2, conn);
+        assert!(t.sit(2, "ada", Claim::Unclaimed, 8).is_ok());
+        assert_eq!(t.host(), Some(2));
+        assert_eq!(t.remove(2).map(|v| v.new_host), Some(None));
         assert_eq!(t.host(), None);
     }
 
     #[test]
     fn sit_refuses_a_full_table_and_a_taken_nation() {
-        let mut t = SessionTable::new(true);
+        let mut t = SessionTable::new(HostRule::FirstPlayer);
         seated(&mut t, 1, 0, Some(0));
         for id in [2, 3] {
             let (conn, _rx) = ConnHandle::for_test();
             t.connect(id, conn);
         }
-        assert_eq!(t.sit(2, Some(0), 8), Err(Refusal::NationTaken { player: 0 }));
-        assert_eq!(t.sit(2, Some(1), 1), Err(Refusal::Full));
-        assert_eq!(t.sit(3, Some(1), 2), Ok(Seat { player: 1, nation: Some(1) }));
+        assert_eq!(t.sit(2, "p", Claim::Nation(0), 8), Err(Refusal::NationTaken { nation: 0, player: 0 }));
+        assert_eq!(t.sit(2, "p", Claim::Nation(1), 1), Err(Refusal::Full));
+        assert_eq!(t.sit(3, "p", Claim::Nation(1), 2), Ok(Seat { player: 1, claim: Claim::Nation(1) }));
         assert_eq!(t.seat(2), None, "a refused session stays unseated");
+    }
+
+    /// M4-2: claims, ready marks and the start condition.
+    #[test]
+    fn lobby_claims_and_ready_marks() {
+        let mut t = SessionTable::new(HostRule::FirstPlayer);
+        seated(&mut t, 1, 0, None);
+        seated(&mut t, 2, 1, None);
+        assert_eq!(t.set_ready(1, true), Err(Refusal::NoClaim));
+        assert_eq!(t.claim(1, Some(0)), Ok(()));
+        assert_eq!(t.claim(2, Some(0)), Err(Refusal::NationTaken { nation: 0, player: 0 }));
+        assert_eq!(t.claim(1, Some(0)), Ok(()), "claiming your own nation again is fine");
+        assert_eq!(t.claim(2, Some(1)), Ok(()));
+        assert_eq!((t.set_ready(1, true), t.set_ready(2, true)), (Ok(()), Ok(())));
+        assert!(t.all_ready());
+        assert_eq!(t.claim(2, None), Ok(()));
+        assert!(!t.all_ready(), "a changed claim clears the ready mark");
+        let lobby = t.lobby();
+        assert_eq!((lobby[0].nation, lobby[0].ready, lobby[1].nation, lobby[1].ready), (Some(0), true, None, false));
+        assert_eq!(t.holder(1), None, "the given-up nation is free");
     }
 
     #[test]
     fn a_nation_is_held_by_its_seat_and_sandbox_holds_none() {
-        let mut t = SessionTable::new(true);
+        let mut t = SessionTable::new(HostRule::FirstPlayer);
         seated(&mut t, 1, 0, None);
         seated(&mut t, 2, 1, Some(1));
         let (conn, _rx) = ConnHandle::for_test();

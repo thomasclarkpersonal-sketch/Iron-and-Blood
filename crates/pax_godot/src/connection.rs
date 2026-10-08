@@ -195,6 +195,23 @@ impl Connection {
     pub fn list_saves(&mut self) {
         self.send(encode::list_saves());
     }
+
+    /// The lobby (M4-2); each is answered with a `LobbyState`.
+    pub fn claim_nation(&mut self, nation: Option<u32>) {
+        self.send(encode::claim_nation(nation));
+    }
+
+    pub fn set_ready(&mut self, ready: bool) {
+        self.send(encode::set_ready(ready));
+    }
+
+    pub fn start_game(&mut self) {
+        self.send(encode::start_game());
+    }
+
+    pub fn kick(&mut self, player: u16) {
+        self.send(encode::kick(player));
+    }
 }
 
 /// A `pax_server` the client launched (NETWORK_PROTOCOL §6). With `--exit-when-idle`

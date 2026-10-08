@@ -208,6 +208,51 @@ impl<'a> ClientMessage<'a> {
     }
   }
 
+  #[inline]
+  #[allow(non_snake_case)]
+  pub fn payload_as_claim_nation(&self) -> Option<ClaimNation<'a>> {
+    if self.payload_type() == ClientPayload::ClaimNation {
+      self.payload().map(|t| {
+       // Safety:
+       // Created from a valid Table for this object
+       // Which contains a valid union in this slot
+       unsafe { ClaimNation::init_from_table(t) }
+     })
+    } else {
+      None
+    }
+  }
+
+  #[inline]
+  #[allow(non_snake_case)]
+  pub fn payload_as_set_ready(&self) -> Option<SetReady<'a>> {
+    if self.payload_type() == ClientPayload::SetReady {
+      self.payload().map(|t| {
+       // Safety:
+       // Created from a valid Table for this object
+       // Which contains a valid union in this slot
+       unsafe { SetReady::init_from_table(t) }
+     })
+    } else {
+      None
+    }
+  }
+
+  #[inline]
+  #[allow(non_snake_case)]
+  pub fn payload_as_start_game(&self) -> Option<StartGame<'a>> {
+    if self.payload_type() == ClientPayload::StartGame {
+      self.payload().map(|t| {
+       // Safety:
+       // Created from a valid Table for this object
+       // Which contains a valid union in this slot
+       unsafe { StartGame::init_from_table(t) }
+     })
+    } else {
+      None
+    }
+  }
+
 }
 
 impl flatbuffers::Verifiable for ClientMessage<'_> {
@@ -229,6 +274,9 @@ impl flatbuffers::Verifiable for ClientMessage<'_> {
           ClientPayload::LoadGame => v.verify_union_variant::<flatbuffers::ForwardsUOffset<LoadGame>>("ClientPayload::LoadGame", pos),
           ClientPayload::ListSaves => v.verify_union_variant::<flatbuffers::ForwardsUOffset<ListSaves>>("ClientPayload::ListSaves", pos),
           ClientPayload::Kick => v.verify_union_variant::<flatbuffers::ForwardsUOffset<Kick>>("ClientPayload::Kick", pos),
+          ClientPayload::ClaimNation => v.verify_union_variant::<flatbuffers::ForwardsUOffset<ClaimNation>>("ClientPayload::ClaimNation", pos),
+          ClientPayload::SetReady => v.verify_union_variant::<flatbuffers::ForwardsUOffset<SetReady>>("ClientPayload::SetReady", pos),
+          ClientPayload::StartGame => v.verify_union_variant::<flatbuffers::ForwardsUOffset<StartGame>>("ClientPayload::StartGame", pos),
           _ => Ok(()),
         }
      })?
@@ -348,6 +396,27 @@ impl core::fmt::Debug for ClientMessage<'_> {
         },
         ClientPayload::Kick => {
           if let Some(x) = self.payload_as_kick() {
+            ds.field("payload", &x)
+          } else {
+            ds.field("payload", &"InvalidFlatbuffer: Union discriminant does not match value.")
+          }
+        },
+        ClientPayload::ClaimNation => {
+          if let Some(x) = self.payload_as_claim_nation() {
+            ds.field("payload", &x)
+          } else {
+            ds.field("payload", &"InvalidFlatbuffer: Union discriminant does not match value.")
+          }
+        },
+        ClientPayload::SetReady => {
+          if let Some(x) = self.payload_as_set_ready() {
+            ds.field("payload", &x)
+          } else {
+            ds.field("payload", &"InvalidFlatbuffer: Union discriminant does not match value.")
+          }
+        },
+        ClientPayload::StartGame => {
+          if let Some(x) = self.payload_as_start_game() {
             ds.field("payload", &x)
           } else {
             ds.field("payload", &"InvalidFlatbuffer: Union discriminant does not match value.")

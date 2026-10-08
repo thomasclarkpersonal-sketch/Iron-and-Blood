@@ -145,11 +145,16 @@ fn the_request_decoder_survives_noise_flipped_bytes_and_truncation() {
     assert!(decoded > 1_000, "flipped bytes often still verify, so the decoder sees odd values ({decoded})");
 }
 
-/// A well-formed request with hostile values.
+/// How many kinds [`hostile_request`] draws from: one per arm of its `match`, so a
+/// new request needs a new arm and this count to match, or the test below fails.
+const REQUEST_KINDS: u64 = 14;
+
+/// A well-formed request with hostile values. Every kind of request has its own arm;
+/// the draws give each its share (the SubmitCommand arm takes three).
 fn hostile_request(n: &mut Noise) -> Request {
     let nation = |n: &mut Noise| n.int(2) as u32;
     let opt = |n: &mut Noise, below: u64| (!n.chance(3)).then(|| n.int(below) as u32);
-    match n.below(11) {
+    match n.below(REQUEST_KINDS) {
         0 => Request::Hello {
             major: if n.chance(2) { PROTOCOL_MAJOR } else { n.next() as u16 },
             minor: n.next() as u16,
@@ -178,8 +183,51 @@ fn hostile_request(n: &mut Noise) -> Request {
         7 => Request::SaveGame { name: n.name() },
         8 => Request::LoadGame { name: n.name() },
         9 => Request::Kick { player: n.int(4) as u16 },
-        _ => Request::ListSaves,
+        10 => Request::ClaimNation { nation: opt(n, 2) },
+        11 => Request::SetReady { ready: n.chance(2) },
+        12 => Request::StartGame,
+        13 => Request::ListSaves,
+        _ => unreachable!("REQUEST_KINDS counts the arms"),
     }
+}
+
+/// Every kind of [`Request`], numbered by an exhaustive `match`: a new variant
+/// fails to compile here until it gets the next number, and [`KINDS`] sits beside
+/// it to be raised with it.
+fn kind(request: &Request) -> usize {
+    match request {
+        Request::Hello { .. } => 0,
+        Request::SubmitCommand { .. } => 1,
+        Request::SetSpeed { .. } => 2,
+        Request::Subscribe { .. } => 3,
+        Request::Ack { .. } => 4,
+        Request::Ping { .. } => 5,
+        Request::SaveGame { .. } => 6,
+        Request::LoadGame { .. } => 7,
+        Request::ListSaves => 8,
+        Request::Kick { .. } => 9,
+        Request::ClaimNation { .. } => 10,
+        Request::SetReady { .. } => 11,
+        Request::StartGame => 12,
+    }
+}
+
+/// How many kinds [`kind`] numbers.
+const KINDS: usize = 13;
+
+/// The generator reaches every kind of request the sim thread handles: every
+/// [`kind`] but `Ping`, which the network task answers. A variant the generator
+/// misses fails here, however `hostile_request`'s own arms are counted.
+#[test]
+fn the_generator_reaches_every_request_kind() {
+    let mut noise = Noise::new(7);
+    let mut seen = [false; KINDS];
+    for _ in 0..10_000 {
+        seen[kind(&hostile_request(&mut noise))] = true;
+    }
+    let ping = kind(&Request::Ping { nonce: 0 });
+    let missed: Vec<usize> = (0..KINDS).filter(|&k| k != ping && !seen[k]).collect();
+    assert!(missed.is_empty(), "hostile_request never generates request kinds {missed:?}");
 }
 
 struct TempDir(PathBuf);
@@ -212,6 +260,11 @@ fn the_sim_thread_survives_hostile_requests() {
     let mut open: Vec<u64> = Vec::new();
     let mut next_session = 1;
     for round in 0..6_000u64 {
+        // The first half plays in the lobby, where hostile claims and starts rarely
+        // line everyone up; the second half plays the game itself.
+        if round == 3_000 {
+            sim.start_without_lobby();
+        }
         match noise.below(40) {
             0 if open.len() < 4 => {
                 let (conn, rx) = ConnHandle::for_test();

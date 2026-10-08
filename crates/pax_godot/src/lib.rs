@@ -318,6 +318,37 @@ impl PaxClient {
         self.with_connection(Connection::list_saves)
     }
 
+    /// Lobby (M4-2): claims nation `nation`, or gives up the claim with `null`. A
+    /// `LOBBY_STATE` answers. Returns an error message (nothing sent), or `""`.
+    #[func]
+    fn claim_nation(&mut self, nation: Variant) -> GString {
+        match optional_id(&nation, "nation") {
+            Ok(n) => self.with_connection(|c| c.claim_nation(n)),
+            Err(e) => rejected(e),
+        }
+    }
+
+    /// Lobby: marks this player ready, or not.
+    #[func]
+    fn set_ready(&mut self, ready: bool) -> GString {
+        self.with_connection(|c| c.set_ready(ready))
+    }
+
+    /// Lobby, host only: starts the game once everyone is ready.
+    #[func]
+    fn start_game(&mut self) -> GString {
+        self.with_connection(Connection::start_game)
+    }
+
+    /// Host only (D24): ends player `player`'s session.
+    #[func]
+    fn kick(&mut self, player: i64) -> GString {
+        match u16::try_from(player) {
+            Ok(p) => self.with_connection(|c| c.kick(p)),
+            Err(_) => rejected(format!("player {player} is not a valid player id")),
+        }
+    }
+
     /// A raw rate (`*_RATE_RAW`) as a fraction (0.15 for 15%), for display.
     #[func]
     fn rate_fraction(raw: i64) -> f64 {
@@ -392,6 +423,28 @@ fn event_dictionary(event: ServerEvent) -> VarDictionary {
             d.set(keys::ERROR, &GString::from(&error));
         }
         ServerEvent::SaveList { names } => d.set(keys::NAMES, &strings(&names)),
+        ServerEvent::LobbyState { players, started, notice } => {
+            // A table: one column per field, one entry per player (keys.rs).
+            let mut t = VarDictionary::new();
+            t.set(keys::PLAYER, &ints(&players.iter().map(|p| p.player).collect::<Vec<_>>()));
+            t.set(keys::NAME, &strings(&players.iter().map(|p| p.name.clone()).collect::<Vec<_>>()));
+            let mut nations: Array<Variant> = Array::new();
+            let (mut sandbox, mut ready, mut host): (Array<bool>, Array<bool>, Array<bool>) =
+                (Array::new(), Array::new(), Array::new());
+            for p in &players {
+                nations.push(&optional(p.nation.map(i64::from)));
+                sandbox.push(p.sandbox);
+                ready.push(p.ready);
+                host.push(p.host);
+            }
+            t.set(keys::NATION, &nations);
+            t.set(keys::SANDBOX, &sandbox);
+            t.set(keys::READY, &ready);
+            t.set(keys::HOST, &host);
+            d.set(keys::LOBBY_PLAYERS, &t);
+            d.set(keys::STARTED, started);
+            d.set(keys::NOTICE, &optional(notice.map(|n| GString::from(&n))));
+        }
         ServerEvent::Unknown(_) => {}
     }
     d

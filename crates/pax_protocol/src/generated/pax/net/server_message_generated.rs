@@ -193,6 +193,21 @@ impl<'a> ServerMessage<'a> {
     }
   }
 
+  #[inline]
+  #[allow(non_snake_case)]
+  pub fn payload_as_lobby_state(&self) -> Option<LobbyState<'a>> {
+    if self.payload_type() == ServerPayload::LobbyState {
+      self.payload().map(|t| {
+       // Safety:
+       // Created from a valid Table for this object
+       // Which contains a valid union in this slot
+       unsafe { LobbyState::init_from_table(t) }
+     })
+    } else {
+      None
+    }
+  }
+
 }
 
 impl flatbuffers::Verifiable for ServerMessage<'_> {
@@ -213,6 +228,7 @@ impl flatbuffers::Verifiable for ServerMessage<'_> {
           ServerPayload::SaveResult => v.verify_union_variant::<flatbuffers::ForwardsUOffset<SaveResult>>("ServerPayload::SaveResult", pos),
           ServerPayload::SaveList => v.verify_union_variant::<flatbuffers::ForwardsUOffset<SaveList>>("ServerPayload::SaveList", pos),
           ServerPayload::Goodbye => v.verify_union_variant::<flatbuffers::ForwardsUOffset<Goodbye>>("ServerPayload::Goodbye", pos),
+          ServerPayload::LobbyState => v.verify_union_variant::<flatbuffers::ForwardsUOffset<LobbyState>>("ServerPayload::LobbyState", pos),
           _ => Ok(()),
         }
      })?
@@ -325,6 +341,13 @@ impl core::fmt::Debug for ServerMessage<'_> {
         },
         ServerPayload::Goodbye => {
           if let Some(x) = self.payload_as_goodbye() {
+            ds.field("payload", &x)
+          } else {
+            ds.field("payload", &"InvalidFlatbuffer: Union discriminant does not match value.")
+          }
+        },
+        ServerPayload::LobbyState => {
+          if let Some(x) = self.payload_as_lobby_state() {
             ds.field("payload", &x)
           } else {
             ds.field("payload", &"InvalidFlatbuffer: Union discriminant does not match value.")

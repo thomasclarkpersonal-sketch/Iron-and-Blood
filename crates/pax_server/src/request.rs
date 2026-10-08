@@ -59,6 +59,15 @@ pub enum Request {
     Kick {
         player: u16,
     },
+    /// Lobby (D24, M4-2): claim a nation, or `None` to give up the claim.
+    ClaimNation {
+        nation: Option<u32>,
+    },
+    SetReady {
+        ready: bool,
+    },
+    /// Lobby, host only: start the game.
+    StartGame,
 }
 
 /// Why a frame isn't a usable request. Fatal to the session (D22).
@@ -131,6 +140,9 @@ pub fn decode(frame: &[u8]) -> Result<Request, RequestError> {
         P::LoadGame => msg.payload_as_load_game().map(|s| Request::LoadGame { name: owned(s.name()) }),
         P::ListSaves => msg.payload_as_list_saves().map(|_| Request::ListSaves),
         P::Kick => msg.payload_as_kick().map(|k| Request::Kick { player: k.player() }),
+        P::ClaimNation => msg.payload_as_claim_nation().map(|c| Request::ClaimNation { nation: c.nation() }),
+        P::SetReady => msg.payload_as_set_ready().map(|r| Request::SetReady { ready: r.ready() }),
+        P::StartGame => msg.payload_as_start_game().map(|_| Request::StartGame),
         _ => None,
     };
     request.ok_or(RequestError::UnknownPayload)

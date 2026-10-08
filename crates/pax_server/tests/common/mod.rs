@@ -66,6 +66,13 @@ pub enum Got {
         error: String,
     },
     SaveList(Vec<String>),
+    /// `LobbyState` (M4-2): each player's `(player, nation, ready)`, whether the game
+    /// started, and the notice.
+    Lobby {
+        players: Vec<(u16, Option<u32>, bool)>,
+        started: bool,
+        notice: Option<String>,
+    },
     Other(String),
     /// The server closed the connection.
     Closed,
@@ -161,6 +168,24 @@ impl Client {
         self.send(&mut b, ClientPayload::ListSaves, l.as_union_value());
     }
 
+    pub fn claim_nation(&mut self, nation: Option<u32>) {
+        let mut b = FlatBufferBuilder::new();
+        let c = ClaimNation::create(&mut b, &ClaimNationArgs { nation });
+        self.send(&mut b, ClientPayload::ClaimNation, c.as_union_value());
+    }
+
+    pub fn set_ready(&mut self, ready: bool) {
+        let mut b = FlatBufferBuilder::new();
+        let r = SetReady::create(&mut b, &SetReadyArgs { ready });
+        self.send(&mut b, ClientPayload::SetReady, r.as_union_value());
+    }
+
+    pub fn start_game(&mut self) {
+        let mut b = FlatBufferBuilder::new();
+        let s = StartGame::create(&mut b, &StartGameArgs {});
+        self.send(&mut b, ClientPayload::StartGame, s.as_union_value());
+    }
+
     pub fn kick(&mut self, player: u16) {
         let mut b = FlatBufferBuilder::new();
         let k = Kick::create(&mut b, &KickArgs { player });
@@ -253,6 +278,16 @@ fn decode(frame: &[u8]) -> Got {
     }
     if let Some(s) = msg.payload_as_server_state() {
         return Got::ServerState { day: s.day(), speed: s.speed(), changed_by: s.changed_by() };
+    }
+    if let Some(l) = msg.payload_as_lobby_state() {
+        return Got::Lobby {
+            players: l
+                .players()
+                .map(|p| p.iter().map(|p| (p.player(), p.nation(), p.ready())).collect())
+                .unwrap_or_default(),
+            started: l.started(),
+            notice: l.notice().map(str::to_owned),
+        };
     }
     if let Some(p) = msg.payload_as_pong() {
         return Got::Pong(p.nonce());

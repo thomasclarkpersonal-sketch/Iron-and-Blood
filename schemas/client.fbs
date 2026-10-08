@@ -13,7 +13,8 @@ table Hello {
   /// Nation to play, as an index into the Welcome's nation table.
   /// Absent: sandbox, so the session may command every nation. Only a server run
   /// with --sandbox accepts it (D24); single player launches its server that way.
-  /// M4-2: nations are claimed in the lobby instead (D24).
+  /// In a multiplayer lobby (protocol 1.4) it is the player's first claim, and
+  /// absent means no claim yet: ClaimNation changes it until the game starts.
   requested_nation: uint = null;
   /// M4: token from an earlier Welcome, to reclaim a dropped session. 0 = new session.
   resume_token: ulong;
@@ -76,6 +77,23 @@ table Kick {
   player: ushort;
 }
 
+/// In the lobby (D24, protocol 1.4): claim a nation, or with `nation` absent give up
+/// the claim. A nation another player holds is refused. Claiming clears this
+/// player's ready mark. The answer is a LobbyState.
+table ClaimNation {
+  nation: uint = null;
+}
+
+/// In the lobby: mark this player ready, or not (protocol 1.4). A player can only be
+/// ready while holding a nation (or a sandbox seat). The answer is a LobbyState.
+table SetReady {
+  ready: bool;
+}
+
+/// Host only, in the lobby (protocol 1.4): start the game once every player is ready.
+/// The answer is a LobbyState with `started` set, sent to everyone.
+table StartGame {}
+
 union ClientPayload {
   Hello,
   SubmitCommand,
@@ -87,6 +105,9 @@ union ClientPayload {
   LoadGame,
   ListSaves,
   Kick,
+  ClaimNation,
+  SetReady,
+  StartGame,
 }
 
 table ClientMessage {

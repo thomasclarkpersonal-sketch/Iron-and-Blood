@@ -12,6 +12,7 @@ const PONG := "pong"
 const SAVE_RESULT := "save_result"
 const SAVE_LIST := "save_list"
 const GOODBYE := "goodbye"
+const LOBBY_STATE := "lobby_state"
 const UNKNOWN := "unknown"
 const CLOSED := "closed"
 const TYPE := "type"
@@ -86,6 +87,12 @@ const NONCE := "nonce"
 const REQUEST := "request"
 const NAME := "name"
 const NAMES := "names"
+const LOBBY_PLAYERS := "lobby_players"
+const SANDBOX := "sandbox"
+const READY := "ready"
+const HOST := "host"
+const STARTED := "started"
+const NOTICE := "notice"
 const WIDTH := "width"
 const HEIGHT := "height"
 const IDS := "ids"
@@ -112,8 +119,9 @@ const COMMAND_ERROR_NO_BASKET := 3
 const COMMAND_ERROR_MALFORMED := 4
 const COMMAND_ERROR_NOT_PERMITTED := 5
 const COMMAND_ERROR_RATE_LIMITED := 6
+const COMMAND_ERROR_NOT_STARTED := 7
 ## CommandError names, by value.
-const COMMAND_ERROR_NAMES := ["None", "UnknownNation", "RateOutOfRange", "NoBasket", "Malformed", "NotPermitted", "RateLimited"]
+const COMMAND_ERROR_NAMES := ["None", "UnknownNation", "RateOutOfRange", "NoBasket", "Malformed", "NotPermitted", "RateLimited", "NotStarted"]
 ## Milliseconds per day at each speed, by value (D23); null when paused.
 const SPEED_DAY_MS := [null, 2000, 1000, 500, 200, 0]
 

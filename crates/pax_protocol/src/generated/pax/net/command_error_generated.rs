@@ -12,10 +12,10 @@ use super::*;
 #[deprecated(since = "2.0.0", note = "Use associated constants instead. This will no longer be generated in 2021.")]
 pub const ENUM_MIN_COMMAND_ERROR: u8 = 0;
 #[deprecated(since = "2.0.0", note = "Use associated constants instead. This will no longer be generated in 2021.")]
-pub const ENUM_MAX_COMMAND_ERROR: u8 = 6;
+pub const ENUM_MAX_COMMAND_ERROR: u8 = 7;
 #[deprecated(since = "2.0.0", note = "Use associated constants instead. This will no longer be generated in 2021.")]
 #[allow(non_camel_case_types)]
-pub const ENUM_VALUES_COMMAND_ERROR: [CommandError; 7] = [
+pub const ENUM_VALUES_COMMAND_ERROR: [CommandError; 8] = [
   CommandError::None,
   CommandError::UnknownNation,
   CommandError::RateOutOfRange,
@@ -23,6 +23,7 @@ pub const ENUM_VALUES_COMMAND_ERROR: [CommandError; 7] = [
   CommandError::Malformed,
   CommandError::NotPermitted,
   CommandError::RateLimited,
+  CommandError::NotStarted,
 ];
 
 /// Why a command was not accepted. `None` means accepted.
@@ -42,9 +43,11 @@ impl CommandError {
   pub const NotPermitted: Self = Self(5);
   /// The session sent commands faster than the server's rate limit (D24).
   pub const RateLimited: Self = Self(6);
+  /// The game hasn't started: the players are still in the lobby (D24, protocol 1.4).
+  pub const NotStarted: Self = Self(7);
 
   pub const ENUM_MIN: u8 = 0;
-  pub const ENUM_MAX: u8 = 6;
+  pub const ENUM_MAX: u8 = 7;
   pub const ENUM_VALUES: &'static [Self] = &[
     Self::None,
     Self::UnknownNation,
@@ -53,6 +56,7 @@ impl CommandError {
     Self::Malformed,
     Self::NotPermitted,
     Self::RateLimited,
+    Self::NotStarted,
   ];
   /// Returns the variant's name or "" if unknown.
   pub fn variant_name(self) -> Option<&'static str> {
@@ -64,6 +68,7 @@ impl CommandError {
       Self::Malformed => Some("Malformed"),
       Self::NotPermitted => Some("NotPermitted"),
       Self::RateLimited => Some("RateLimited"),
+      Self::NotStarted => Some("NotStarted"),
       _ => None,
     }
   }

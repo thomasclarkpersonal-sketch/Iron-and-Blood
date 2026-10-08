@@ -76,7 +76,8 @@ impl<'a> Hello<'a> {
   /// Nation to play, as an index into the Welcome's nation table.
   /// Absent: sandbox, so the session may command every nation. Only a server run
   /// with --sandbox accepts it (D24); single player launches its server that way.
-  /// M4-2: nations are claimed in the lobby instead (D24).
+  /// In a multiplayer lobby (protocol 1.4) it is the player's first claim, and
+  /// absent means no claim yet: ClaimNation changes it until the game starts.
   #[inline]
   pub fn requested_nation(&self) -> Option<u32> {
     // Safety:

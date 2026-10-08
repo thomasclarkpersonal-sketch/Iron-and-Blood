@@ -60,6 +60,11 @@ sequenceDiagram
 5. **Keep-alive:** a session silent for `pax_protocol::IDLE_TIMEOUT` (10 seconds, D22) is closed, so the client sends `Ping` at least every fifth of that (2 seconds). Both sides take the value from that one constant. M4's lag rules are in D24.
 6. **LoadGame** ends with a new `Welcome` to **every** player, because the scenario and its tables may differ. Each client must drop everything it holds from the old session, whether or not it asked for the load.
 7. **Leaving:** when a player leaves, the others play on (D24). When the last one leaves, the game pauses, because D23 never runs a game nobody is watching.
+8. **The lobby (M4-2, protocol 1.4):** a multiplayer server (`--players` above 1) starts in a lobby. Single player has none and never sends `LobbyState`.
+   - `Hello`'s nation is the player's first claim. Without one, the player joins unclaimed (or as a sandbox seat on a `--sandbox` server).
+   - Players `ClaimNation` and `SetReady`; every change goes to every player as a `LobbyState`. A refused request gets a `LobbyState` with a `notice`, to the asker only. A player must hold a nation (or a sandbox seat) to be ready, and changing a claim clears the ready mark.
+   - The host's `StartGame` succeeds once every player is ready. Until then commands get `NotStarted` and the clock stays paused; after it, the host unpauses.
+   - The scenario is the one the server was started with. Choosing a save in the lobby is M4-5, and rejoining after a drop is M4-4. After the start, a new `Hello` must name a free nation.
 
 ## 4. Messages
 
@@ -75,6 +80,8 @@ sequenceDiagram
 | `Ping` | Keep-alive and round-trip measurement | `Pong` |
 | `SaveGame`, `LoadGame`, `ListSaves` | Saves (D23). Only the host saves and loads (D24); anyone else gets a `SaveResult` with the error. Anyone may list | `SaveResult`, `Welcome`, `SaveList` |
 | `Kick` | Host only (D24, protocol 1.3): end the session of player `player`, which gets `Goodbye: kicked by the host`. Ignored from anyone else, for the host itself, or for a player who isn't connected | — |
+| `ClaimNation`, `SetReady` | Lobby (protocol 1.4, §3): claim a nation (absent: give up the claim); mark ready | `LobbyState` |
+| `StartGame` | Lobby, host only: start once every player is ready | `LobbyState` with `started`, to everyone |
 
 ### Server → client (`ServerPayload`)
 
@@ -86,6 +93,7 @@ sequenceDiagram
 | `ServerState` | The speed changed (including pause and unpause) |
 | `Pong`, `SaveResult`, `SaveList` | Replies |
 | `Goodbye` | The server closes the connection; the reason says why |
+| `LobbyState` | Multiplayer only (protocol 1.4): the players (id, name, nation, sandbox, ready, host) and whether the game started, whenever any of it changes; with a `notice`, to one client whose lobby request was refused |
 
 ### What a `DayUpdate` contains
 
@@ -153,7 +161,7 @@ FlatBuffers stays compatible across versions only if changes follow these rules.
 - **Never delete** a field; mark it `(deprecated)`.
 - **Add union members and enum values only at the end.** Never renumber them. Receivers must ignore an unknown union member or enum value, not crash on it.
 - A change that breaks these rules bumps `protocol_major`. A compatible addition bumps `protocol_minor`.
-- A receiver treats a field added in a later minor version as *no data* when it is absent, never as an error: a newer client must still read an older server. History: 1.1 (M3) added `StaticData.map_dir`; 1.2 (M3) added `NationTable.militancy`; 1.3 (M4-3) added the `Kick` request.
+- A receiver treats a field added in a later minor version as *no data* when it is absent, never as an error: a newer client must still read an older server. History: 1.1 (M3) added `StaticData.map_dir`; 1.2 (M3) added `NationTable.militancy`; 1.3 (M4-3) added the `Kick` request; 1.4 (M4-2) added the lobby: `ClaimNation`, `SetReady`, `StartGame`, `LobbyState` and `CommandError.NotStarted`.
 - Rust code is generated with **flatc 24.3.25**, matching the `flatbuffers` crate version, into the `pax_protocol` crate. It is checked in, and CI regenerates it and fails on any difference. Mismatched compiler and runtime versions produce code that doesn't compile.
 
 ## 9. Testing

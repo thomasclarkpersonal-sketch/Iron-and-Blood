@@ -39,6 +39,8 @@ enum CommandError : ubyte {
   NotPermitted = 5,
   /// The session sent commands faster than the server's rate limit (D24).
   RateLimited = 6,
+  /// The game hasn't started: the players are still in the lobby (D24, protocol 1.4).
+  NotStarted = 7,
 }
 
 // ------------------------------------------------------------------ commands

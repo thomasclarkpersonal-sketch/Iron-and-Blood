@@ -1,4 +1,4 @@
-//! Several players on one server, over real TCP (M4-1, M4-3, D24).
+//! Several players on one server, over real TCP (M4-1 to M4-3, D24).
 
 mod common;
 
@@ -12,12 +12,35 @@ fn server(players: u16) -> pax_server::Server {
     start(config)
 }
 
-/// The next message that isn't a DayUpdate, acknowledging any updates on the way.
+/// The next message that isn't a DayUpdate or a lobby update, acknowledging any
+/// updates on the way.
 fn next_non_update(c: &mut Client) -> Got {
     loop {
         match c.next() {
             Got::DayUpdate { day, .. } => c.ack(day),
+            Got::Lobby { notice: None, .. } => {}
             other => return other,
+        }
+    }
+}
+
+/// The next message that isn't a lobby update.
+fn next_game(c: &mut Client) -> Got {
+    loop {
+        match c.next() {
+            Got::Lobby { notice: None, .. } => {}
+            other => return other,
+        }
+    }
+}
+
+/// Reads until the lobby says the game started.
+fn until_started(c: &mut Client) {
+    loop {
+        match c.next() {
+            Got::Lobby { started: true, .. } => return,
+            Got::Closed => panic!("the server closed the connection"),
+            _ => {}
         }
     }
 }
@@ -52,14 +75,38 @@ fn two_players_each_with_their_own_nation_view_and_permissions() {
     c.hello(None);
     assert!(matches!(c.next(), Got::Rejected(r) if r.contains("server full: all 2 players")));
 
+    // The lobby (M4-2): nothing plays until the host starts the game.
+    b.set_income_tax(9, 1, 150_000);
+    assert!(matches!(
+        next_non_update(&mut b),
+        Got::CommandResult { client_seq: 9, error: CommandError::NotStarted, .. }
+    ));
+    b.set_ready(true);
+    a.set_ready(true);
+    // The two connections race: start only once the lobby shows both ready.
+    loop {
+        if let Got::Lobby { players, .. } = a.next()
+            && players.len() == 2
+            && players.iter().all(|p| p.2)
+        {
+            break;
+        }
+    }
+    a.start_game();
+    until_started(&mut a);
+    until_started(&mut b);
+
     // Each player's subscription is their own.
     a.subscribe(MapMode::Population, 0, None, Some(0));
-    assert!(matches!(a.next(), Got::DayUpdate { province: Some(0), .. }));
+    assert!(matches!(next_game(&mut a), Got::DayUpdate { province: Some(0), .. }));
     // Each commands only their own nation.
     b.set_income_tax(1, 0, 150_000);
-    assert!(matches!(b.next(), Got::CommandResult { client_seq: 1, error: CommandError::NotPermitted, .. }));
+    assert!(matches!(
+        next_non_update(&mut b),
+        Got::CommandResult { client_seq: 1, error: CommandError::NotPermitted, .. }
+    ));
     b.set_income_tax(2, 1, 150_000);
-    assert!(matches!(b.next(), Got::CommandResult { client_seq: 2, error: CommandError::None, .. }));
+    assert!(matches!(next_non_update(&mut b), Got::CommandResult { client_seq: 2, error: CommandError::None, .. }));
 
     // Only the host (A, the first player) starts the clock; B is told the speed is unchanged.
     b.set_speed(Speed::Fastest);

@@ -222,8 +222,27 @@ pub enum ServerEvent {
     Goodbye {
         reason: String,
     },
+    /// The lobby of a multiplayer server (D24, protocol 1.4).
+    LobbyState {
+        players: Vec<LobbyPlayerView>,
+        started: bool,
+        /// Why this client's last lobby request was refused.
+        notice: Option<String>,
+    },
     /// A message kind newer than this client: ignored (D22).
     Unknown(wire::ServerPayload),
+}
+
+/// One player in the lobby (`LobbyPlayer`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LobbyPlayerView {
+    pub player: u16,
+    pub name: String,
+    /// Checked against the session's nation table.
+    pub nation: Option<u32>,
+    pub sandbox: bool,
+    pub ready: bool,
+    pub host: bool,
 }
 
 impl ServerEvent {
@@ -241,6 +260,7 @@ impl ServerEvent {
             ServerEvent::SaveResult { .. } => P::SaveResult,
             ServerEvent::SaveList { .. } => P::SaveList,
             ServerEvent::Goodbye { .. } => P::Goodbye,
+            ServerEvent::LobbyState { .. } => P::LobbyState,
             ServerEvent::Unknown(kind) => *kind,
         })
     }
@@ -259,6 +279,7 @@ fn payload_tag(kind: wire::ServerPayload) -> &'static str {
         wire::ServerPayload::SaveResult => keys::SAVE_RESULT,
         wire::ServerPayload::SaveList => keys::SAVE_LIST,
         wire::ServerPayload::Goodbye => keys::GOODBYE,
+        wire::ServerPayload::LobbyState => keys::LOBBY_STATE,
         _ => keys::UNKNOWN,
     }
 }
@@ -629,6 +650,26 @@ impl ServerStream {
                 let l = required(msg.payload_as_save_list(), "SaveList body")?;
                 ServerEvent::SaveList { names: strings(l.names(), "SaveList names")? }
             }
+            P::LobbyState => {
+                let l = required(msg.payload_as_lobby_state(), "LobbyState body")?;
+                let nations = tables.expect("checked above").nations;
+                let players = required(l.players(), "LobbyState players")?
+                    .iter()
+                    .map(|p| {
+                        let nation = p.nation();
+                        id_in(nation.as_slice(), nations, "a lobby player's nation")?;
+                        Ok(LobbyPlayerView {
+                            player: p.player(),
+                            name: required(p.name(), "LobbyPlayer name")?.to_owned(),
+                            nation,
+                            sandbox: p.sandbox(),
+                            ready: p.ready(),
+                            host: p.host(),
+                        })
+                    })
+                    .collect::<Result<_, StreamError>>()?;
+                ServerEvent::LobbyState { players, started: l.started(), notice: l.notice().map(str::to_owned) }
+            }
             _ => ServerEvent::Unknown(kind),
         })
     }
@@ -791,6 +832,38 @@ mod tests {
         assert!(
             matches!(s.error(), Some(StreamError::Invalid(e)) if e.contains("NationTable militancy has 2 entries, expected 1"))
         );
+    }
+
+    fn lobby_frame(nation: Option<u32>, notice: Option<&str>) -> Vec<u8> {
+        let mut b = FlatBufferBuilder::new();
+        let name = b.create_string("ada");
+        let p = wire::LobbyPlayer::create(
+            &mut b,
+            &wire::LobbyPlayerArgs { player: 3, name: Some(name), nation, sandbox: false, ready: true, host: true },
+        );
+        let players = b.create_vector(&[p]);
+        let notice = notice.map(|n| b.create_string(n));
+        let l =
+            wire::LobbyState::create(&mut b, &wire::LobbyStateArgs { players: Some(players), started: false, notice });
+        server_frame(&mut b, wire::ServerPayload::LobbyState, l.as_union_value())
+    }
+
+    /// M4-2: the lobby decodes, and its nations are checked like every other id.
+    #[test]
+    fn a_lobby_decodes_and_its_nations_are_checked() {
+        let mut s = ServerStream::default();
+        let mut bytes = welcome_frame(PROTOCOL_MAJOR, 2, 2, true);
+        bytes.extend(lobby_frame(Some(0), Some("not every player is ready")));
+        let events = s.push(&bytes);
+        let [_, ServerEvent::LobbyState { players, started: false, notice: Some(n) }] = events.as_slice() else {
+            panic!("{events:?}")
+        };
+        assert_eq!(
+            (players[0].player, players[0].nation, players[0].host, n.as_str()),
+            (3, Some(0), true, "not every player is ready")
+        );
+        assert!(s.push(&lobby_frame(Some(9), None)).is_empty());
+        assert!(matches!(s.error(), Some(StreamError::Invalid(e)) if e.contains("a lobby player's nation 9")));
     }
 
     #[test]
