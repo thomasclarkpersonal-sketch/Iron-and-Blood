@@ -7,12 +7,13 @@
 //! * commands, checked, queued and applied at the start of the next tick;
 //! * the log of every command that applied (D21, D23), kept by [`Game`];
 //! * pacing: when ticks happen, at the session's chosen speed;
-//! * flow control: which updates each session is sent, kept in [`crate::window`].
+//! * flow control: which updates each session is sent, kept in [`crate::window`];
+//! * saves and loads (D23).
 //!
-//! Saves arrive with M3-6.
+//! Its sessions are rows in a [`SessionTable`]: up to `Config::max_players` play at
+//! once, each with a distinct player id and nation (M4-1, D24).
 
 use flume::{Receiver, RecvTimeoutError, TryRecvError};
-use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
@@ -25,30 +26,12 @@ use crate::clock::Clock;
 use crate::commands;
 use crate::encode::{self, WelcomeInfo};
 use crate::game::Game;
-use crate::net::{ConnHandle, Inbound, Outbound};
+use crate::net::{Inbound, Outbound};
 use crate::queue::CommandQueue;
 use crate::request::{Request, WireCommand};
+use crate::session::{Seat, Session, SessionTable};
 use crate::view::{self, CheckedSubscription, DayViews, Subscription};
 use crate::window::UpdateWindow;
-
-struct Session {
-    conn: ConnHandle,
-    subscription: CheckedSubscription,
-    /// Set by `Welcome`. Until then the session may only say `Hello`: one choke
-    /// point in [`Sim::handle`] drops anything else, so no request handler has to
-    /// remember to check (a rejected session's queued requests never act).
-    seat: Option<Seat>,
-    /// Which days' updates it is sent (D23 flow control).
-    window: UpdateWindow,
-}
-
-/// Who a welcomed session plays.
-#[derive(Clone, Copy, Debug)]
-struct Seat {
-    player: u16,
-    /// `None`: sandbox, may command every nation (M3 only, D24).
-    nation: Option<u32>,
-}
 
 pub(crate) struct Sim {
     game: Game,
@@ -56,10 +39,10 @@ pub(crate) struct Sim {
     /// save names it): what a save records so it can be loaded again.
     scenario_dir: PathBuf,
     saves_dir: PathBuf,
-    sessions: BTreeMap<u64, Session>,
-    /// The single welcomed session (M3 is single player, D10).
-    active: Option<u64>,
-    /// Stop when the welcomed session leaves (the client launched this server).
+    sessions: SessionTable,
+    /// How many sessions may play at once (`Config::max_players`).
+    max_players: usize,
+    /// Stop when the last player leaves (the client launched this server).
     exit_when_idle: bool,
     /// The speed and the next tick. [`Sim::set_clock`] changes the speed and announces
     /// it; the one exception is a load, whose new `Welcome` carries the speed.
@@ -74,8 +57,8 @@ impl Sim {
             game: Game::new(scenario),
             scenario_dir: config.scenario.clone(),
             saves_dir: config.saves_dir.clone(),
-            sessions: BTreeMap::new(),
-            active: None,
+            sessions: SessionTable::default(),
+            max_players: usize::from(config.max_players),
             exit_when_idle: config.exit_when_idle,
             clock: Clock::Paused,
             queue: CommandQueue::default(),
@@ -83,9 +66,7 @@ impl Sim {
     }
 
     fn send(&self, session: u64, out: Outbound) {
-        if let Some(s) = self.sessions.get(&session) {
-            s.conn.send(out);
-        }
+        self.sessions.send(session, out);
     }
 
     /// A protocol error the sim thread detected: `Goodbye` with the reason, then close (D22).
@@ -109,21 +90,30 @@ impl Sim {
             );
             return self.reject(session, &reason);
         }
-        if self.active.is_some() {
-            return self.reject(session, "server full: a single-player server accepts one client");
+        if self.sessions.players() >= self.max_players {
+            let reason = match self.max_players {
+                1 => "server full: a single-player server accepts one client".to_owned(),
+                n => format!("server full: all {n} players are connected"),
+            };
+            return self.reject(session, &reason);
         }
-        if let Some(n) = requested_nation
-            && n as usize >= nations
-        {
-            return self.reject(session, &format!("unknown nation {n}: the scenario has {nations}"));
+        if let Some(n) = requested_nation {
+            if n as usize >= nations {
+                return self.reject(session, &format!("unknown nation {n}: the scenario has {nations}"));
+            }
+            // Each nation has one player (D24). Sandbox seats hold no nation.
+            if let Some(player) = self.sessions.holder(n) {
+                let key = &self.game.world().nations.key[n as usize];
+                return self.reject(session, &format!("nation {n} ({key}) is taken by player {player}"));
+            }
         }
+        let seat = Seat { player: self.sessions.free_player(), nation: requested_nation };
         // A connection's events arrive in order on one channel: Connected, its
         // requests, then Closed. So a session that sent Hello is always known here.
-        let s = self.sessions.get_mut(&session).expect("Connected precedes every request of a session");
-        s.seat = Some(Seat { player: 0, nation: requested_nation });
-        self.active = Some(session);
-        info!(session, name, ?requested_nation, "welcomed");
-        self.welcome(session, Seat { player: 0, nation: requested_nation });
+        let s = self.sessions.get_mut(session).expect("Connected precedes every request of a session");
+        s.seat = Some(seat);
+        info!(session, name, player = seat.player, ?requested_nation, "welcomed");
+        self.welcome(session, seat);
     }
 
     /// Replaces the session's subscription and answers with a `DayUpdate` for the
@@ -134,7 +124,7 @@ impl Sim {
             Ok(s) => s,
             Err(reason) => return self.goodbye(session, &reason),
         };
-        let Some(s) = self.sessions.get_mut(&session) else { return };
+        let Some(s) = self.sessions.get_mut(session) else { return };
         s.subscription = subscription;
         s.conn.send(Outbound::Frame(view::day_update(&self.game.views(), &subscription, self.clock.speed(), 0)));
     }
@@ -153,7 +143,7 @@ impl Sim {
     /// Every submission gets exactly one `CommandResult` now. A second one, an error,
     /// follows only if the command fails when it is applied.
     fn submit(&mut self, session: u64, client_seq: u32, command: Option<WireCommand>) {
-        let Some(seat) = self.sessions.get(&session).and_then(|s| s.seat) else { return };
+        let Some(seat) = self.sessions.seat(session) else { return };
         let command = match command.ok_or(wire::CommandError::Malformed).and_then(commands::to_engine) {
             Ok(c) => c,
             Err(e) => return self.command_result(session, client_seq, e),
@@ -172,7 +162,7 @@ impl Sim {
     /// D22 requires of unknown enum values: the clock is unchanged, and the session is
     /// told the current state so it can resynchronise.
     fn set_speed(&mut self, session: u64, speed: wire::Speed) {
-        let Some(seat) = self.sessions.get(&session).and_then(|s| s.seat) else { return };
+        let Some(seat) = self.sessions.seat(session) else { return };
         match Clock::at(speed, Instant::now()) {
             Some(clock) => self.set_clock(clock, seat.player),
             None => {
@@ -184,23 +174,18 @@ impl Sim {
     }
 
     /// The only place the speed changes: sets the clock and tells every welcomed
-    /// session (`ServerState`, D23).
+    /// session who changed it (`ServerState`, D23).
     fn set_clock(&mut self, clock: Clock, changed_by: u16) {
         self.clock = clock;
         let speed = clock.speed();
-        info!(?speed, "speed changed");
-        let frame = encode::server_state(self.game.world().day, speed, changed_by);
-        for (&id, s) in &self.sessions {
-            if s.seat.is_some() {
-                self.send(id, Outbound::Frame(frame.clone()));
-            }
-        }
+        info!(?speed, changed_by, "speed changed");
+        self.sessions.broadcast(&encode::server_state(self.game.world().day, speed, changed_by));
     }
 
     /// The session processed the update for `day`: everything up to it leaves the
     /// window. If days ran while the window was full, the latest day goes out now.
     fn ack(&mut self, session: u64, day: u64) {
-        let Some(s) = self.sessions.get_mut(&session) else { return };
+        let Some(s) = self.sessions.get_mut(session) else { return };
         if s.window.ack(day) {
             send_update(s, &self.game.views(), self.clock.speed());
         }
@@ -219,20 +204,13 @@ impl Sim {
     /// (D23). The views are built once and shared by all sessions.
     fn advance(&mut self) {
         self.tick();
-        let mut due = Vec::new();
-        for (&id, s) in &mut self.sessions {
-            if s.seat.is_none() {
-                continue;
-            }
-            if s.window.day_ran() {
-                due.push(id);
-            }
-        }
+        let due: Vec<u64> =
+            self.sessions.welcomed_mut().filter_map(|(id, s)| s.window.day_ran().then_some(id)).collect();
         if !due.is_empty() {
             // Build the views only when someone will see them.
             let views = self.game.views();
             for id in due {
-                if let Some(s) = self.sessions.get_mut(&id) {
+                if let Some(s) = self.sessions.get_mut(id) {
                     send_update(s, &views, self.clock.speed());
                 }
             }
@@ -314,10 +292,10 @@ impl Sim {
         // Not `set_clock`: the `Welcome` below announces the speed with the new game.
         self.clock = Clock::Paused;
         let nations = self.game.world().nations.key.len();
-        let ids: Vec<u64> = self.sessions.iter().filter(|(_, s)| s.seat.is_some()).map(|(&id, _)| id).collect();
-        for id in ids {
-            let Some(s) = self.sessions.get_mut(&id) else { continue };
-            let seat = s.seat.as_mut().expect("filtered to welcomed sessions");
+        // Every player gets the new game's Welcome, in session order (NETWORK_PROTOCOL §3).
+        for id in self.sessions.welcomed() {
+            let Some(s) = self.sessions.get_mut(id) else { continue };
+            let seat = s.seat.as_mut().expect("welcomed sessions have a seat");
             // A nation the loaded scenario doesn't have falls back to sandbox (M3).
             seat.nation = seat.nation.filter(|&n| (n as usize) < nations);
             let seat = *seat;
@@ -354,20 +332,12 @@ impl Sim {
     /// Handles one inbound event. Returns `false` when the server should stop.
     pub(crate) fn handle(&mut self, event: Inbound) -> bool {
         match event {
-            Inbound::Connected { session, conn } => {
-                let session_state = Session {
-                    conn,
-                    subscription: CheckedSubscription::default(),
-                    seat: None,
-                    window: UpdateWindow::default(),
-                };
-                self.sessions.insert(session, session_state);
-            }
+            Inbound::Connected { session, conn } => self.sessions.connect(session, conn),
             Inbound::Request { session, request: Request::Hello { major, minor, name, requested_nation, .. } } => {
                 self.hello(session, major, minor, name.as_deref(), requested_nation);
             }
             // The admission choke point: only welcomed sessions get past here.
-            Inbound::Request { session, request } if !self.sessions.get(&session).is_some_and(|s| s.seat.is_some()) => {
+            Inbound::Request { session, request } if self.sessions.seat(session).is_none() => {
                 debug!(session, ?request, "ignored: the session was not welcomed");
             }
             Inbound::Request { session, request } => match request {
@@ -384,12 +354,14 @@ impl Sim {
                 Request::Hello { .. } | Request::Ping { .. } => {}
             },
             Inbound::Closed { session } => {
-                let seat = self.sessions.remove(&session).and_then(|s| s.seat);
-                if self.active == Some(session) {
-                    self.active = None;
-                    // Nobody is watching: stop the clock (D23 never runs a game unobserved).
-                    let player = seat.expect("the active session was welcomed").player;
-                    self.set_clock(Clock::Paused, player);
+                let seat = self.sessions.remove(session).and_then(|s| s.seat);
+                // The others play on (D24). When the last player leaves, nobody is
+                // watching: stop the clock (D23 never runs a game unobserved).
+                if let Some(seat) = seat
+                    && self.sessions.players() == 0
+                {
+                    info!(session, player = seat.player, "the last player left");
+                    self.set_clock(Clock::Paused, seat.player);
                     if self.exit_when_idle {
                         info!("the client left; exiting (--exit-when-idle)");
                         return false;
@@ -416,7 +388,7 @@ impl Sim {
     /// After the sim thread panicked: tell every connection why it is being closed.
     pub(crate) fn fail(&self, message: &str) {
         let reason = format!("the server failed: {message}");
-        for session in self.sessions.values() {
+        for session in self.sessions.all() {
             session.conn.send(Outbound::Frame(encode::goodbye(&reason)));
             session.conn.send(Outbound::Close);
         }
@@ -460,7 +432,7 @@ pub(crate) fn run(sim: &mut Sim, inbound: Receiver<Inbound>) {
         }
     }
     // Close every remaining connection (e.g. a rejected client that stayed connected).
-    for session in sim.sessions.values() {
+    for session in sim.sessions.all() {
         session.conn.send(Outbound::Frame(encode::goodbye("the server is shutting down")));
         session.conn.send(Outbound::Close);
     }
@@ -469,6 +441,7 @@ pub(crate) fn run(sim: &mut Sim, inbound: Receiver<Inbound>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::net::ConnHandle;
     use pax_engine::{Command, Fixed};
     use pax_protocol::read_server_message;
     use tokio::sync::mpsc::Receiver;
@@ -478,13 +451,26 @@ mod tests {
     /// What the sim thread sent a session, decoded.
     #[derive(Debug, PartialEq)]
     enum Sent {
-        Welcome,
+        Welcome {
+            player: u16,
+        },
         Rejected,
         Goodbye(String),
-        Result { seq: u32, error: wire::CommandError, day: u64 },
-        Update { day: u64, skipped: u32 },
-        State(wire::Speed),
-        Saved { name: String, error: String },
+        Result {
+            seq: u32,
+            error: wire::CommandError,
+            day: u64,
+        },
+        Update {
+            day: u64,
+            skipped: u32,
+        },
+        /// The speed, and the player who set it.
+        State(wire::Speed, u16),
+        Saved {
+            name: String,
+            error: String,
+        },
         Saves(Vec<String>),
         Close,
     }
@@ -496,8 +482,8 @@ mod tests {
                 Outbound::Close => Sent::Close,
                 Outbound::Frame(f) => {
                     let m = read_server_message(&f).unwrap();
-                    if m.payload_as_welcome().is_some() {
-                        Sent::Welcome
+                    if let Some(w) = m.payload_as_welcome() {
+                        Sent::Welcome { player: w.player() }
                     } else if m.payload_as_rejected().is_some() {
                         Sent::Rejected
                     } else if let Some(g) = m.payload_as_goodbye() {
@@ -507,7 +493,7 @@ mod tests {
                     } else if let Some(u) = m.payload_as_day_update() {
                         Sent::Update { day: u.day(), skipped: u.skipped() }
                     } else if let Some(s) = m.payload_as_server_state() {
-                        Sent::State(s.speed())
+                        Sent::State(s.speed(), s.changed_by())
                     } else if let Some(r) = m.payload_as_save_result() {
                         Sent::Saved {
                             name: r.name().unwrap_or_default().into(),
@@ -559,7 +545,7 @@ mod tests {
             resume_token: 0,
         };
         sim.handle(Inbound::Request { session: SESSION, request: hello });
-        assert_eq!(drain(&mut rx), [Sent::Welcome]);
+        assert_eq!(drain(&mut rx), [Sent::Welcome { player: 0 }]);
         (sim, rx, saves)
     }
 
@@ -654,10 +640,10 @@ mod tests {
         let (mut sim, mut rx, _saves) = welcomed(None);
         assert_eq!(sim.clock, Clock::Paused, "a new game starts paused");
         sim.handle(Inbound::Request { session: SESSION, request: Request::SetSpeed { speed: wire::Speed::Normal } });
-        assert_eq!(drain(&mut rx), [Sent::State(wire::Speed::Normal)]);
+        assert_eq!(drain(&mut rx), [Sent::State(wire::Speed::Normal, 0)]);
         assert!(sim.clock.due().is_some());
         sim.handle(Inbound::Request { session: SESSION, request: Request::SetSpeed { speed: wire::Speed::Paused } });
-        assert_eq!(drain(&mut rx), [Sent::State(wire::Speed::Paused)]);
+        assert_eq!(drain(&mut rx), [Sent::State(wire::Speed::Paused, 0)]);
         assert_eq!(sim.clock, Clock::Paused);
         // D22: a speed newer than this server is ignored, never a protocol error. The
         // session is told the unchanged state.
@@ -665,7 +651,7 @@ mod tests {
         drain(&mut rx);
         let before = sim.clock;
         sim.handle(Inbound::Request { session: SESSION, request: Request::SetSpeed { speed: wire::Speed(9) } });
-        assert_eq!(drain(&mut rx), [Sent::State(wire::Speed::Fast)]);
+        assert_eq!(drain(&mut rx), [Sent::State(wire::Speed::Fast, 0)]);
         assert_eq!(sim.clock, before);
     }
 
@@ -675,6 +661,90 @@ mod tests {
         sim.handle(Inbound::Request { session: SESSION, request: Request::SetSpeed { speed: wire::Speed::Fast } });
         sim.handle(Inbound::Closed { session: SESSION });
         assert_eq!(sim.clock, Clock::Paused);
+    }
+
+    /// A sim with room for `players`, and nobody connected yet.
+    fn multiplayer(players: u16) -> (Sim, SavesDir) {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two_states");
+        let saves = test_saves_dir();
+        let mut config = crate::Config::local(&dir);
+        config.saves_dir = saves.0.clone();
+        config.max_players = players;
+        (Sim::new(pax_data::load_scenario(&dir).unwrap(), &config), saves)
+    }
+
+    /// Connects session `id` and says Hello for `nation`. Returns what it was sent.
+    fn join(sim: &mut Sim, id: u64, nation: Option<u32>) -> (Receiver<Outbound>, Vec<Sent>) {
+        let (conn, mut rx) = ConnHandle::for_test();
+        sim.handle(Inbound::Connected { session: id, conn });
+        let hello =
+            Request::Hello { major: PROTOCOL_MAJOR, minor: 0, name: None, requested_nation: nation, resume_token: 0 };
+        sim.handle(Inbound::Request { session: id, request: hello });
+        let sent = drain(&mut rx);
+        (rx, sent)
+    }
+
+    /// M4-1: players up to the limit, each with their own id and nation.
+    #[test]
+    fn players_join_up_to_the_limit_with_distinct_ids_and_nations() {
+        let (mut sim, _saves) = multiplayer(3);
+        let (_a, sent) = join(&mut sim, 1, Some(0));
+        assert_eq!(sent, [Sent::Welcome { player: 0 }]);
+        let (_b, sent) = join(&mut sim, 2, Some(0));
+        assert_eq!(sent, [Sent::Rejected, Sent::Close], "nation 0 is taken");
+        let (_b, sent) = join(&mut sim, 3, Some(1));
+        assert_eq!(sent, [Sent::Welcome { player: 1 }]);
+        let (_c, sent) = join(&mut sim, 4, None);
+        assert_eq!(sent, [Sent::Welcome { player: 2 }], "a sandbox seat holds no nation");
+        let (_d, sent) = join(&mut sim, 5, None);
+        assert_eq!(sent, [Sent::Rejected, Sent::Close], "three players: the server is full");
+        // Player 1 leaves; the next player takes the free id and nation.
+        sim.handle(Inbound::Closed { session: 3 });
+        let (_e, sent) = join(&mut sim, 6, Some(1));
+        assert_eq!(sent, [Sent::Welcome { player: 1 }]);
+    }
+
+    /// M4-1: every player hears a speed change and who made it; each gets the days
+    /// through their own window; one leaving doesn't stop the others' game, and the
+    /// last one leaving does.
+    #[test]
+    fn players_share_the_clock_but_not_their_windows() {
+        let (mut sim, _saves) = multiplayer(2);
+        let (mut a, _) = join(&mut sim, 1, Some(0));
+        let (mut b, _) = join(&mut sim, 2, Some(1));
+        let speed = Request::SetSpeed { speed: wire::Speed::Fast };
+        sim.handle(Inbound::Request { session: 2, request: speed });
+        assert_eq!(drain(&mut a), [Sent::State(wire::Speed::Fast, 1)], "player 1 set it");
+        assert_eq!(drain(&mut b), [Sent::State(wire::Speed::Fast, 1)]);
+        for _ in 0..4 {
+            sim.advance();
+        }
+        // A acknowledges everything, B nothing: B's window holds it at three updates.
+        let updates = |sent: Vec<Sent>| sent.into_iter().filter(|s| matches!(s, Sent::Update { .. })).count();
+        assert_eq!((updates(drain(&mut a)), updates(drain(&mut b))), (3, 3));
+        sim.handle(Inbound::Request { session: 1, request: Request::Ack { day: 3 } });
+        assert_eq!(drain(&mut a), [Sent::Update { day: 4, skipped: 0 }]);
+        assert_eq!(drain(&mut b), []);
+        // B leaves: A plays on.
+        sim.handle(Inbound::Closed { session: 2 });
+        assert_eq!(sim.clock.speed(), wire::Speed::Fast, "the others play on (D24)");
+        assert_eq!(drain(&mut a), []);
+        // A leaves too: nobody is watching, so the clock stops.
+        sim.handle(Inbound::Closed { session: 1 });
+        assert_eq!(sim.clock, Clock::Paused);
+    }
+
+    /// A load sends every player the new game's Welcome, each with their own seat.
+    #[test]
+    fn a_load_welcomes_every_player_again() {
+        let (mut sim, _saves) = multiplayer(2);
+        let (mut a, _) = join(&mut sim, 1, Some(0));
+        let (mut b, _) = join(&mut sim, 2, Some(1));
+        sim.handle(Inbound::Request { session: 1, request: Request::SaveGame { name: Some("s".into()) } });
+        sim.handle(Inbound::Request { session: 1, request: Request::LoadGame { name: Some("s".into()) } });
+        let a_sent = drain(&mut a);
+        assert!(matches!(a_sent.as_slice(), [Sent::Saved { .. }, Sent::Welcome { player: 0 }]), "{a_sent:?}");
+        assert_eq!(drain(&mut b), [Sent::Welcome { player: 1 }]);
     }
 
     /// D11 pins the server's day to the harness's: with no players, `Sim::tick`
@@ -745,7 +815,7 @@ mod tests {
         let later_hash = sim.game.world().state_hash();
 
         request(&mut sim, Request::LoadGame { name: Some("autumn".into()) });
-        assert_eq!(drain(&mut rx), [Sent::Welcome], "a load answers with a new Welcome");
+        assert_eq!(drain(&mut rx), [Sent::Welcome { player: 0 }], "a load answers with a new Welcome");
         assert_eq!((sim.game.world().day, sim.game.world().state_hash()), (saved_day, saved_hash));
         assert_eq!(sim.log(), saved_log.as_slice());
         assert_eq!(sim.clock, Clock::Paused, "a loaded game starts paused");

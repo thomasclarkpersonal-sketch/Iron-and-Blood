@@ -380,6 +380,7 @@ The state → national → sphere → global roll-up in the old ECONOMY_SYSTEM w
 - **Framing:** TCP; each message is a size-prefixed FlatBuffer with file identifier `PAXC` (client→server) or `PAXS` (server→client). Client messages are at most 64 KiB and server messages at most 16 MiB.
   - Every inbound buffer is verified before it is read.
   - Any protocol error closes the session with `Goodbye`.
+- **Liveness:** the server closes a session that has sent nothing for **10 s**. A client therefore sends `Ping` whenever it has sent nothing for a fifth of that (2 s), so a live client never trips it. Both sides derive their timing from one constant, `pax_protocol::IDLE_TIMEOUT`. In multiplayer, D24's lag rules replace this.
 - **Generated code:** produced by flatc **24.3.25**, matching the `flatbuffers` crate, in the engine-free `pax_protocol` crate, by `scripts/gen-protocol.sh`. That script downloads the pinned flatc and checks its checksum. The code is checked in, and CI fails if regenerating it gives a different result.
   - **`unsafe` exception:** flatc's Rust code uses `unsafe` internally, and the workspace forbids `unsafe_code`. `pax_protocol` therefore *denies* `unsafe_code` and allows it on the generated module only, so its hand-written code (framing, readers) is still held to the rule.
   - **planus** (a pure-Rust FlatBuffers compiler) was evaluated in M3-1. Its generated code also uses `unsafe`, so it would remove neither the exception nor the pinned toolchain's role, and flatc was kept.
@@ -452,7 +453,7 @@ The state → national → sphere → global roll-up in the old ECONOMY_SYSTEM w
 - **Lag, in wall-clock time:**
   - updates coalesce per client (D23);
   - 5 s of silence from a client pauses the game ("waiting for player");
-  - 30 s drops the session, and its nation keeps its current policies. In multiplayer this replaces M3's 10 s idle timeout (`pax_protocol::IDLE_TIMEOUT`), which would otherwise drop a client before the fairness pause could help it; single player keeps the 10 s rule;
+  - 30 s drops the session, and its nation keeps its current policies. In multiplayer this replaces D22's 10 s liveness rule, which would otherwise drop a client before the fairness pause could help it; single player keeps D22's rule;
   - a resume token reclaims the nation.
 - **Transport:**
   - TLS whenever the server is not bound to localhost;

@@ -30,6 +30,7 @@ pub fn two_states() -> Server {
 #[derive(Debug, PartialEq)]
 pub enum Got {
     Welcome {
+        player: u16,
         nation: Option<u32>,
         day: u64,
         provinces: Vec<String>,
@@ -58,6 +59,7 @@ pub enum Got {
     ServerState {
         day: u64,
         speed: Speed,
+        changed_by: u16,
     },
     SaveResult {
         name: String,
@@ -197,6 +199,7 @@ fn decode(frame: &[u8]) -> Got {
     if let Some(w) = msg.payload_as_welcome() {
         let defs = w.defs().expect("Welcome carries StaticData");
         return Got::Welcome {
+            player: w.player(),
             nation: w.nation(),
             day: w.day(),
             provinces: strings(defs.provinces()),
@@ -243,7 +246,7 @@ fn decode(frame: &[u8]) -> Got {
         return Got::SaveList(l.names().map(|n| n.iter().map(str::to_owned).collect()).unwrap_or_default());
     }
     if let Some(s) = msg.payload_as_server_state() {
-        return Got::ServerState { day: s.day(), speed: s.speed() };
+        return Got::ServerState { day: s.day(), speed: s.speed(), changed_by: s.changed_by() };
     }
     if let Some(p) = msg.payload_as_pong() {
         return Got::Pong(p.nonce());
@@ -270,7 +273,7 @@ pub fn play_until(c: &mut Client, day: u64) -> u64 {
     // Drain to the pause confirmation, so later messages are the replies we expect.
     loop {
         match c.next() {
-            Got::ServerState { speed: Speed::Paused, day } => return day,
+            Got::ServerState { speed: Speed::Paused, day, .. } => return day,
             Got::DayUpdate { day, .. } => c.ack(day),
             Got::Closed => panic!("server closed the connection"),
             _ => {}

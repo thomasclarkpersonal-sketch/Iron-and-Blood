@@ -82,7 +82,7 @@ fn paused_means_no_updates() {
     while paused_at.is_none() {
         match c.next() {
             Got::DayUpdate { day, .. } => c.ack(day),
-            Got::ServerState { day, speed: Speed::Paused } => paused_at = Some(day),
+            Got::ServerState { day, speed: Speed::Paused, .. } => paused_at = Some(day),
             other => panic!("unexpected {other:?}"),
         }
     }

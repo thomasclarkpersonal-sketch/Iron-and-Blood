@@ -10,10 +10,11 @@
 //!   engine and the wire types (`pax_protocol` has no engine dependency).
 //!
 //! * **Views** (`view`): what each session sees of the world each day (M3-3).
+//! * **Sessions** (`session`): the sim thread's table of connections and the seats
+//!   of the players among them (M4-1, D24).
 //!
-//! State: handshake, single session, keep-alive, timeouts, protocol errors, and
-//! subscriptions with views (M3-2, M3-3). Ticking, commands and saves arrive with
-//! M3-4 to M3-6 (`docs/MILESTONE_3.md`).
+//! Built so far: M3 (single player, `docs/MILESTONE_3.md`) and several players at
+//! once (M4-1). The lobby, authority and lag rules follow in `docs/MILESTONE_4.md`.
 
 mod clock;
 mod commands;
@@ -26,6 +27,7 @@ mod net;
 mod noise;
 mod queue;
 mod request;
+mod session;
 mod sim;
 mod view;
 mod window;
@@ -55,8 +57,11 @@ pub struct Config {
     /// Close a session that sends nothing for this long (the client pings at least
     /// every 2 s, NETWORK_PROTOCOL §3).
     pub idle_timeout: Duration,
-    /// Stop when the welcomed client leaves: the client launched this server.
+    /// Stop when the last player leaves: the client launched this server.
     pub exit_when_idle: bool,
+    /// How many sessions may play at once; one more is refused with "server full".
+    /// Single player is 1 (M3); `--players N` sets it for multiplayer (M4-1).
+    pub max_players: u16,
     /// Where `SaveGame` writes and `LoadGame` reads `<name>.toml` (D23).
     pub saves_dir: PathBuf,
 }
@@ -70,6 +75,7 @@ impl Config {
             idle_timeout: pax_protocol::IDLE_TIMEOUT,
             exit_when_idle: false,
             saves_dir: PathBuf::from("saves"),
+            max_players: 1,
         }
     }
 }

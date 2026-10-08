@@ -1,8 +1,9 @@
-//! `pax_server --scenario DIR [--bind ADDR] [--port-file PATH] [--saves DIR] [--exit-when-idle]`
+//! `pax_server --scenario DIR [--bind ADDR] [--port-file PATH] [--saves DIR] [--players N] [--exit-when-idle]`
 //!
 //! The authoritative game server (D10). In single player the client launches it with
 //! `--scenario <dir> --bind 127.0.0.1:0 --port-file <tmp> --exit-when-idle` and reads
-//! the port from the file (NETWORK_PROTOCOL §6).
+//! the port from the file (NETWORK_PROTOCOL §6). `--players N` lets up to N clients
+//! play at once (M4-1; default 1).
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -11,7 +12,11 @@ use pax_server::{Config, Server};
 use tracing::error;
 
 const USAGE: &str =
-    "usage: pax_server --scenario DIR [--bind ADDR] [--port-file PATH] [--saves DIR] [--exit-when-idle]";
+    "usage: pax_server --scenario DIR [--bind ADDR] [--port-file PATH] [--saves DIR] [--players N] [--exit-when-idle]";
+
+/// The most players `--players` allows. Player ids are `u16` on the wire; the cap is
+/// far below that, a sanity limit for a server whose every player gets every update.
+const MAX_PLAYERS: u16 = 64;
 
 /// Parses the arguments after the program name.
 fn parse_args(args: impl IntoIterator<Item = String>) -> Result<(Config, Option<PathBuf>), String> {
@@ -29,6 +34,14 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> Result<(Config, Option<
                     value.parse().map_err(|_| format!("--bind: '{value}' is not an address like 127.0.0.1:0"))?;
             }
             "--saves" => config.saves_dir = PathBuf::from(it.next().ok_or("--saves needs a value")?),
+            "--players" => {
+                let value = it.next().ok_or("--players needs a value")?;
+                config.max_players = value
+                    .parse()
+                    .ok()
+                    .filter(|&n| (1..=MAX_PLAYERS).contains(&n))
+                    .ok_or(format!("--players: '{value}' is not a number from 1 to {MAX_PLAYERS}"))?;
+            }
             "--port-file" => port_file = Some(PathBuf::from(it.next().ok_or("--port-file needs a value")?)),
             _ => return Err(format!("unknown argument {flag}")),
         }
@@ -94,6 +107,17 @@ mod tests {
         assert_eq!(config.bind, "127.0.0.1:0".parse().unwrap());
         assert_eq!(port_file, Some(PathBuf::from("/tmp/p")));
         assert!(config.exit_when_idle);
+        assert_eq!(config.max_players, 1, "single player by default");
+    }
+
+    #[test]
+    fn players_must_be_from_1_to_the_cap() {
+        let (config, _) = parse_args(args("--scenario s --players 4")).unwrap();
+        assert_eq!(config.max_players, 4);
+        for bad in ["0", "65", "-1", "four"] {
+            let e = parse_args(args(&format!("--scenario s --players {bad}"))).unwrap_err();
+            assert!(e.contains("--players"), "{bad}: {e}");
+        }
     }
 
     #[test]

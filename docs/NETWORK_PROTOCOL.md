@@ -32,7 +32,7 @@ sequenceDiagram
     participant C as Client (Godot)
     participant S as pax_server
     C->>S: Hello {protocol, name, requested_nation}
-    alt protocol major mismatch / server full
+    alt protocol major mismatch / server full / nation taken
         S->>C: Rejected {reason}
     else accepted
         S->>C: Welcome {player, nation, content_hash, day, speed, StaticData}
@@ -50,14 +50,16 @@ sequenceDiagram
 ```
 
 1. **Hello first.** The client sends `Hello` with `protocol_major` and `protocol_minor`. A different major version gets `Rejected`. A newer or older minor version is accepted, under the evolution rules in §8.
+   - **Players (M4-1):** a server started with `--players N` (default 1) welcomes up to N clients at once; one more gets `Rejected: server full`. Each nation has one player, so `Hello` for a nation another player holds is `Rejected` too. Each player gets a distinct `Welcome.player` id, the lowest one free.
 2. **Welcome** carries `StaticData`: the key tables (goods, professions, producer types, provinces, markets), the province→market map, and each nation with the markets it owns (a market no nation lists is stateless).
    - Every id in the protocol is an index into these tables, and the indices stay fixed for the whole session.
    - **Map check:** the client draws the map from its own copy of the scenario's map files, in the directory `StaticData.map_dir` names (relative to the scenario, checked by `pax_map::check_map_dir`; protocol 1.1). It hashes them with `pax_content::map_hash`, the same function the server uses, and compares the result with `StaticData.map_hash`. On a mismatch it shows an error rather than mislabelling provinces.
    - `content_hash` covers every file the scenario loader reads, maps included, each keyed by its role rather than its path. It identifies the game content in logs and saves (D23).
 3. **Subscribe** replaces the whole subscription. The server immediately answers with a `DayUpdate` for the current day, even while paused, so a newly opened panel fills at once.
 4. **Daily updates** follow the flow-control rule in §5.
-5. **Keep-alive:** a session silent for `pax_protocol::IDLE_TIMEOUT` (10 seconds in M3) is closed, so the client sends `Ping` at least every fifth of that (2 seconds). Both sides take the value from that one constant. M4's lag rules are in D24.
-6. **LoadGame** ends with a new `Welcome`, because the scenario and its tables may differ. The client must drop everything it holds from the old session.
+5. **Keep-alive:** a session silent for `pax_protocol::IDLE_TIMEOUT` (10 seconds, D22) is closed, so the client sends `Ping` at least every fifth of that (2 seconds). Both sides take the value from that one constant. M4's lag rules are in D24.
+6. **LoadGame** ends with a new `Welcome` to **every** player, because the scenario and its tables may differ. Each client must drop everything it holds from the old session, whether or not it asked for the load.
+7. **Leaving:** when a player leaves, the others play on (D24). When the last one leaves, the game pauses, because D23 never runs a game nobody is watching.
 
 ## 4. Messages
 
@@ -77,7 +79,7 @@ sequenceDiagram
 
 | Message | When |
 |---|---|
-| `Welcome`, `Rejected` | Reply to `Hello` (and `Welcome` again after `LoadGame`) |
+| `Welcome`, `Rejected` | Reply to `Hello` (and `Welcome` again, to every player, after any player's `LoadGame`) |
 | `DayUpdate` | After a simulated day, subject to flow control (§5) |
 | `CommandResult` | Reply to `SubmitCommand` |
 | `ServerState` | The speed changed (including pause and unpause) |
@@ -124,8 +126,9 @@ sequenceDiagram
 
 - The client launches `pax_server` as a child process: `pax_server --scenario <dir> --bind 127.0.0.1:0 --port-file <tmp> --exit-when-idle`. The server binds a free port and writes it to the port file (atomically, so a polling client never reads half a number). The client then connects.
 - When the client exits, it closes the connection, and `--exit-when-idle` makes the server shut down once its player has gone.
-- The client's bridge (`pax_godot::connection`) does this, and also what every client owes the server: it acknowledges each `DayUpdate` on the poll after the one that delivered it (§5), and sends a `Ping` after a fifth of `IDLE_TIMEOUT` (2 s) without sending anything. It also pairs each `SaveResult` and load `Welcome` with the request it answers, oldest first, because the server answers save requests in order.
+- The client's bridge (`pax_godot::connection`) does this, and also what every client owes the server: it acknowledges each `DayUpdate` on the poll after the one that delivered it (§5), and sends a `Ping` after a fifth of `IDLE_TIMEOUT` (2 s) without sending anything. It also pairs each `SaveResult` and load `Welcome` with the request it answers, oldest first, because the server answers save requests in order. A `Welcome` nothing asked for is another player's load (§3), and replaces the session's tables all the same.
 - There is no Docker and no separate install: the server binary ships next to the client.
+- **Several players (M4-1):** run the server yourself, for example `pax_server --scenario <dir> --bind 0.0.0.0:7777 --players 3`, and have each client connect to it. The lobby (M4-2), the host's controls (M4-3) and the lag rules (M4-4) are still to come, and so is TLS (M4-6): until then, bind a multiplayer server only on a trusted network.
 
 ## 7. Conversions and units
 
