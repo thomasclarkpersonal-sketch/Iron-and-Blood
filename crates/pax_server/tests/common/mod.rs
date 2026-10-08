@@ -360,3 +360,53 @@ pub fn ping_frame(nonce: u64) -> Vec<u8> {
     finish_size_prefixed_client_message_buffer(&mut b, msg);
     b.finished_data().to_vec()
 }
+
+/// Reads until the lobby shows `players` players, all ready (M4-2), acknowledging
+/// updates on the way. Fails after 10 s.
+pub fn until_all_ready(c: &mut Client, players: usize) {
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        assert!(std::time::Instant::now() < deadline, "the lobby never showed {players} players ready");
+        match c.next() {
+            Got::Lobby { players: p, .. } if p.len() == players && p.iter().all(|p| p.2) => return,
+            Got::DayUpdate { day, .. } => c.ack(day),
+            Got::Closed => panic!("the server closed the connection"),
+            _ => {}
+        }
+    }
+}
+
+/// Reads until the lobby says the game started, acknowledging updates on the way.
+/// Fails after 10 s.
+pub fn until_started(c: &mut Client) {
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        assert!(std::time::Instant::now() < deadline, "the game never started");
+        match c.next() {
+            Got::Lobby { started: true, .. } => return,
+            Got::DayUpdate { day, .. } => c.ack(day),
+            Got::Closed => panic!("the server closed the connection"),
+            _ => {}
+        }
+    }
+}
+
+/// A started two-player game on `config` (M4-2): the host, holding nation 0, is
+/// seated first (the first player is host, D24), the guest holds nation 1, both get
+/// ready, and the host starts. The one copy of the lobby handshake the TCP tests use.
+pub fn started_game(config: Config) -> (Server, Client, Client) {
+    let server = start(config);
+    let mut host = Client::connect(server.local_addr());
+    host.hello(Some(0));
+    assert!(matches!(host.next(), Got::Welcome { player: 0, .. }), "the host is seated first");
+    let mut guest = Client::connect(server.local_addr());
+    guest.hello(Some(1));
+    host.set_ready(true);
+    guest.set_ready(true);
+    // The two connections race: start only once the lobby shows both ready.
+    until_all_ready(&mut host, 2);
+    host.start_game();
+    until_started(&mut host);
+    until_started(&mut guest);
+    (server, host, guest)
+}

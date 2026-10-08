@@ -8,8 +8,9 @@ use pax_server::Config;
 use std::time::{Duration, Instant};
 
 fn server(players: u16) -> pax_server::Server {
-    let mut config = Config::local(scenario("two_states"));
-    config.max_players = players;
+    let mut config = Config::multiplayer(scenario("two_states"), players);
+    // The test drives one client at a time, so another is silent: no fairness pause.
+    config.pause_after = None;
     start(config)
 }
 
@@ -31,17 +32,6 @@ fn next_game(c: &mut Client) -> Got {
         match c.next() {
             Got::Lobby { notice: None, .. } => {}
             other => return other,
-        }
-    }
-}
-
-/// Reads until the lobby says the game started.
-fn until_started(c: &mut Client) {
-    loop {
-        match c.next() {
-            Got::Lobby { started: true, .. } => return,
-            Got::Closed => panic!("the server closed the connection"),
-            _ => {}
         }
     }
 }
@@ -147,32 +137,10 @@ fn two_players_each_with_their_own_nation_view_and_permissions() {
 
 /// Two players in a started game, with short lag thresholds for the test.
 fn started_pair(pause_after: Duration, drop_after: Duration) -> (pax_server::Server, Client, Client) {
-    let mut config = Config::local(scenario("two_states"));
-    config.max_players = 2;
+    let mut config = Config::multiplayer(scenario("two_states"), 2);
     config.pause_after = Some(pause_after);
     config.idle_timeout = drop_after;
-    let server = start(config);
-    let mut a = Client::connect(server.local_addr());
-    a.hello(Some(0));
-    // A must be seated first, to be the host that starts the game.
-    assert!(matches!(a.next(), Got::Welcome { player: 0, .. }));
-    let mut b = Client::connect(server.local_addr());
-    b.hello(Some(1));
-    a.set_ready(true);
-    b.set_ready(true);
-    // The two connections race: start only once the lobby shows both ready.
-    loop {
-        if let Got::Lobby { players, .. } = a.next()
-            && players.len() == 2
-            && players.iter().all(|p| p.2)
-        {
-            break;
-        }
-    }
-    a.start_game();
-    until_started(&mut a);
-    until_started(&mut b);
-    (server, a, b)
+    started_game(config)
 }
 
 /// Reads `a`'s messages, keeping it alive (acks and pings), until one matches.

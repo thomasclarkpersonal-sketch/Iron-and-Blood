@@ -240,6 +240,21 @@ impl SessionTable {
         self.reserved.len() < before
     }
 
+    /// A load sent a multiplayer game back to the lobby (M4-5): each player keeps a
+    /// claim the loaded game has (`nations` of them) and is unclaimed otherwise, and
+    /// nobody is ready. A seat is never widened: a lost claim becomes `Unclaimed`,
+    /// which commands nothing, never `Sandbox`. (The load drops kept seats itself,
+    /// in every phase: `Sim::load_game`.)
+    pub(crate) fn load_into_lobby(&mut self, nations: usize) {
+        for row in self.rows.values_mut() {
+            let Some(seat) = row.seat.as_mut() else { continue };
+            if seat.nation().is_some_and(|n| n as usize >= nations) {
+                seat.claim = Claim::Unclaimed;
+            }
+            row.ready = false;
+        }
+    }
+
     /// Drops every kept seat: a load replaced the game, whose nations they hold.
     pub(crate) fn forget_all(&mut self) {
         self.reserved.clear();

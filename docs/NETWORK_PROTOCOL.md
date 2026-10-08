@@ -61,12 +61,13 @@ sequenceDiagram
    - **In multiplayer (D24, M4-4)**, a player silent for 5 s (`--pause-after`) pauses a running game for everyone. Every `ServerState` lists who it waits for (`waiting_for`, protocol 1.5). The pause and its resume are the server's doing: `changed_by` keeps the last player who set the speed.
    - When they speak again, or are dropped after 30 s of silence (`--drop-after`), the game resumes at its speed, or at the speed the host set while it waited.
 6. **LoadGame** ends with a new `Welcome` to **every** player, because the scenario and its tables may differ. Each client must drop everything it holds from the old session, whether or not it asked for the load.
+   - **In multiplayer (M4-5)** the game goes back to the lobby: each player keeps a claim the loaded game has, is unclaimed otherwise (never sandbox), nobody is ready, and the host starts again. Players are never dropped by a load, and kept seats (§3.9) are cleared. A `LobbyState` follows the `Welcome`s.
 7. **Leaving:** when a player leaves, the others play on (D24). When the last one leaves, the game pauses, because D23 never runs a game nobody is watching.
 8. **The lobby (M4-2, protocol 1.4):** a multiplayer server (`--players` above 1) starts in a lobby. Single player has none and never sends `LobbyState`.
    - `Hello`'s nation is the player's first claim. Without one, the player joins unclaimed (or as a sandbox seat on a `--sandbox` server).
    - Players `ClaimNation` and `SetReady`; every change goes to every player as a `LobbyState`. A refused request gets a `LobbyState` with a `notice`, to the asker only. A player must hold a nation (or a sandbox seat) to be ready, and changing a claim clears the ready mark.
    - The host's `StartGame` succeeds once every player is ready. Until then commands get `NotStarted` and the clock stays paused; after it, the host unpauses.
-   - The scenario is the one the server was started with. Choosing a save in the lobby is M4-5; rejoining after a drop is §3.9. After the start, a new `Hello` must name a free nation.
+   - The scenario is the one the server was started with. The host loads a save from the lobby or during the game, and either way the game comes back to the lobby (§3.6); rejoining after a drop is §3.9. After the start, a new `Hello` must name a free nation.
 9. **Rejoining (M4-4, protocol 1.5):** every `Welcome` carries a `resume_token`.
    - When a player leaves a started game, the server keeps their seat: player id and nation, shown in the lobby as `away`. It does this however the player left, because it can't tell a crash from a quit.
    - `Hello` with that token reclaims the seat. A token with no kept seat is `Rejected`: it was forged, the player was kicked, or a load replaced the game.
