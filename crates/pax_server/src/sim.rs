@@ -546,29 +546,32 @@ impl Sim {
         self.game = Game::resume(scenario, save, last_report);
         self.queue.discard();
         // Kept seats hold the old game's nations.
-        self.sessions.forget_all();
         self.paused_for_fairness = None;
         // The new Welcomes reset every client: the lobby goes out again after them.
         self.last_lobby = None;
         // Not `set_clock`: the `Welcome` below announces the speed with the new game.
         self.clock = Clock::Paused;
         let nations = self.game.world().nations.key.len();
-        // A multiplayer load goes through the lobby (D24, M4-5): players keep the claims
-        // the loaded game has, re-claim the others, get ready, and the host starts.
-        if self.phase != Phase::SinglePlayer {
-            self.phase = Phase::Lobby;
-            self.sessions.back_to_lobby(nations);
-        }
-        // First the seats the new game can't hold: a seat is never widened, so in single
-        // player a player whose nation the loaded game lacks leaves, rather than
-        // becoming a sandbox seat that commands every nation. (In a lobby the claim was
-        // already cleared.)
-        for id in self.sessions.welcomed() {
-            let seat = self.sessions.seat(id).expect("welcomed sessions have a seat");
-            if let Some(n) = seat.nation().filter(|&n| n as usize >= nations) {
-                self.goodbye(id, &format!("the loaded game has no nation {n}, which you played"));
-                if let Some(v) = self.sessions.unseat(id) {
-                    self.seat_ended(id, v);
+        // A seat is never widened to sandbox, which commands every nation. Each phase
+        // has its own rule for a seat whose nation the loaded game lacks:
+        match self.phase {
+            // A multiplayer load goes through the lobby (D24, M4-5): players keep the
+            // claims the loaded game has and re-claim the others; nobody is dropped.
+            Phase::Lobby | Phase::Playing => {
+                self.phase = Phase::Lobby;
+                self.sessions.load_into_lobby(nations);
+            }
+            // Single player has no lobby: that seat ends.
+            Phase::SinglePlayer => {
+                self.sessions.forget_all();
+                for id in self.sessions.welcomed() {
+                    let seat = self.sessions.seat(id).expect("welcomed sessions have a seat");
+                    if let Some(n) = seat.nation().filter(|&n| n as usize >= nations) {
+                        self.goodbye(id, &format!("the loaded game has no nation {n}, which you played"));
+                        if let Some(v) = self.sessions.unseat(id) {
+                            self.seat_ended(id, v);
+                        }
+                    }
                 }
             }
         }
@@ -662,15 +665,6 @@ impl Sim {
 
     /// Handles one inbound event. Returns `false` when the server should stop.
     pub(crate) fn handle(&mut self, event: Inbound) -> bool {
-        // The frequent requests that never touch the session table needn't rebuild
-        // the lobby to compare it.
-        let may_change_lobby = !matches!(
-            &event,
-            Inbound::Request {
-                request: Request::Ack { .. } | Request::Subscribe { .. } | Request::SubmitCommand { .. },
-                ..
-            }
-        );
         match event {
             Inbound::Connected { session, conn } => self.sessions.connect(session, conn),
             Inbound::Request {
@@ -719,9 +713,7 @@ impl Sim {
             Inbound::Crash => panic!("injected crash for a test"),
         }
         // The lobby, once per event, after its last change, and only if it changed.
-        if may_change_lobby {
-            self.tell_lobby_if_changed();
-        }
+        self.tell_lobby_if_changed();
         !self.stop
     }
 }

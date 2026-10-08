@@ -110,17 +110,20 @@ impl Config {
     }
 
     /// A multiplayer server for `scenario` with room for `players`, with D24's
-    /// defaults: no sandbox, a fairness pause after [`PAUSE_AFTER`] of silence and a
-    /// drop after [`DROP_AFTER`] (in place of D22's 10 s). The one place those
-    /// defaults are applied; the CLI starts from here too.
+    /// defaults: no sandbox, and its lag rules ([`Self::use_multiplayer_lag`]).
     pub fn multiplayer(scenario: impl Into<PathBuf>, players: u16) -> Self {
-        Config {
-            max_players: players,
-            sandbox: false,
-            idle_timeout: DROP_AFTER,
-            pause_after: Some(PAUSE_AFTER),
-            ..Config::local(scenario)
-        }
+        let mut config = Config { max_players: players, sandbox: false, ..Config::local(scenario) };
+        config.use_multiplayer_lag();
+        config
+    }
+
+    /// D24's lag rules in place of D22's 10 s: a fairness pause after
+    /// [`PAUSE_AFTER`] of silence and a drop after [`DROP_AFTER`]. The one place those
+    /// defaults are applied: [`Self::multiplayer`] and the CLI both call it, and the
+    /// CLI's `--pause-after` and `--drop-after` override it.
+    pub fn use_multiplayer_lag(&mut self) {
+        self.idle_timeout = DROP_AFTER;
+        self.pause_after = Some(PAUSE_AFTER);
     }
 
     /// A local single-player server for `scenario`, as the client launches it: one
