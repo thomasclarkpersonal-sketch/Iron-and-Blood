@@ -22,8 +22,8 @@ const DAYS_AFTER_RELOAD := 5
 ## The policy the run sets (income tax of nation 0), in per mille.
 const TAX_PER_MILLE := 123
 
-## main.gd: its `client`, `welcome`, `map_modes`, `select_province` and `finish`.
-var _app: Node
+## main.gd, typed, so a renamed member fails when the script loads, not mid-run.
+var _app: ClientApp
 var _stage := Stage.STARTING
 var _started_ms := Time.get_ticks_msec()
 ## The day the load returned to: the final check needs days after it.
@@ -32,7 +32,7 @@ var _reload_day := 0
 var _command: Variant = null
 
 
-func _init(app: Node) -> void:
+func _init(app: ClientApp) -> void:
 	_app = app
 
 
