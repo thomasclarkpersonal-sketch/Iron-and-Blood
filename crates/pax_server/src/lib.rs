@@ -22,6 +22,7 @@ mod net;
 mod request;
 mod sim;
 mod view;
+mod window;
 
 use std::net::SocketAddr;
 use std::path::PathBuf;

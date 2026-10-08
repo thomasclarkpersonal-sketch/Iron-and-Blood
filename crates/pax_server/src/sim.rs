@@ -7,12 +7,12 @@
 //! * commands, checked, queued and applied at the start of the next tick;
 //! * the log of every command that applied (D21, D23);
 //! * pacing: when ticks happen, at the session's chosen speed;
-//! * flow control: which updates each session is sent.
+//! * flow control: which updates each session is sent, kept in [`crate::window`].
 //!
 //! Saves arrive with M3-6.
 
 use flume::{Receiver, RecvTimeoutError, TryRecvError};
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
 use pax_data::Scenario;
@@ -26,24 +26,72 @@ use crate::game::Game;
 use crate::net::{ConnHandle, Inbound, Outbound};
 use crate::request::{Request, WireCommand};
 use crate::view::{self, CheckedSubscription, DayViews, Subscription};
+use crate::window::UpdateWindow;
 
-/// How many `DayUpdate`s a session may have unacknowledged (D23). While its window is
-/// full the server keeps simulating but sends that session nothing. When the session
-/// acknowledges, it gets only the latest day, with `skipped` counting the days it missed.
-pub(crate) const UPDATE_WINDOW: usize = 3;
+/// How a speed paces the clock (D23).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Pace {
+    Paused,
+    /// One day per interval; a zero interval for `Fastest`, which ticks as fast as
+    /// the engine allows.
+    Every(Duration),
+    /// A speed newer than this server.
+    Unknown,
+}
 
-/// Days per real second at each speed (D23). `None` for paused; a zero interval for
-/// `Fastest`, which ticks as fast as the engine allows.
-fn tick_interval(speed: wire::Speed) -> Option<Duration> {
+/// Days per real second at each speed (D23).
+fn pace(speed: wire::Speed) -> Pace {
     use wire::Speed as S;
     match speed {
-        S::Slowest => Some(Duration::from_millis(2_000)), // 0.5 days/s
-        S::Slow => Some(Duration::from_millis(1_000)),    // 1
-        S::Normal => Some(Duration::from_millis(500)),    // 2
-        S::Fast => Some(Duration::from_millis(200)),      // 5
-        S::Fastest => Some(Duration::ZERO),
-        // Paused, and speeds newer than this server (refused in `set_speed`).
-        _ => None,
+        S::Paused => Pace::Paused,
+        S::Slowest => Pace::Every(Duration::from_millis(2_000)), // 0.5 days/s
+        S::Slow => Pace::Every(Duration::from_millis(1_000)),    // 1
+        S::Normal => Pace::Every(Duration::from_millis(500)),    // 2
+        S::Fast => Pace::Every(Duration::from_millis(200)),      // 5
+        S::Fastest => Pace::Every(Duration::ZERO),
+        _ => Pace::Unknown,
+    }
+}
+
+/// The game clock: one value, so "paused" and "a tick is due" can't disagree.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Clock {
+    Paused,
+    Running { speed: wire::Speed, interval: Duration, next: Instant },
+}
+
+impl Clock {
+    /// The clock at `speed`, its first tick one interval after `now`, so unpausing
+    /// never fires a burst of catch-up ticks. `None` for an unknown speed.
+    fn at(speed: wire::Speed, now: Instant) -> Option<Clock> {
+        match pace(speed) {
+            Pace::Paused => Some(Clock::Paused),
+            Pace::Every(interval) => Some(Clock::Running { speed, interval, next: now + interval }),
+            Pace::Unknown => None,
+        }
+    }
+
+    fn speed(self) -> wire::Speed {
+        match self {
+            Clock::Paused => wire::Speed::Paused,
+            Clock::Running { speed, .. } => speed,
+        }
+    }
+
+    /// When the next tick is due; `None` while paused.
+    fn due(self) -> Option<Instant> {
+        match self {
+            Clock::Paused => None,
+            Clock::Running { next, .. } => Some(next),
+        }
+    }
+
+    /// A tick ran at `now`: the next is one interval after the one that was due,
+    /// keeping the cadence, but never in the past after a slow tick.
+    fn ticked(&mut self, now: Instant) {
+        if let Clock::Running { interval, next, .. } = self {
+            *next = (*next + *interval).max(now);
+        }
     }
 }
 
@@ -54,11 +102,8 @@ struct Session {
     /// point in [`Sim::handle`] drops anything else, so no request handler has to
     /// remember to check (a rejected session's queued requests never act).
     seat: Option<Seat>,
-    /// Days of the `DayUpdate`s sent and not yet acknowledged, oldest first.
-    in_flight: VecDeque<u64>,
-    /// Days that ran since this session's last update, the current day included.
-    /// The next update reports all but the current day as `skipped`.
-    days_since_update: u32,
+    /// Which days' updates it is sent (D23 flow control).
+    window: UpdateWindow,
 }
 
 /// Who a welcomed session plays.
@@ -99,9 +144,8 @@ pub(crate) struct Sim {
     active: Option<u64>,
     /// Stop when the welcomed session leaves (the client launched this server).
     exit_when_idle: bool,
-    speed: wire::Speed,
-    /// When the next tick is due; `None` while paused.
-    next_tick: Option<Instant>,
+    /// The speed and the next tick. Only [`Sim::set_clock`] changes the speed.
+    clock: Clock,
     /// Commands accepted for the next tick, each stamped `(player, sequence)` on
     /// arrival. `tick` applies them sorted by that stamp (D10's `(day, player,
     /// sequence)`; all of them are for the same day).
@@ -120,8 +164,7 @@ impl Sim {
             sessions: BTreeMap::new(),
             active: None,
             exit_when_idle,
-            speed: wire::Speed::Paused,
-            next_tick: None,
+            clock: Clock::Paused,
             pending: Vec::new(),
             next_sequence: 0,
             log: Vec::new(),
@@ -175,7 +218,7 @@ impl Sim {
             nation: requested_nation,
             scenario: &self.game.scenario().name,
             content_hash: self.game.scenario().content_hash,
-            speed: self.speed,
+            speed: self.clock.speed(),
         };
         self.send(session, Outbound::Frame(encode::welcome(self.game.world(), &info)));
     }
@@ -190,7 +233,7 @@ impl Sim {
         };
         let Some(s) = self.sessions.get_mut(&session) else { return };
         s.subscription = subscription;
-        s.conn.send(Outbound::Frame(view::day_update(&self.game.views(), &subscription, self.speed, 0)));
+        s.conn.send(Outbound::Frame(view::day_update(&self.game.views(), &subscription, self.clock.speed(), 0)));
     }
 
     fn command_result(&self, session: u64, client_seq: u32, error: wire::CommandError) {
@@ -218,23 +261,34 @@ impl Sim {
         if let Err(e) = self.game.world().validate(command) {
             return self.command_result(session, client_seq, commands::error_to_wire(&e));
         }
-        let sequence = self.next_sequence;
-        self.next_sequence += 1;
-        self.pending.push(Pending { session, player: seat.player, sequence, client_seq, command });
+        self.stamp(session, seat.player, client_seq, command);
         self.command_result(session, client_seq, wire::CommandError::None);
     }
 
-    /// Changes the speed and tells every welcomed session (`ServerState`). The next
-    /// tick is one interval from now, so unpausing never fires a burst of catch-up ticks.
+    /// Stamps an accepted command `(player, sequence)` on arrival (D10, D22) and
+    /// queues it for the next tick.
+    fn stamp(&mut self, session: u64, player: u16, client_seq: u32, command: Command) {
+        let sequence = self.next_sequence;
+        self.next_sequence += 1;
+        self.pending.push(Pending { session, player, sequence, client_seq, command });
+    }
+
+    /// A session asked for a new speed. An unknown speed is a protocol error.
     fn set_speed(&mut self, session: u64, speed: wire::Speed) {
         let Some(seat) = self.sessions.get(&session).and_then(|s| s.seat) else { return };
-        if speed != wire::Speed::Paused && tick_interval(speed).is_none() {
-            return self.goodbye(session, &format!("unknown speed {}", speed.0));
+        match Clock::at(speed, Instant::now()) {
+            Some(clock) => self.set_clock(clock, seat.player),
+            None => self.goodbye(session, &format!("unknown speed {}", speed.0)),
         }
-        self.speed = speed;
-        self.next_tick = tick_interval(speed).map(|interval| Instant::now() + interval);
+    }
+
+    /// The only place the speed changes: sets the clock and tells every welcomed
+    /// session (`ServerState`, D23).
+    fn set_clock(&mut self, clock: Clock, changed_by: u16) {
+        self.clock = clock;
+        let speed = clock.speed();
         info!(?speed, "speed changed");
-        let frame = encode::server_state(self.game.world().day, speed, seat.player);
+        let frame = encode::server_state(self.game.world().day, speed, changed_by);
         for (&id, s) in &self.sessions {
             if s.seat.is_some() {
                 self.send(id, Outbound::Frame(frame.clone()));
@@ -246,11 +300,8 @@ impl Sim {
     /// window. If days ran while the window was full, the latest day goes out now.
     fn ack(&mut self, session: u64, day: u64) {
         let Some(s) = self.sessions.get_mut(&session) else { return };
-        while s.in_flight.front().is_some_and(|&d| d <= day) {
-            s.in_flight.pop_front();
-        }
-        if s.days_since_update > 0 && s.in_flight.len() < UPDATE_WINDOW {
-            send_update(s, &self.game.views(), self.speed);
+        if s.window.ack(day) {
+            send_update(s, &self.game.views(), self.clock.speed());
         }
     }
 
@@ -292,8 +343,7 @@ impl Sim {
             if s.seat.is_none() {
                 continue;
             }
-            s.days_since_update += 1;
-            if s.in_flight.len() < UPDATE_WINDOW {
+            if s.window.day_ran() {
                 due.push(id);
             }
         }
@@ -302,7 +352,7 @@ impl Sim {
             let views = self.game.views();
             for id in due {
                 if let Some(s) = self.sessions.get_mut(&id) {
-                    send_update(s, &views, self.speed);
+                    send_update(s, &views, self.clock.speed());
                 }
             }
         }
@@ -322,8 +372,7 @@ impl Sim {
                     conn,
                     subscription: CheckedSubscription::default(),
                     seat: None,
-                    in_flight: VecDeque::new(),
-                    days_since_update: 0,
+                    window: UpdateWindow::default(),
                 };
                 self.sessions.insert(session, session_state);
             }
@@ -344,12 +393,12 @@ impl Sim {
                 other => debug!(session, ?other, "not handled until M3-6"),
             },
             Inbound::Closed { session } => {
-                self.sessions.remove(&session);
+                let seat = self.sessions.remove(&session).and_then(|s| s.seat);
                 if self.active == Some(session) {
                     self.active = None;
                     // Nobody is watching: stop the clock (D23 never runs a game unobserved).
-                    self.speed = wire::Speed::Paused;
-                    self.next_tick = None;
+                    let player = seat.map_or(0, |s| s.player);
+                    self.set_clock(Clock::Paused, player);
                     if self.exit_when_idle {
                         info!("the client left; exiting (--exit-when-idle)");
                         return false;
@@ -376,13 +425,9 @@ impl Sim {
 }
 
 /// Sends `s` an update for the current day and puts it in the session's window.
-/// `skipped` counts the days that ran since its last update, apart from the current one,
-/// which this update shows: `days_since_update - 1`.
 fn send_update(s: &mut Session, views: &DayViews<'_>, speed: wire::Speed) {
-    let frame = view::day_update(views, &s.subscription, speed, s.days_since_update.saturating_sub(1));
-    s.in_flight.push_back(views.world.day);
-    s.days_since_update = 0;
-    s.conn.send(Outbound::Frame(frame));
+    let skipped = s.window.sent(views.world.day);
+    s.conn.send(Outbound::Frame(view::day_update(views, &s.subscription, speed, skipped)));
 }
 
 /// The sim thread's loop: handle everything already waiting, tick if due, otherwise
@@ -394,12 +439,10 @@ pub(crate) fn run(sim: &mut Sim, inbound: Receiver<Inbound>) {
             Ok(event) => event,
             Err(TryRecvError::Disconnected) => break,
             // Nothing waiting: tick if due, otherwise sleep until an event or the tick.
-            Err(TryRecvError::Empty) => match sim.next_tick {
+            Err(TryRecvError::Empty) => match sim.clock.due() {
                 Some(due) if Instant::now() >= due => {
                     sim.advance();
-                    // Keep the cadence, but never schedule in the past after a slow tick.
-                    let interval = tick_interval(sim.speed).unwrap_or_default();
-                    sim.next_tick = sim.next_tick.map(|_| (due + interval).max(Instant::now()));
+                    sim.clock.ticked(Instant::now());
                     continue;
                 }
                 Some(due) => match inbound.recv_deadline(due) {
@@ -580,13 +623,13 @@ mod tests {
     #[test]
     fn speed_changes_are_announced_and_schedule_ticks() {
         let (mut sim, mut rx) = welcomed(None);
-        assert_eq!(sim.next_tick, None, "a new game starts paused");
+        assert_eq!(sim.clock, Clock::Paused, "a new game starts paused");
         sim.handle(Inbound::Request { session: SESSION, request: Request::SetSpeed { speed: wire::Speed::Normal } });
         assert_eq!(drain(&mut rx), [Sent::State(wire::Speed::Normal)]);
-        assert!(sim.next_tick.is_some());
+        assert!(sim.clock.due().is_some());
         sim.handle(Inbound::Request { session: SESSION, request: Request::SetSpeed { speed: wire::Speed::Paused } });
         assert_eq!(drain(&mut rx), [Sent::State(wire::Speed::Paused)]);
-        assert_eq!(sim.next_tick, None);
+        assert_eq!(sim.clock, Clock::Paused);
         sim.handle(Inbound::Request { session: SESSION, request: Request::SetSpeed { speed: wire::Speed(9) } });
         assert!(matches!(drain(&mut rx).as_slice(), [Sent::Goodbye(r), Sent::Close] if r.contains("unknown speed")));
     }
@@ -596,7 +639,20 @@ mod tests {
         let (mut sim, _rx) = welcomed(None);
         sim.handle(Inbound::Request { session: SESSION, request: Request::SetSpeed { speed: wire::Speed::Fast } });
         sim.handle(Inbound::Closed { session: SESSION });
-        assert_eq!((sim.speed, sim.next_tick), (wire::Speed::Paused, None));
+        assert_eq!(sim.clock, Clock::Paused);
+    }
+
+    #[test]
+    fn the_clock_keeps_its_cadence_but_never_schedules_in_the_past() {
+        let start = Instant::now();
+        let mut clock = Clock::at(wire::Speed::Normal, start).expect("a known speed");
+        assert_eq!(clock.due(), Some(start + Duration::from_millis(500)));
+        clock.ticked(start + Duration::from_millis(600));
+        assert_eq!(clock.due(), Some(start + Duration::from_millis(1_000)), "a late tick keeps the cadence");
+        clock.ticked(start + Duration::from_millis(5_000));
+        assert_eq!(clock.due(), Some(start + Duration::from_millis(5_000)), "a slow tick never queues catch-up");
+        assert_eq!(Clock::at(wire::Speed(9), start), None);
+        assert_eq!(Clock::at(wire::Speed::Paused, start), Some(Clock::Paused));
     }
 
     /// D10: within a day, commands apply in `(player, sequence)` order, whatever
@@ -607,9 +663,7 @@ mod tests {
         let rate = |raw| Command::SetIncomeTax { nation: 0, rate: Fixed::from_raw(raw) };
         // Player 1's command arrives first; player 0's two follow.
         for (player, raw) in [(1, 100_000), (0, 110_000), (0, 120_000)] {
-            let sequence = sim.next_sequence;
-            sim.next_sequence += 1;
-            sim.pending.push(Pending { session: SESSION, player, sequence, client_seq: 0, command: rate(raw) });
+            sim.stamp(SESSION, player, 0, rate(raw));
         }
         sim.tick();
         let applied: Vec<_> = sim.log().iter().map(|l| (l.player, l.command)).collect();
