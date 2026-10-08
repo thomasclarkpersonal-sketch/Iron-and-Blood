@@ -13,9 +13,11 @@
 ##   --map-mode=N           start in map mode N (a PaxKeys.MAP_MODE_* value)
 ##   --tab=N                start on side-panel tab N (0 World, 1 Nation, 2 Market, 3 Province)
 ##   --select=N             select province N at start
+##   --open-saves           open the save/load menu at start
 ##   --screenshot=PATH      run to day 30, pause, save a screenshot and quit
 ##   --smoke                headless check: select a province, switch to the Price map, set a policy,
-##                          run to day 40, check the views and the policy, print SMOKE OK, quit
+##                          save, list and load at day 20, run to day 40, check the views, the
+##                          policy and the reload, print SMOKE OK, quit
 extends Control
 
 const PaxKeys := preload("res://pax_keys.gd")
@@ -29,6 +31,8 @@ const MapColors := preload("res://ui/map_colors.gd")
 const NationPanel := preload("res://ui/nation_panel.gd")
 const MarketPanel := preload("res://ui/market_panel.gd")
 const ProvincePanel := preload("res://ui/province_panel.gd")
+const SaveMenu := preload("res://ui/save_menu.gd")
+const LostScreen := preload("res://ui/lost_screen.gd")
 
 const SMOKE_DAYS := 40
 const SCREENSHOT_DAYS := 30
@@ -50,8 +54,18 @@ var map_view: MapView
 var map_modes: MapModes
 var province_info: Label
 var overlay: DebugOverlay
-var lost: Label
+var save_menu: SaveMenu
+var lost: LostScreen
 
+## Whether this connection has had its first Welcome (a later one is a load).
+var _session_started := false
+## The smoke test's save-and-load round trip: 0 not begun, 1 saving, 2 listing,
+## 3 loading, 4 reloaded.
+var _smoke_stage := 0
+const SMOKE_SAVE := "smoke"
+const SMOKE_SAVE_DAY := 20
+## The day the smoke test's load returned to: the final check needs days after it.
+var _smoke_reload_day := 0
 ## The policy the smoke test sets (income tax of nation 0), in per mille.
 const SMOKE_TAX_PER_MILLE := 123
 ## The smoke test's command, once accepted: its `client_seq`.
@@ -86,7 +100,12 @@ func _unhandled_input(event: InputEvent) -> void:
 func _start() -> void:
 	start_screen.visible = false
 	game.visible = true
+	lost.visible = false
 	_started_ms = Time.get_ticks_msec()
+	_session_started = false
+	welcome = {}
+	last_update = {}
+	selected_province = null
 	client = PaxClient.new()
 	var error := client.launch(_server_path(), _scenario_dir(), OS.get_user_data_dir().path_join("saves"))
 	if error != "":
@@ -101,7 +120,14 @@ func _start() -> void:
 func _handle(event: Dictionary) -> void:
 	match event[PaxKeys.TYPE]:
 		PaxKeys.WELCOME:
+			var reload := _session_started
+			_session_started = true
 			welcome = event
+			if reload:
+				# A load replaced the game (D23): its tables may differ, so start afresh.
+				selected_province = null
+				map_view.set_selected(null)
+				save_menu.visible = false
 			top_bar.set_session(welcome)
 			summary.set_session(welcome)
 			nation_panel.set_session(welcome)
@@ -112,12 +138,19 @@ func _handle(event: Dictionary) -> void:
 			var select := _arg("--select=")
 			if select.is_valid_int():
 				_select_province(int(select))
-			if _flag("--smoke"):
+			if reload and _flag("--smoke"):
+				_smoke_stage = 4
+				_smoke_reload_day = welcome[PaxKeys.DAY]
+				_select_province(0)
+				map_modes.select(PaxKeys.MAP_MODE_PRICE)
+			elif _flag("--smoke"):
 				# Exercise the subscription path: a province panel and a value map mode.
 				_select_province(0)
 				map_modes.select(PaxKeys.MAP_MODE_PRICE)
 				_smoke_command = client.submit_policy(PaxKeys.POLICY_INCOME_TAX, 0,
 					PaxClient.rate_from_per_mille(SMOKE_TAX_PER_MILLE))
+			if _flag("--open-saves") and not reload:
+				save_menu.open()
 			if _flag("--smoke") or _arg("--screenshot=") != "":
 				client.set_speed(PaxKeys.SPEED_FASTEST)
 		PaxKeys.DAY_UPDATE:
@@ -136,13 +169,30 @@ func _handle(event: Dictionary) -> void:
 				_finish(1, "SMOKE FAILED: the policy command was refused: %s" % event)
 		PaxKeys.SERVER_STATE:
 			top_bar.show_speed(event[PaxKeys.SPEED])
+		PaxKeys.SAVE_LIST:
+			save_menu.show_list(event[PaxKeys.NAMES])
+			if _smoke_stage == 2 and SMOKE_SAVE in event[PaxKeys.NAMES]:
+				_smoke_stage = 3
+				client.load_game(SMOKE_SAVE)
+		PaxKeys.SAVE_RESULT:
+			save_menu.show_result(event)
+			if _smoke_stage == 1 and event[PaxKeys.NAME] == SMOKE_SAVE:
+				if event[PaxKeys.ERROR] != "":
+					_finish(1, "SMOKE FAILED: save: %s" % event[PaxKeys.ERROR])
+				_smoke_stage = 2
+				client.list_saves()
+			elif _smoke_stage == 3:
+				_finish(1, "SMOKE FAILED: load: %s" % event[PaxKeys.ERROR])
 		PaxKeys.CLOSED:
 			_connection_lost(event[PaxKeys.REASON])
 
 
 ## The --smoke and --screenshot runs: stop once the game has run long enough.
 func _check_scripted_runs(day: int) -> void:
-	if _flag("--smoke") and day >= SMOKE_DAYS:
+	if _flag("--smoke") and _smoke_stage == 0 and day >= SMOKE_SAVE_DAY:
+		_smoke_stage = 1
+		client.save_game(SMOKE_SAVE)
+	if _flag("--smoke") and _smoke_stage == 4 and day >= maxi(SMOKE_DAYS, _smoke_reload_day + 5):
 		var map = last_update[PaxKeys.MAP]
 		var province = last_update[PaxKeys.PROVINCE]
 		if map == null or map[PaxKeys.MODE] != PaxKeys.MAP_MODE_PRICE or province == null or province[PaxKeys.PROVINCE_ID] != 0:
@@ -152,7 +202,7 @@ func _check_scripted_runs(day: int) -> void:
 		if _smoke_command == null or tax != PaxClient.rate_from_per_mille(SMOKE_TAX_PER_MILLE):
 			_finish(1, "SMOKE FAILED: the income tax policy didn't apply (rate %d)" % tax)
 			return
-		print("SMOKE OK: day %d, state %s, %s, price map, province panel and a policy" % [
+		print("SMOKE OK: day %d, state %s, %s, price map, province panel, a policy, save and load" % [
 			day, Format.hash_hex(last_update[PaxKeys.STATE_HASH]), welcome[PaxKeys.SCENARIO]])
 		_finish(0, "")
 	var shot := _arg("--screenshot=")
@@ -238,10 +288,22 @@ func _select_province(province: int) -> void:
 
 
 func _connection_lost(reason: String) -> void:
-	lost.text = "Connection lost: %s" % reason
-	lost.visible = true
-	if _flag("--smoke") or _arg("--screenshot=") != "":
+	lost.show_reason(reason)
+	save_menu.visible = false
+	var shot := _arg("--screenshot=")
+	if shot != "" and not _finishing:
+		# Show what the player would see, then fail the run.
+		_finishing = true
+		await RenderingServer.frame_post_draw
+		get_viewport().get_texture().get_image().save_png(shot)
+		print("SCREENSHOT %s" % shot)
+	if _flag("--smoke") or shot != "":
 		_finish(1, "FAILED: connection lost: %s" % reason)
+
+
+## `error` if there is one, else `ok`.
+func _or_ok(error: String, ok: String) -> String:
+	return error if error != "" else ok
 
 
 func _finish(code: int, message: String) -> void:
@@ -281,6 +343,7 @@ func _build_ui() -> void:
 	game.visible = false
 	top_bar = TopBar.new()
 	top_bar.speed_requested.connect(func(speed: int) -> void: client.set_speed(speed))
+	top_bar.saves_requested.connect(func() -> void: save_menu.open())
 	game.add_child(top_bar)
 	var body := HBoxContainer.new()
 	body.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -336,10 +399,20 @@ func _build_ui() -> void:
 	# Hidden until F3, except in screenshots, which show what a bug report needs.
 	overlay.visible = _arg("--screenshot=") != ""
 
-	lost = Label.new()
-	lost.set_anchors_preset(Control.PRESET_CENTER)
-	lost.add_theme_color_override("font_color", Color(1, 0.4, 0.4))
-	lost.visible = false
+	save_menu = SaveMenu.new()
+	save_menu.refresh_requested.connect(func() -> void: client.list_saves())
+	save_menu.save_requested.connect(func(name: String) -> void:
+		save_menu.show_status(_or_ok(client.save_game(name), "Saving…")))
+	save_menu.load_requested.connect(func(name: String) -> void:
+		save_menu.show_status(_or_ok(client.load_game(name), "Loading…")))
+	add_child(save_menu)
+	save_menu.set_anchors_and_offsets_preset(Control.PRESET_CENTER, Control.PRESET_MODE_MINSIZE)
+
+	lost = LostScreen.new()
+	lost.restart_requested.connect(func() -> void:
+		if client != null:
+			client.disconnect_from_server()
+		_start())
 	add_child(lost)
 
 
