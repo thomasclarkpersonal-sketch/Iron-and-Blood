@@ -11,7 +11,7 @@
 ##   --server=PATH          pax_server binary (default: ../target/debug/pax_server)
 ##   --nation=N             play nation N (default: sandbox)
 ##   --map-mode=N           start in map mode N (a PaxKeys.MAP_MODE_* value)
-##   --tab=N                start on side-panel tab N (0 World, 1 Nation, 2 Market, 3 Province)
+##   --tab=NAME             start on a side-panel tab: World, Nation, Market or Province
 ##   --select=N             select province N at start
 ##   --open-saves           open the save/load menu at start
 ##   --screenshot=PATH      run to day 30, pause, save a screenshot and quit
@@ -283,8 +283,9 @@ func _select_province(province: int) -> void:
 	selected_province = province
 	map_view.set_selected(province)
 	_subscribe()
-	if tabs.current_tab == 0:
-		tabs.current_tab = 3 # the province panel
+	# From the world summary, a selection opens the province's own panel.
+	if tabs.get_current_tab_control() == summary:
+		tabs.current_tab = tabs.get_tab_idx_from_control(tabs.get_node("Province"))
 
 
 func _connection_lost(reason: String) -> void:
@@ -382,9 +383,12 @@ func _build_ui() -> void:
 	province_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	province_scroll.add_child(province_panel)
 	tabs.add_child(province_scroll)
+	# --tab names a tab (its node name), so adding or reordering tabs can't make it stale.
 	var tab := _arg("--tab=")
-	if tab.is_valid_int():
-		tabs.current_tab = int(tab)
+	if tab != "":
+		var page := tabs.get_node_or_null(tab) as Control
+		if page != null:
+			tabs.current_tab = tabs.get_tab_idx_from_control(page)
 	body.add_child(tabs)
 	game.add_child(body)
 	add_child(game)

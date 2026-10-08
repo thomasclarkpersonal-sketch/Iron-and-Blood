@@ -22,7 +22,7 @@ Command-line options go after `--`:
 | `--server=PATH` | `pax_server` binary (default `../target/debug/pax_server`, or `$PAX_SERVER`) |
 | `--nation=N` | Play nation `N` (default: sandbox) |
 | `--map-mode=N` | Start in map mode `N` (a `PaxKeys.MAP_MODE_*` value) |
-| `--tab=N` | Start on side-panel tab `N` (0 World, 1 Nation, 2 Market, 3 Province) |
+| `--tab=NAME` | Start on a side-panel tab: `World`, `Nation`, `Market` or `Province` |
 | `--select=N` | Select province `N` at start |
 | `--open-saves` | Open the save/load menu at start |
 | `--screenshot=PATH` | Run to day 30, save a screenshot with the debug overlay, quit (or, if the connection is lost, screenshot the connection-lost screen and fail) |

@@ -18,20 +18,20 @@ func _init() -> void:
 	_title = Label.new()
 	_title.text = "Select a province on the map."
 	add_child(_title)
-	for heading in ["People", "Labour", "Producers"]:
-		var l := Label.new()
-		l.text = heading
-		l.add_theme_font_size_override("font_size", 18)
-		add_child(l)
-		var t := Table.new()
-		add_child(t)
-		match heading:
-			"People":
-				_pops = t
-			"Labour":
-				_labour = t
-			_:
-				_producers = t
+	_pops = _section("People")
+	_labour = _section("Labour")
+	_producers = _section("Producers")
+
+
+## A heading and the table under it.
+func _section(heading: String) -> Table:
+	var l := Label.new()
+	l.text = heading
+	l.add_theme_font_size_override("font_size", 18)
+	add_child(l)
+	var t := Table.new()
+	add_child(t)
+	return t
 
 
 func set_session(welcome: Dictionary) -> void:
@@ -66,5 +66,5 @@ func show_update(update: Dictionary) -> void:
 	for i in producers[PaxKeys.PRODUCER_TYPE].size():
 		rows.append([types[producers[PaxKeys.PRODUCER_TYPE][i]].capitalize(),
 			"%d / %d" % [producers[PaxKeys.EMPLOYED][i], producers[PaxKeys.CAPACITY][i]],
-			"%.2f" % producers[PaxKeys.WAGE][i], Format.money(producers[PaxKeys.CASH][i])])
+			Format.price(producers[PaxKeys.WAGE][i]), Format.money(producers[PaxKeys.CASH][i])])
 	_producers.fill(["Producer", "Employed", "Wage", "Cash"], rows)

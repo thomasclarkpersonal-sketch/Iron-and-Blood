@@ -3,6 +3,7 @@
 extends VBoxContainer
 
 const PaxKeys := preload("res://pax_keys.gd")
+const Format := preload("res://ui/format.gd")
 const Table := preload("res://ui/table.gd")
 
 var _title: Label
@@ -31,6 +32,6 @@ func show_update(update: Dictionary) -> void:
 	_title.text = "Market: %s" % _markets[m[PaxKeys.MARKET_ID]].capitalize()
 	var rows := []
 	for g in _goods.size():
-		rows.append([_goods[g].capitalize(), "%.3f" % m[PaxKeys.PRICE][g], "%.1f" % m[PaxKeys.SUPPLY][g],
-			"%.1f" % m[PaxKeys.DEMAND][g], "%.1f" % m[PaxKeys.TRADED][g]])
+		rows.append([_goods[g].capitalize(), Format.price(m[PaxKeys.PRICE][g]), Format.amount(m[PaxKeys.SUPPLY][g]),
+			Format.amount(m[PaxKeys.DEMAND][g]), Format.amount(m[PaxKeys.TRADED][g])])
 	_table.fill(["Good", "Price", "Supply", "Demand", "Traded"], rows)
