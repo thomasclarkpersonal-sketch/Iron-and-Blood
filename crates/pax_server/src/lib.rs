@@ -67,8 +67,9 @@ pub struct Config {
     pub sandbox: bool,
     /// On a dedicated server, the client name of the host (`--admin NAME`, D24). When
     /// unset, the first player is host, and when the host leaves, the remaining
-    /// player with the lowest id. A name is only as trustworthy as the connection
-    /// until M4-6 adds TLS and a server password.
+    /// player with the lowest id. The name is what the client asserts, so anyone
+    /// who can connect can claim it while the admin is away: until M4-6's server
+    /// password authenticates the admin, multiplayer binds loopback only (`main.rs`).
     pub admin: Option<String>,
     /// Where `SaveGame` writes and `LoadGame` reads `<name>.toml` (D23).
     pub saves_dir: PathBuf,

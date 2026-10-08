@@ -450,7 +450,7 @@ The state → national → sphere → global roll-up in the old ECONOMY_SYSTEM w
 - **Permissions:** each session commands at most one nation, claimed in the lobby. The server checks a command's nation against the session's before `World::validate`; a mismatch gets `NotPermitted`. Permission (here) and rule validity (D21) are separate checks, in that order. Sandbox sessions exist only with `--sandbox`.
 - **Host:** only the host changes speed, unpauses, saves, loads and kicks. Any player may pause.
   - The host is the first player on a player-hosted server. When the host leaves, the remaining player with the lowest id becomes host, so a game is never left without anyone able to unpause it (M4-3).
-  - On a dedicated server, `--admin NAME` names the host's client instead. While the admin is away there is no host, and the role never passes to another player.
+  - On a dedicated server, `--admin NAME` names the host's client instead. While the admin is away there is no host, and the role never passes to another player. The name is only what the client says it is, so until M4-6's server password authenticates the admin, a multiplayer server binds loopback only.
   - A refused speed change is answered with the unchanged `ServerState`, and a refused save or load with a `SaveResult` error. A refused kick is ignored.
 - **Order:** commands apply in `(day, player, sequence)` order, all server-stamped. Any future command that can conflict with another player's must define its own conflict rule in its decision. Player order is only a deterministic tie-break, and would otherwise always favour lower ids.
 - **Lag, in wall-clock time:**

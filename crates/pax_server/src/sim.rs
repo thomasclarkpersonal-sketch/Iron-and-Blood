@@ -30,7 +30,7 @@ use crate::game::Game;
 use crate::net::{Inbound, Outbound};
 use crate::queue::CommandQueue;
 use crate::request::{Request, WireCommand};
-use crate::session::{Refusal, Seat, Session, SessionTable};
+use crate::session::{Refusal, Seat, Session, SessionTable, Vacated};
 use crate::view::{self, CheckedSubscription, DayViews, Subscription};
 use crate::window::UpdateWindow;
 
@@ -49,6 +49,9 @@ pub(crate) struct Sim {
     admin: Option<String>,
     /// Stop when the last player leaves (the client launched this server).
     exit_when_idle: bool,
+    /// Set when the server should stop; [`Sim::handle`] returns it. A flag rather
+    /// than a return value, so no path that ends a seat can drop it.
+    stop: bool,
     /// The speed and the next tick. [`Sim::set_clock`] changes the speed and announces
     /// it; the one exception is a load, whose new `Welcome` carries the speed.
     clock: Clock,
@@ -62,11 +65,13 @@ impl Sim {
             game: Game::new(scenario),
             scenario_dir: config.scenario.clone(),
             saves_dir: config.saves_dir.clone(),
-            sessions: SessionTable::default(),
+            // D24: the host role passes on unless an admin holds it (dedicated server).
+            sessions: SessionTable::new(config.admin.is_none()),
             max_players: usize::from(config.max_players),
             sandbox: config.sandbox,
             admin: config.admin.clone(),
             exit_when_idle: config.exit_when_idle,
+            stop: false,
             clock: Clock::Paused,
             queue: CommandQueue::default(),
         }
@@ -332,10 +337,10 @@ impl Sim {
             // A seat is never widened: a player whose nation the loaded game lacks
             // leaves, rather than becoming a sandbox seat that commands every nation.
             if let Some(n) = seat.nation.filter(|&n| n as usize >= nations) {
-                let was_host = self.sessions.is_host(id);
                 self.goodbye(id, &format!("the loaded game has no nation {n}, which you played"));
-                self.sessions.unseat(id);
-                self.player_left(id, seat, was_host);
+                if let Some(v) = self.sessions.unseat(id) {
+                    self.seat_ended(id, v);
+                }
                 continue;
             }
             let Some(s) = self.sessions.get_mut(id) else { continue };
@@ -355,33 +360,28 @@ impl Sim {
         info!(session, target, player, "kicked by the host");
         self.goodbye(target, "kicked by the host");
         // Unseated now, so whatever it still sends is dropped; its row goes when its
-        // connection closes. The host stays, so the game goes on.
-        if let Some(seat) = self.sessions.unseat(target) {
-            self.player_left(target, seat, false);
+        // connection closes.
+        if let Some(v) = self.sessions.unseat(target) {
+            self.seat_ended(target, v);
         }
     }
 
-    /// A player stopped playing: left, or was kicked. When the host leaves a
-    /// player-hosted server, the remaining player with the lowest id becomes host;
-    /// on a dedicated server, the host's role waits for the admin to return (D24).
-    /// When the last player leaves, nobody is watching, so the clock stops (D23).
-    /// Returns `false` when the server should stop.
-    fn player_left(&mut self, session: u64, seat: Seat, was_host: bool) -> bool {
-        if self.sessions.players() == 0 {
-            info!(session, player = seat.player, "the last player left");
-            self.set_clock(Clock::Paused, seat.player);
-            if self.exit_when_idle {
-                info!("the client left; exiting (--exit-when-idle)");
-                return false;
-            }
-        } else if was_host
-            && self.admin.is_none()
-            && let Some(next) = self.sessions.lowest_player()
-        {
-            self.sessions.set_host(next);
+    /// A player's seat ended: they left, were kicked, or a load dropped them. The
+    /// table has already passed the host role on (D24). When the last player
+    /// leaves, nobody is watching, so the clock stops (D23), and a server the
+    /// client launched stops too. Every path that ends a seat comes through here.
+    fn seat_ended(&mut self, session: u64, v: Vacated) {
+        if let Some(next) = v.new_host {
             info!(session = next, "the host left; the host is now this session");
         }
-        true
+        if v.last {
+            info!(session, player = v.seat.player, "the last player left");
+            self.set_clock(Clock::Paused, v.seat.player);
+            if self.exit_when_idle {
+                info!("the client left; exiting (--exit-when-idle)");
+                self.stop = true;
+            }
+        }
     }
 
     fn welcome(&self, session: u64, seat: Seat) {
@@ -434,17 +434,16 @@ impl Sim {
                 Request::Hello { .. } | Request::Ping { .. } => {}
             },
             Inbound::Closed { session } => {
-                let was_host = self.sessions.is_host(session);
-                // The others play on (D24); see `player_left`.
-                if let Some(seat) = self.sessions.remove(session).and_then(|s| s.seat()) {
-                    return self.player_left(session, seat, was_host);
+                // The others play on (D24); see `seat_ended`.
+                if let Some(v) = self.sessions.remove(session) {
+                    self.seat_ended(session, v);
                 }
             }
-            Inbound::Shutdown => return false,
+            Inbound::Shutdown => self.stop = true,
             #[cfg(test)]
             Inbound::Crash => panic!("injected crash for a test"),
         }
-        true
+        !self.stop
     }
 }
 
@@ -877,7 +876,9 @@ mod tests {
     #[test]
     fn an_admin_name_makes_that_player_the_host() {
         let (mut sim, _saves) = multiplayer(2);
+        // As `Sim::new` sets them for `--admin ada`.
         sim.admin = Some("ada".into());
+        sim.sessions = SessionTable::new(false);
         let (_a, _) = join(&mut sim, 1, Some(0));
         assert_eq!(sim.sessions.host(), None, "the first player isn't host on a dedicated server");
         let (conn, mut rx) = ConnHandle::for_test();
@@ -938,7 +939,11 @@ mod tests {
         other.handle(Inbound::Request { session: 1, request: Request::SaveGame { name: Some("mv".into()) } });
         assert!(matches!(drain(&mut o).as_slice(), [Sent::Saved { error, .. }] if error.is_empty()));
 
-        sim.handle(Inbound::Request { session: 1, request: Request::LoadGame { name: Some("mv".into()) } });
+        // The game had nobody left, so a server the client launched would stop (D23).
+        sim.exit_when_idle = true;
+        let keep_running =
+            sim.handle(Inbound::Request { session: 1, request: Request::LoadGame { name: Some("mv".into()) } });
+        assert!(!keep_running, "the load ended every seat: the server stops");
         for (rx, n) in [(&mut a, 0), (&mut b, 1)] {
             match drain(rx).as_slice() {
                 [Sent::Goodbye(reason), Sent::Close] => assert!(reason.contains(&format!("no nation {n}")), "{reason}"),

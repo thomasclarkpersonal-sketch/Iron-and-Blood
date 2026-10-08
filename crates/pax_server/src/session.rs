@@ -6,9 +6,12 @@
 //! nation). Rows hold no references into the `World`; the sim thread reads both side
 //! by side.
 //!
-//! The table is the only writer of seats ([`SessionTable::sit`], [`SessionTable::unseat`]),
-//! so its invariants hold whoever seats a player: player ids are distinct, a nation
-//! has at most one player (D24), and no more than the server's limit play at once. Rows are keyed by the connection's session id in a `BTreeMap`, so
+//! The table is the only writer of seats and of the host role, so its invariants hold
+//! whoever seats or unseats a player: player ids are distinct, a nation has at most
+//! one player (D24), no more than the server's limit play at once, and the host
+//! passes on by D24's rule whenever the host's seat ends. A seat starts only in
+//! [`SessionTable::sit`] and ends only in [`SessionTable::remove`] or
+//! [`SessionTable::unseat`], which return a [`Vacated`] the caller must handle. Rows are keyed by the connection's session id in a `BTreeMap`, so
 //! iteration (broadcasts, a load's new `Welcome`s) is in session order, never in hash
 //! order.
 
@@ -30,12 +33,6 @@ pub(crate) struct Session {
     pub window: UpdateWindow,
 }
 
-impl Session {
-    pub(crate) fn seat(&self) -> Option<Seat> {
-        self.seat
-    }
-}
-
 /// Why [`SessionTable::sit`] refused a seat.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Refusal {
@@ -43,6 +40,18 @@ pub(crate) enum Refusal {
     Full,
     /// Another player holds the nation (D24).
     NationTaken { player: u16 },
+}
+
+/// What ending a seat changed. The caller must act on it (D23: when the last player
+/// leaves, the clock stops), so it can't be dropped by accident.
+#[must_use = "ending a seat may have ended the game for everyone (D23)"]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Vacated {
+    pub seat: Seat,
+    /// The session that became host because this one was (D24), if any.
+    pub new_host: Option<u64>,
+    /// Nobody plays any more.
+    pub last: bool,
 }
 
 /// Who a welcomed session plays.
@@ -55,15 +64,23 @@ pub(crate) struct Seat {
     pub nation: Option<u32>,
 }
 
-#[derive(Default)]
 pub(crate) struct SessionTable {
     rows: BTreeMap<u64, Session>,
     /// The session that sets the speed, saves, loads and kicks (D24). Always a
     /// welcomed session, or `None`.
     host: Option<u64>,
+    /// D24's succession rule: on a player-hosted server, when the host's seat ends,
+    /// the remaining player with the lowest id becomes host. A dedicated server
+    /// (`--admin`) keeps the role for its admin instead.
+    host_passes: bool,
 }
 
 impl SessionTable {
+    /// An empty table. `host_passes`: D24's succession rule applies (player-hosted).
+    pub(crate) fn new(host_passes: bool) -> Self {
+        SessionTable { rows: BTreeMap::new(), host: None, host_passes }
+    }
+
     /// A new connection, not yet welcomed.
     pub(crate) fn connect(&mut self, id: u64, conn: ConnHandle) {
         let row =
@@ -71,12 +88,32 @@ impl SessionTable {
         self.rows.insert(id, row);
     }
 
-    /// Removes a row. If it was the host, nobody is host until [`Self::set_host`].
-    pub(crate) fn remove(&mut self, id: u64) -> Option<Session> {
+    /// Removes a closed connection's row. If it was playing, its seat ends: see
+    /// [`Vacated`].
+    pub(crate) fn remove(&mut self, id: u64) -> Option<Vacated> {
+        let seat = self.rows.remove(&id)?.seat?;
+        Some(self.vacated(id, seat))
+    }
+
+    /// Ends the session's seat while its connection is still open (a kick, a load
+    /// without its nation): it no longer plays, and the admission choke point drops
+    /// whatever it still sends. Its row stays until its connection closes.
+    pub(crate) fn unseat(&mut self, id: u64) -> Option<Vacated> {
+        let seat = self.rows.get_mut(&id)?.seat.take()?;
+        Some(self.vacated(id, seat))
+    }
+
+    /// After a seat ended: the host role passes on by D24's rule.
+    fn vacated(&mut self, id: u64, seat: Seat) -> Vacated {
+        let mut new_host = None;
         if self.host == Some(id) {
             self.host = None;
+            if self.host_passes {
+                new_host = self.lowest_player();
+                self.host = new_host;
+            }
         }
-        self.rows.remove(&id)
+        Vacated { seat, new_host, last: self.players() == 0 }
     }
 
     pub(crate) fn host(&self) -> Option<u64> {
@@ -87,7 +124,7 @@ impl SessionTable {
         self.host == Some(id)
     }
 
-    /// Makes a welcomed session the host.
+    /// Makes a welcomed session the host: the first player, or the admin (D24).
     pub(crate) fn set_host(&mut self, id: u64) {
         debug_assert!(self.seat(id).is_some(), "only a welcomed session can be host");
         self.host = Some(id);
@@ -95,22 +132,13 @@ impl SessionTable {
 
     /// The welcomed session with the lowest player id: who becomes host when the
     /// host leaves a player-hosted server (D24).
-    pub(crate) fn lowest_player(&self) -> Option<u64> {
+    fn lowest_player(&self) -> Option<u64> {
         self.rows.iter().filter_map(|(&id, s)| s.seat.map(|seat| (seat.player, id))).min().map(|(_, id)| id)
     }
 
     /// The session holding player id `player`.
     pub(crate) fn session_of(&self, player: u16) -> Option<u64> {
         self.rows.iter().find(|(_, s)| s.seat.is_some_and(|seat| seat.player == player)).map(|(&id, _)| id)
-    }
-
-    /// Takes the session's seat: it no longer plays, and the admission choke point
-    /// drops whatever it still sends. Its row stays until its connection closes.
-    pub(crate) fn unseat(&mut self, id: u64) -> Option<Seat> {
-        if self.host == Some(id) {
-            self.host = None;
-        }
-        self.rows.get_mut(&id).and_then(|s| s.seat.take())
     }
 
     pub(crate) fn get_mut(&mut self, id: u64) -> Option<&mut Session> {
@@ -206,7 +234,7 @@ mod tests {
 
     #[test]
     fn player_ids_fill_the_lowest_gap() {
-        let mut t = SessionTable::default();
+        let mut t = SessionTable::new(true);
         assert_eq!(t.free_player(), 0);
         seated(&mut t, 1, 0, None);
         seated(&mut t, 2, 1, Some(0));
@@ -219,23 +247,30 @@ mod tests {
     }
 
     #[test]
-    fn the_host_is_cleared_when_it_leaves_or_is_unseated() {
-        let mut t = SessionTable::default();
+    fn ending_the_hosts_seat_passes_the_role_or_clears_it() {
+        let mut t = SessionTable::new(true);
         seated(&mut t, 9, 0, None);
         seated(&mut t, 5, 1, None);
-        t.set_host(5);
-        assert!(t.is_host(5));
-        assert_eq!(t.lowest_player(), Some(9), "player 0 is session 9");
-        t.remove(5);
+        seated(&mut t, 7, 2, None);
+        t.set_host(7);
+        let v = t.remove(7).unwrap();
+        assert_eq!((v.new_host, v.last, t.host()), (Some(9), false, Some(9)), "player 0 is session 9");
+        assert_eq!(t.unseat(5).map(|v| (v.new_host, v.last)), Some((None, false)), "not the host: no change");
+        assert_eq!(t.unseat(9).map(|v| (v.new_host, v.last)), Some((None, true)), "nobody left to pass it to");
+        assert_eq!((t.host(), t.unseat(9)), (None, None), "a seat ends once");
+
+        // A dedicated server keeps the role for its admin.
+        let mut t = SessionTable::new(false);
+        seated(&mut t, 1, 0, None);
+        seated(&mut t, 2, 1, None);
+        t.set_host(1);
+        assert_eq!(t.remove(1).map(|v| v.new_host), Some(None));
         assert_eq!(t.host(), None);
-        t.set_host(9);
-        assert_eq!(t.unseat(9).map(|s| s.player), Some(0));
-        assert_eq!((t.host(), t.players()), (None, 0));
     }
 
     #[test]
     fn sit_refuses_a_full_table_and_a_taken_nation() {
-        let mut t = SessionTable::default();
+        let mut t = SessionTable::new(true);
         seated(&mut t, 1, 0, Some(0));
         for id in [2, 3] {
             let (conn, _rx) = ConnHandle::for_test();
@@ -249,7 +284,7 @@ mod tests {
 
     #[test]
     fn a_nation_is_held_by_its_seat_and_sandbox_holds_none() {
-        let mut t = SessionTable::default();
+        let mut t = SessionTable::new(true);
         seated(&mut t, 1, 0, None);
         seated(&mut t, 2, 1, Some(1));
         let (conn, _rx) = ConnHandle::for_test();
