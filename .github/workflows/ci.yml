@@ -39,8 +39,20 @@ jobs:
             echo "::error::crates/pax_protocol/src/generated is out of date with schemas/. Run scripts/gen-protocol.sh and commit the result."
             exit 1
           fi
+      - name: Every crate applies the workspace lints
+        run: python3 scripts/check_lints.py
+      - name: Client crates never depend on the engine (D10, D12)
+        run: |
+          for crate in pax_protocol pax_godot; do
+            if cargo tree -p "$crate" -e normal --prefix none | grep -q '^pax_engine '; then
+              echo "::error::$crate depends on pax_engine. Clients must not be able to simulate (D10, D12)."
+              exit 1
+            fi
+          done
       - run: cargo fmt --all --check
       - run: cargo clippy --all-targets --release -- -D warnings
+      - name: Clippy the bridge's demo bindings (the M3-0 spike scene uses them)
+        run: cargo clippy -p pax_godot --features demo --all-targets --release -- -D warnings
       - name: Rustdoc (no broken links)
         run: cargo doc --no-deps
         env:

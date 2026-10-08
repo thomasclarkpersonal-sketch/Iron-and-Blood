@@ -239,6 +239,11 @@ All parsing lives in `pax_data`, so the format can change without touching the e
   - **A Rust GDExtension bridge** (`pax_godot`, using godot-rust/gdext) owns the connection. It reads and writes frames, verifies messages, checks the protocol version, converts `Fixed` for display, and turns map values into shader arrays.
   - The bridge depends on `pax_protocol` only, **never on `pax_engine`**, so the client cannot simulate (D10).
 - **Fallback: C# (Godot .NET)** with the official FlatBuffers C# library, if the M3-0 spike shows gdext can't do the job. gdext is pre-1.0 (0.5.x), so the spike is the risk gate.
+- **M3-0 spike: passed (2026-10-08), so the fallback isn't needed.**
+  - godot-rust **0.5.5** (`api-4-7`, pinned exactly) loads in **Godot 4.7.2**.
+  - The bridge decodes real `Welcome` and `DayUpdate` frames through `pax_protocol`.
+  - The province-ID shader draws a 300-province map coloured by the update's map values ([screenshot](images/m3-0-gdext-spike.png)).
+  - Like `pax_protocol`, the bridge *denies* rather than forbids `unsafe_code`, because godot-rust's entry point must be an `unsafe impl`. It allows `unsafe` in that one module only, and `scripts/check_lints.py` (CI) keeps both crates' copied lint tables equal to the workspace's apart from that exception.
 
 **Why GDExtension over C#.** The options considered:
 

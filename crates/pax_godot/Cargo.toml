@@ -1,0 +1,36 @@
+[package]
+name = "pax_godot"
+description = "Godot GDExtension bridge: owns the client's side of the wire protocol (D12, D22)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+# cdylib: the library Godot loads (client/pax_godot.gdextension). rlib: so tests can link it.
+crate-type = ["cdylib", "rlib"]
+
+# Depends on the protocol only, never on pax_engine: the client must not be able to
+# simulate (D10, D12). CI checks this with `cargo tree`.
+[features]
+# The M3-0 spike's demo data (PaxDemo), until pax_server sends real frames. Off in
+# release clients: build the spike with `cargo build -p pax_godot --features demo`.
+demo = []
+
+[dependencies]
+pax_protocol.workspace = true
+flatbuffers = "=24.3.25"
+# Pinned exactly: godot-rust is pre-1.0 and breaks between minor versions. api-4-7
+# builds against Godot 4.7's API, and the extension then loads in Godot 4.7 and later.
+godot = { version = "=0.5.5", features = ["api-4-7"] }
+
+# The workspace lints, except one. godot-rust's entry point must be an
+# `unsafe impl ExtensionLibrary`, and the workspace's `forbid(unsafe_code)` can't be
+# relaxed for one item. This crate denies it and allows it on that item only (src/lib.rs).
+# Keep in step with [workspace.lints] in the root Cargo.toml.
+[lints.rust]
+unsafe_code = "deny"
+
+[lints.clippy]
+float_arithmetic = "warn"

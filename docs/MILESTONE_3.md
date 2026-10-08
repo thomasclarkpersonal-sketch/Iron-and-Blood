@@ -54,7 +54,7 @@ flowchart LR
 
 | ID | Task | Depends on | Notes |
 |---|---|---|---|
-| M3-0 | **GDExtension spike** (D12): `crates/pax_godot` (gdext) decodes a real `Welcome` and `DayUpdate` from `pax_protocol` in Godot 4 and draws a coloured province map | M3-1 | Time-boxed. If gdext can't do it, switch D12 to the C# fallback before M3-8 |
+| M3-0 ✅ | **GDExtension spike** (D12): `crates/pax_godot` (gdext) decodes a real `Welcome` and `DayUpdate` from `pax_protocol` in Godot 4 and draws a coloured province map | M3-1 | **Passed**: Godot 4.7.2 + godot-rust 0.5.5; [screenshot](images/m3-0-gdext-spike.png). C# fallback not needed |
 | M3-1 ✅ | **`pax_protocol` crate:** schemas → generated Rust (flatc 24.3.25, checked in, CI drift check); frame reader/writer with size limits; round-trip tests for every message; size-budget test | — | M4-8's Docker image will use the checked-in generated code. Allow generated-code lints locally (`#[allow]` on the module), not workspace-wide |
 | M3-2 | **`pax_server` skeleton:** CLI (`--scenario`, `--bind`, `--port-file`, `--exit-when-idle`); sim thread + tokio network; `Hello`/`Welcome`/`Rejected`; one session at a time (a second gets `Rejected: server full`); `Ping`/`Pong`, 10 s silence timeout; `Goodbye` on protocol errors | M3-1 | Inherit workspace lints (`[lints] workspace = true`) and edition |
 | M3-3 | **Views:** `WorldSummary`, `NationTable`, `MapView` (all `MapMode`s), `MarketDetail`, `ProvinceDetail`; `Subscribe` with an immediate refresh | M3-2 | Builders read `World` + `DayReport` only. Tests: values match `pax_cli report` for the same day |
