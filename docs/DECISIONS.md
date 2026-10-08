@@ -456,9 +456,9 @@ The state → national → sphere → global roll-up in the old ECONOMY_SYSTEM w
 - **Order:** commands apply in `(day, player, sequence)` order, all server-stamped. Any future command that can conflict with another player's must define its own conflict rule in its decision. Player order is only a deterministic tie-break, and would otherwise always favour lower ids.
 - **Lag, in wall-clock time:**
   - updates coalesce per client (D23);
-  - 5 s of silence from a client pauses the game ("waiting for player");
+  - 5 s of silence from a client pauses the game ("waiting for player"). `ServerState.waiting_for` names who it waits for. When everyone is back, or the silent player is dropped, the game resumes at the speed it had. A speed the host sets while it waits is the speed it resumes at; the game doesn't run until everyone is back or dropped, also when the silence began in the lobby (M4-4);
   - 30 s drops the session, and its nation keeps its current policies. In multiplayer this replaces D22's 10 s liveness rule, which would otherwise drop a client before the fairness pause could help it; single player keeps D22's rule;
-  - a resume token reclaims the nation.
+  - a resume token (64 bits from the OS's secure random source) reclaims the nation. In a started game, any player who leaves keeps their seat (player id and nation) for their token: the server can't tell a crash from a quit. A kept seat counts toward the player limit, nobody else can take its nation, and the lobby shows it as away. A kick or a load drops kept seats (M4-4).
 - **Transport:**
   - TLS whenever the server is not bound to localhost;
   - an optional server password;

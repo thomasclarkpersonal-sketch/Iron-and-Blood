@@ -77,6 +77,7 @@ mod tests {
         WelcomeView {
             protocol_minor: 1,
             player: 0,
+            resume_token: 0,
             nation: None,
             day: 0,
             speed: pax_protocol::wire::Speed::Paused,

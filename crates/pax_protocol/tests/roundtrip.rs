@@ -236,7 +236,10 @@ fn small_server_messages() {
     assert_eq!((r.client_seq(), r.error()), (9, CommandError::RateOutOfRange));
 
     let mut b = FlatBufferBuilder::new();
-    let m = ServerState::create(&mut b, &ServerStateArgs { day: 12, speed: Speed::Paused, changed_by: 0 });
+    let m = ServerState::create(
+        &mut b,
+        &ServerStateArgs { day: 12, speed: Speed::Paused, changed_by: 0, waiting_for: None },
+    );
     let f = server_frame(&mut b, ServerPayload::ServerState, m.as_union_value());
     assert_eq!(server(&f).payload_as_server_state().unwrap().speed(), Speed::Paused);
 

@@ -1,4 +1,4 @@
-//! `pax_server --scenario DIR [--bind ADDR] [--port-file PATH] [--saves DIR] [--players N] [--sandbox] [--admin NAME] [--exit-when-idle]`
+//! `pax_server --scenario DIR [--bind ADDR] [--port-file PATH] [--saves DIR] [--players N] [--sandbox] [--admin NAME] [--pause-after S] [--drop-after S] [--exit-when-idle]`
 //!
 //! The authoritative game server (D10). In single player the client launches it with
 //! `--scenario <dir> --bind 127.0.0.1:0 --port-file <tmp> --sandbox --exit-when-idle`
@@ -8,14 +8,18 @@
 //!
 //! D24 requires TLS whenever a server is not bound to localhost, and TLS arrives with
 //! M4-6. Until then, `--players` above 1 is refused on any non-loopback address.
+//!
+//! With several players, a silent client pauses the game after `--pause-after`
+//! seconds and is dropped after `--drop-after` (D24: 5 and 30 by default).
 
 use std::path::PathBuf;
 use std::process::ExitCode;
+use std::time::Duration;
 
 use pax_server::{Config, Server};
 use tracing::error;
 
-const USAGE: &str = "usage: pax_server --scenario DIR [--bind ADDR] [--port-file PATH] [--saves DIR] [--players N] [--sandbox] [--admin NAME] [--exit-when-idle]";
+const USAGE: &str = "usage: pax_server --scenario DIR [--bind ADDR] [--port-file PATH] [--saves DIR] [--players N] [--sandbox] [--admin NAME] [--pause-after S] [--drop-after S] [--exit-when-idle]";
 
 /// The most players `--players` allows. Player ids are `u16` on the wire; the cap is
 /// far below that, a sanity limit for a server whose every player gets every update.
@@ -29,11 +33,23 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> Result<(Config, Option<
     // Sandbox seats exist only when asked for (D24).
     config.sandbox = false;
     let mut port_file = None;
+    let (mut pause_after, mut drop_after) = (None, None);
+    let seconds = |flag: &str, value: Option<String>| -> Result<Duration, String> {
+        let value = value.ok_or(format!("{flag} needs a value"))?;
+        value
+            .parse::<u64>()
+            .ok()
+            .filter(|&s| s > 0)
+            .map(Duration::from_secs)
+            .ok_or(format!("{flag}: '{value}' is not a whole number of seconds"))
+    };
     while let Some(flag) = it.next() {
         match flag.as_str() {
             "--scenario" => scenario = Some(PathBuf::from(it.next().ok_or("--scenario needs a value")?)),
             "--exit-when-idle" => config.exit_when_idle = true,
             "--sandbox" => config.sandbox = true,
+            "--pause-after" => pause_after = Some(seconds("--pause-after", it.next())?),
+            "--drop-after" => drop_after = Some(seconds("--drop-after", it.next())?),
             "--admin" => config.admin = Some(it.next().ok_or("--admin needs a value")?),
             "--bind" => {
                 let value = it.next().ok_or("--bind needs a value")?;
@@ -54,14 +70,17 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> Result<(Config, Option<
         }
     }
     config.scenario = scenario.ok_or("missing --scenario DIR")?;
-    // D24: TLS whenever the server isn't bound to localhost. Until M4-6 brings it, a
-    // multiplayer server binds loopback only; there is deliberately no opt-out.
-    if config.max_players > 1 && !config.bind.ip().is_loopback() {
-        return Err(format!(
-            "--players {} on {} needs TLS (D24), which arrives with M4-6: until then, bind 127.0.0.1",
-            config.max_players, config.bind
-        ));
+    // D24's lag rules replace D22's 10 s timeout in multiplayer only.
+    if config.max_players > 1 {
+        // `Config::multiplayer` holds the defaults; the flags override them.
+        let defaults = Config::multiplayer(PathBuf::new(), config.max_players);
+        config.idle_timeout = drop_after.unwrap_or(defaults.idle_timeout);
+        config.pause_after = pause_after.or(defaults.pause_after);
+    } else if pause_after.is_some() || drop_after.is_some() {
+        return Err("--pause-after and --drop-after are multiplayer settings (--players above 1)".to_owned());
     }
+    // The rules every way of building a server shares (`Config::validate`).
+    config.validate().map_err(|e| e.to_string())?;
     Ok((config, port_file))
 }
 
@@ -135,6 +154,20 @@ mod tests {
         assert!(parse_args(args("--scenario s --players 2 --bind 0.0.0.0:7777 --insecure-no-tls")).is_err());
         assert!(parse_args(args("--scenario s --players 2 --bind 127.0.0.1:7777")).is_ok());
         assert!(parse_args(args("--scenario s --bind 0.0.0.0:7777")).is_ok(), "one player: unchanged from M3");
+    }
+
+    /// D24's lag rules: multiplayer defaults, settings, and single player unchanged.
+    #[test]
+    fn lag_settings_apply_to_multiplayer_only() {
+        let (one, _) = parse_args(args("--scenario s")).unwrap();
+        assert_eq!((one.idle_timeout, one.pause_after), (pax_protocol::IDLE_TIMEOUT, None));
+        let (many, _) = parse_args(args("--scenario s --players 2")).unwrap();
+        assert_eq!((many.idle_timeout, many.pause_after), (pax_server::DROP_AFTER, Some(pax_server::PAUSE_AFTER)));
+        let (set, _) = parse_args(args("--scenario s --players 2 --pause-after 2 --drop-after 9")).unwrap();
+        assert_eq!((set.idle_timeout, set.pause_after), (Duration::from_secs(9), Some(Duration::from_secs(2))));
+        assert!(parse_args(args("--scenario s --pause-after 2")).unwrap_err().contains("multiplayer"));
+        assert!(parse_args(args("--scenario s --players 2 --pause-after 9 --drop-after 9")).is_err());
+        assert!(parse_args(args("--scenario s --players 2 --drop-after 0")).is_err());
     }
 
     #[test]

@@ -32,6 +32,7 @@ impl<'a> LobbyPlayer<'a> {
   pub const VT_SANDBOX: flatbuffers::VOffsetT = 10;
   pub const VT_READY: flatbuffers::VOffsetT = 12;
   pub const VT_HOST: flatbuffers::VOffsetT = 14;
+  pub const VT_AWAY: flatbuffers::VOffsetT = 16;
 
   #[inline]
   pub unsafe fn init_from_table(table: flatbuffers::Table<'a>) -> Self {
@@ -46,6 +47,7 @@ impl<'a> LobbyPlayer<'a> {
     if let Some(x) = args.nation { builder.add_nation(x); }
     if let Some(x) = args.name { builder.add_name(x); }
     builder.add_player(args.player);
+    builder.add_away(args.away);
     builder.add_host(args.host);
     builder.add_ready(args.ready);
     builder.add_sandbox(args.sandbox);
@@ -98,6 +100,15 @@ impl<'a> LobbyPlayer<'a> {
     // which contains a valid value in this slot
     unsafe { self._tab.get::<bool>(LobbyPlayer::VT_HOST, Some(false)).unwrap()}
   }
+  /// Left the started game: the seat (player id and nation) is kept for their
+  /// resume token (D24, protocol 1.5). Nobody plays the nation meanwhile.
+  #[inline]
+  pub fn away(&self) -> bool {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<bool>(LobbyPlayer::VT_AWAY, Some(false)).unwrap()}
+  }
 }
 
 impl flatbuffers::Verifiable for LobbyPlayer<'_> {
@@ -113,6 +124,7 @@ impl flatbuffers::Verifiable for LobbyPlayer<'_> {
      .visit_field::<bool>("sandbox", Self::VT_SANDBOX, false)?
      .visit_field::<bool>("ready", Self::VT_READY, false)?
      .visit_field::<bool>("host", Self::VT_HOST, false)?
+     .visit_field::<bool>("away", Self::VT_AWAY, false)?
      .finish();
     Ok(())
   }
@@ -124,6 +136,7 @@ pub struct LobbyPlayerArgs<'a> {
     pub sandbox: bool,
     pub ready: bool,
     pub host: bool,
+    pub away: bool,
 }
 impl<'a> Default for LobbyPlayerArgs<'a> {
   #[inline]
@@ -135,6 +148,7 @@ impl<'a> Default for LobbyPlayerArgs<'a> {
       sandbox: false,
       ready: false,
       host: false,
+      away: false,
     }
   }
 }
@@ -169,6 +183,10 @@ impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> LobbyPlayerBuilder<'a, 'b, A> {
     self.fbb_.push_slot::<bool>(LobbyPlayer::VT_HOST, host, false);
   }
   #[inline]
+  pub fn add_away(&mut self, away: bool) {
+    self.fbb_.push_slot::<bool>(LobbyPlayer::VT_AWAY, away, false);
+  }
+  #[inline]
   pub fn new(_fbb: &'b mut flatbuffers::FlatBufferBuilder<'a, A>) -> LobbyPlayerBuilder<'a, 'b, A> {
     let start = _fbb.start_table();
     LobbyPlayerBuilder {
@@ -192,6 +210,7 @@ impl core::fmt::Debug for LobbyPlayer<'_> {
       ds.field("sandbox", &self.sandbox());
       ds.field("ready", &self.ready());
       ds.field("host", &self.host());
+      ds.field("away", &self.away());
       ds.finish()
   }
 }

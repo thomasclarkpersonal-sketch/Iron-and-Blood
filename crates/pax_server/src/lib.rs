@@ -46,6 +46,14 @@ use std::path::PathBuf;
 use std::thread::JoinHandle;
 use std::time::Duration;
 
+/// D24's default fairness pause: a multiplayer game pauses for everyone when a
+/// player has sent nothing for this long (`--pause-after`).
+pub const PAUSE_AFTER: Duration = Duration::from_secs(5);
+
+/// D24's default drop: a multiplayer session silent this long is closed, and its
+/// seat waits for its resume token (`--drop-after`). It replaces D22's 10 s rule.
+pub const DROP_AFTER: Duration = Duration::from_secs(30);
+
 /// How to run a server.
 #[derive(Clone, Debug)]
 pub struct Config {
@@ -55,8 +63,13 @@ pub struct Config {
     /// (NETWORK_PROTOCOL §6).
     pub bind: SocketAddr,
     /// Close a session that sends nothing for this long (the client pings at least
-    /// every 2 s, NETWORK_PROTOCOL §3).
+    /// every 2 s, NETWORK_PROTOCOL §3): D22's 10 s in single player, D24's drop
+    /// (`--drop-after`, 30 s) in multiplayer.
     pub idle_timeout: Duration,
+    /// In multiplayer, pause the game for everyone when a player has sent nothing for
+    /// this long, and resume when they speak again (D24's fairness pause,
+    /// `--pause-after`, 5 s). `None`: no fairness pause (single player).
+    pub pause_after: Option<Duration>,
     /// Stop when the last player leaves: the client launched this server.
     pub exit_when_idle: bool,
     /// How many sessions may play at once; one more is refused with "server full".
@@ -76,6 +89,40 @@ pub struct Config {
 }
 
 impl Config {
+    /// The rules a configuration must keep, however it was built (the CLI, tests, a
+    /// launcher):
+    /// * the fairness pause is multiplayer only, and comes before the drop (D24), or
+    ///   the connection task would drop a client when it should pause the game;
+    /// * D24's TLS rule: several players bind loopback only until M4-6 brings TLS.
+    pub fn validate(&self) -> Result<(), ConfigError> {
+        if let Some(pause) = self.pause_after {
+            if self.max_players <= 1 {
+                return Err(ConfigError::PauseInSinglePlayer);
+            }
+            if pause >= self.idle_timeout {
+                return Err(ConfigError::PauseNotBeforeDrop);
+            }
+        }
+        if self.max_players > 1 && !self.bind.ip().is_loopback() {
+            return Err(ConfigError::MultiplayerNeedsTls { players: self.max_players, bind: self.bind });
+        }
+        Ok(())
+    }
+
+    /// A multiplayer server for `scenario` with room for `players`, with D24's
+    /// defaults: no sandbox, a fairness pause after [`PAUSE_AFTER`] of silence and a
+    /// drop after [`DROP_AFTER`] (in place of D22's 10 s). The one place those
+    /// defaults are applied; the CLI starts from here too.
+    pub fn multiplayer(scenario: impl Into<PathBuf>, players: u16) -> Self {
+        Config {
+            max_players: players,
+            sandbox: false,
+            idle_timeout: DROP_AFTER,
+            pause_after: Some(PAUSE_AFTER),
+            ..Config::local(scenario)
+        }
+    }
+
     /// A local single-player server for `scenario`, as the client launches it: one
     /// player, sandbox allowed, the protocol's 10 s timeout.
     pub fn local(scenario: impl Into<PathBuf>) -> Self {
@@ -83,6 +130,7 @@ impl Config {
             scenario: scenario.into(),
             bind: SocketAddr::from(([127, 0, 0, 1], 0)),
             idle_timeout: pax_protocol::IDLE_TIMEOUT,
+            pause_after: None,
             exit_when_idle: false,
             saves_dir: PathBuf::from("saves"),
             max_players: 1,
@@ -92,9 +140,39 @@ impl Config {
     }
 }
 
+/// A rule a [`Config`] breaks (`Config::validate`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ConfigError {
+    /// A fairness pause is for multiplayer (D24).
+    PauseInSinglePlayer,
+    /// The pause must come before the drop, or clients are dropped instead.
+    PauseNotBeforeDrop,
+    /// D24: TLS off localhost, and M4-6 hasn't brought it yet.
+    MultiplayerNeedsTls { players: u16, bind: SocketAddr },
+}
+
+impl std::fmt::Display for ConfigError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ConfigError::PauseInSinglePlayer => {
+                write!(f, "a fairness pause (--pause-after) is for multiplayer (--players above 1)")
+            }
+            ConfigError::PauseNotBeforeDrop => write!(f, "--pause-after must be shorter than --drop-after"),
+            ConfigError::MultiplayerNeedsTls { players, bind } => write!(
+                f,
+                "--players {players} on {bind} needs TLS (D24), which arrives with M4-6: until then, bind 127.0.0.1"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for ConfigError {}
+
 /// Why a server couldn't start.
 #[derive(Debug)]
 pub enum StartError {
+    /// The configuration breaks a rule (`Config::validate`).
+    Config(ConfigError),
     Scenario(pax_data::LoadError),
     Io(std::io::Error),
 }
@@ -102,6 +180,7 @@ pub enum StartError {
 impl std::fmt::Display for StartError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            StartError::Config(e) => write!(f, "{e}"),
             StartError::Scenario(e) => write!(f, "{e}"),
             StartError::Io(e) => write!(f, "{e}"),
         }
@@ -151,6 +230,7 @@ impl Server {
     /// Loads the scenario, binds the listener and starts the sim thread. Returns once
     /// the server accepts connections.
     pub fn start(config: Config) -> Result<Server, StartError> {
+        config.validate().map_err(StartError::Config)?;
         let scenario = pax_data::load_scenario(&config.scenario).map_err(StartError::Scenario)?;
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
@@ -162,7 +242,8 @@ impl Server {
         // Bounded: a connection whose requests pile up stops being read (backpressure),
         // as a connection whose replies pile up is closed (net.rs).
         let (to_sim, inbound) = flume::bounded(net::INBOUND_QUEUE);
-        runtime.spawn(net::accept_loop(listener, to_sim.clone(), config.idle_timeout));
+        let timing = net::Timing { idle: config.idle_timeout, stall_after: config.pause_after };
+        runtime.spawn(net::accept_loop(listener, to_sim.clone(), timing));
         let mut sim = sim::Sim::new(scenario, &config);
         let sim = std::thread::Builder::new().name("pax-sim".to_owned()).spawn(move || {
             // A panic is caught only to tell the clients and the caller; the default
@@ -220,6 +301,21 @@ mod tests {
         );
         wire::finish_size_prefixed_client_message_buffer(&mut b, m);
         b.finished_data().to_vec()
+    }
+
+    /// `Server::start` checks the configuration however it was built, not just the
+    /// CLI: a fairness pause no shorter than the drop would drop clients instead.
+    #[test]
+    fn a_server_refuses_a_configuration_that_breaks_the_rules() {
+        let scenario = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two_states");
+        let mut config = Config::local(&scenario);
+        config.max_players = 2;
+        config.pause_after = Some(Duration::from_secs(40));
+        config.idle_timeout = Duration::from_secs(30);
+        assert!(matches!(Server::start(config.clone()), Err(StartError::Config(ConfigError::PauseNotBeforeDrop))));
+        config.pause_after = Some(Duration::from_secs(5));
+        config.bind = SocketAddr::from(([0, 0, 0, 0], 0));
+        assert!(matches!(Server::start(config), Err(StartError::Config(ConfigError::MultiplayerNeedsTls { .. }))));
     }
 
     /// A panic on the sim thread reaches the client (Goodbye) and the caller (Err),

@@ -60,6 +60,8 @@ pub enum Got {
         day: u64,
         speed: Speed,
         changed_by: u16,
+        /// Players a fairness pause waits for (D24).
+        waiting_for: Vec<u16>,
     },
     SaveResult {
         name: String,
@@ -277,7 +279,12 @@ fn decode(frame: &[u8]) -> Got {
         return Got::SaveList(l.names().map(|n| n.iter().map(str::to_owned).collect()).unwrap_or_default());
     }
     if let Some(s) = msg.payload_as_server_state() {
-        return Got::ServerState { day: s.day(), speed: s.speed(), changed_by: s.changed_by() };
+        return Got::ServerState {
+            day: s.day(),
+            speed: s.speed(),
+            changed_by: s.changed_by(),
+            waiting_for: s.waiting_for().map(|w| w.iter().collect()).unwrap_or_default(),
+        };
     }
     if let Some(l) = msg.payload_as_lobby_state() {
         return Got::Lobby {

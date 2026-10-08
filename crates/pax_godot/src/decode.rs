@@ -61,6 +61,8 @@ fn invalid(message: String) -> StreamError {
 pub struct WelcomeView {
     pub protocol_minor: u16,
     pub player: u16,
+    /// Present in a later `Hello` to reclaim this seat after a drop (D24).
+    pub resume_token: u64,
     pub nation: Option<u32>,
     pub day: u64,
     pub speed: wire::Speed,
@@ -206,6 +208,9 @@ pub enum ServerEvent {
         day: u64,
         speed: wire::Speed,
         changed_by: u16,
+        /// Players a fairness pause waits for (D24, protocol 1.5); empty when none,
+        /// and from an older server.
+        waiting_for: Vec<u16>,
     },
     Pong {
         nonce: u64,
@@ -243,6 +248,8 @@ pub struct LobbyPlayerView {
     pub sandbox: bool,
     pub ready: bool,
     pub host: bool,
+    /// Left the started game; the seat waits for their resume token (protocol 1.5).
+    pub away: bool,
 }
 
 impl ServerEvent {
@@ -337,6 +344,7 @@ fn welcome(w: wire::Welcome<'_>) -> Result<WelcomeView, StreamError> {
     let view = WelcomeView {
         protocol_minor: w.protocol_minor(),
         player: w.player(),
+        resume_token: w.resume_token(),
         nation: w.nation(),
         day: w.day(),
         speed: w.speed(),
@@ -629,7 +637,12 @@ impl ServerStream {
             }
             P::ServerState => {
                 let s = required(msg.payload_as_server_state(), "ServerState body")?;
-                ServerEvent::ServerState { day: s.day(), speed: s.speed(), changed_by: s.changed_by() }
+                ServerEvent::ServerState {
+                    day: s.day(),
+                    speed: s.speed(),
+                    changed_by: s.changed_by(),
+                    waiting_for: s.waiting_for().map(|w| w.iter().collect()).unwrap_or_default(),
+                }
             }
             P::Pong => ServerEvent::Pong { nonce: required(msg.payload_as_pong(), "Pong body")?.nonce() },
             P::SaveResult => {
@@ -665,6 +678,7 @@ impl ServerStream {
                             sandbox: p.sandbox(),
                             ready: p.ready(),
                             host: p.host(),
+                            away: p.away(),
                         })
                     })
                     .collect::<Result<_, StreamError>>()?;
@@ -839,7 +853,15 @@ mod tests {
         let name = b.create_string("ada");
         let p = wire::LobbyPlayer::create(
             &mut b,
-            &wire::LobbyPlayerArgs { player: 3, name: Some(name), nation, sandbox: false, ready: true, host: true },
+            &wire::LobbyPlayerArgs {
+                player: 3,
+                name: Some(name),
+                nation,
+                sandbox: false,
+                ready: true,
+                host: true,
+                away: false,
+            },
         );
         let players = b.create_vector(&[p]);
         let notice = notice.map(|n| b.create_string(n));

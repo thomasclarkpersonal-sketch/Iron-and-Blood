@@ -30,6 +30,7 @@ impl<'a> ServerState<'a> {
   pub const VT_DAY: flatbuffers::VOffsetT = 4;
   pub const VT_SPEED: flatbuffers::VOffsetT = 6;
   pub const VT_CHANGED_BY: flatbuffers::VOffsetT = 8;
+  pub const VT_WAITING_FOR: flatbuffers::VOffsetT = 10;
 
   #[inline]
   pub unsafe fn init_from_table(table: flatbuffers::Table<'a>) -> Self {
@@ -38,10 +39,11 @@ impl<'a> ServerState<'a> {
   #[allow(unused_mut)]
   pub fn create<'bldr: 'args, 'args: 'mut_bldr, 'mut_bldr, A: flatbuffers::Allocator + 'bldr>(
     _fbb: &'mut_bldr mut flatbuffers::FlatBufferBuilder<'bldr, A>,
-    args: &'args ServerStateArgs
+    args: &'args ServerStateArgs<'args>
   ) -> flatbuffers::WIPOffset<ServerState<'bldr>> {
     let mut builder = ServerStateBuilder::new(_fbb);
     builder.add_day(args.day);
+    if let Some(x) = args.waiting_for { builder.add_waiting_for(x); }
     builder.add_changed_by(args.changed_by);
     builder.add_speed(args.speed);
     builder.finish()
@@ -62,13 +64,25 @@ impl<'a> ServerState<'a> {
     // which contains a valid value in this slot
     unsafe { self._tab.get::<Speed>(ServerState::VT_SPEED, Some(Speed::Paused)).unwrap()}
   }
-  /// The player who changed it (M4); the M3 player is 0.
+  /// The player who last set the speed (M4); the M3 player is 0. A fairness pause
+  /// and its resume, or the last player leaving, are the server's doing and keep
+  /// it: `waiting_for` says why the game paused (D24).
   #[inline]
   pub fn changed_by(&self) -> u16 {
     // Safety:
     // Created from valid Table for this object
     // which contains a valid value in this slot
     unsafe { self._tab.get::<u16>(ServerState::VT_CHANGED_BY, Some(0)).unwrap()}
+  }
+  /// Players the game is waiting for: silent past the server's pause threshold,
+  /// which paused it for everyone (D24's fairness pause, protocol 1.5). Empty when
+  /// nobody is. The game resumes by itself when they are all back or dropped.
+  #[inline]
+  pub fn waiting_for(&self) -> Option<flatbuffers::Vector<'a, u16>> {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'a, u16>>>(ServerState::VT_WAITING_FOR, None)}
   }
 }
 
@@ -82,22 +96,25 @@ impl flatbuffers::Verifiable for ServerState<'_> {
      .visit_field::<u64>("day", Self::VT_DAY, false)?
      .visit_field::<Speed>("speed", Self::VT_SPEED, false)?
      .visit_field::<u16>("changed_by", Self::VT_CHANGED_BY, false)?
+     .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, u16>>>("waiting_for", Self::VT_WAITING_FOR, false)?
      .finish();
     Ok(())
   }
 }
-pub struct ServerStateArgs {
+pub struct ServerStateArgs<'a> {
     pub day: u64,
     pub speed: Speed,
     pub changed_by: u16,
+    pub waiting_for: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, u16>>>,
 }
-impl<'a> Default for ServerStateArgs {
+impl<'a> Default for ServerStateArgs<'a> {
   #[inline]
   fn default() -> Self {
     ServerStateArgs {
       day: 0,
       speed: Speed::Paused,
       changed_by: 0,
+      waiting_for: None,
     }
   }
 }
@@ -120,6 +137,10 @@ impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> ServerStateBuilder<'a, 'b, A> {
     self.fbb_.push_slot::<u16>(ServerState::VT_CHANGED_BY, changed_by, 0);
   }
   #[inline]
+  pub fn add_waiting_for(&mut self, waiting_for: flatbuffers::WIPOffset<flatbuffers::Vector<'b , u16>>) {
+    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(ServerState::VT_WAITING_FOR, waiting_for);
+  }
+  #[inline]
   pub fn new(_fbb: &'b mut flatbuffers::FlatBufferBuilder<'a, A>) -> ServerStateBuilder<'a, 'b, A> {
     let start = _fbb.start_table();
     ServerStateBuilder {
@@ -140,6 +161,7 @@ impl core::fmt::Debug for ServerState<'_> {
       ds.field("day", &self.day());
       ds.field("speed", &self.speed());
       ds.field("changed_by", &self.changed_by());
+      ds.field("waiting_for", &self.waiting_for());
       ds.finish()
   }
 }

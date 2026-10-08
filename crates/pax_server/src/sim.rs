@@ -33,7 +33,7 @@ use crate::game::Game;
 use crate::net::{Inbound, Outbound};
 use crate::queue::CommandQueue;
 use crate::request::{Request, WireCommand};
-use crate::session::{Claim, HostRule, Refusal, Seat, Session, SessionTable, Vacated};
+use crate::session::{Claim, HostRule, LobbyEntry, OnLeave, Refusal, Seat, Session, SessionTable, Vacated};
 use crate::view::{self, CheckedSubscription, DayViews, Subscription};
 use crate::window::UpdateWindow;
 
@@ -69,6 +69,16 @@ pub(crate) struct Sim {
     stop: bool,
     /// Where the game is: single player, or a multiplayer lobby or game (M4-2).
     phase: Phase,
+    /// The speed a fairness pause interrupted, restored when nobody is stalled any
+    /// more. `None`: no fairness pause is holding the clock. Who is stalled is on the
+    /// session rows.
+    paused_for_fairness: Option<wire::Speed>,
+    /// The player who last set the clock: `ServerState.changed_by`. A fairness pause
+    /// and its resume are the server's doing and keep it (D24).
+    last_changed_by: u16,
+    /// The lobby as players last saw it; it is sent again only when it differs
+    /// (M4-2). `None`: it must be sent (after a load's new Welcomes).
+    last_lobby: Option<(Vec<LobbyEntry>, bool)>,
     /// The speed and the next tick. [`Sim::set_clock`] changes the speed and announces
     /// it; the one exception is a load, whose new `Welcome` carries the speed.
     clock: Clock,
@@ -89,6 +99,9 @@ impl Sim {
             exit_when_idle: config.exit_when_idle,
             stop: false,
             phase: if config.max_players > 1 { Phase::Lobby } else { Phase::SinglePlayer },
+            paused_for_fairness: None,
+            last_changed_by: 0,
+            last_lobby: None,
             clock: Clock::Paused,
             queue: CommandQueue::default(),
         }
@@ -111,7 +124,15 @@ impl Sim {
         self.send(session, Outbound::Close);
     }
 
-    fn hello(&mut self, session: u64, major: u16, minor: u16, name: Option<&str>, requested_nation: Option<u32>) {
+    fn hello(
+        &mut self,
+        session: u64,
+        major: u16,
+        minor: u16,
+        name: Option<&str>,
+        requested_nation: Option<u32>,
+        resume_token: u64,
+    ) {
         let nations = self.game.world().nations.key.len();
         if major != PROTOCOL_MAJOR {
             let reason = format!(
@@ -122,6 +143,17 @@ impl Sim {
         // `net` lets a session say Hello only once; the sim thread doesn't rely on it.
         if self.sessions.seat(session).is_some() {
             return self.goodbye(session, "Hello sent twice");
+        }
+        // A player coming back to a started game with their token gets their seat (D24).
+        if let Some(token) = std::num::NonZeroU64::new(resume_token) {
+            match self.sessions.resume(session, token) {
+                Ok(seat) => {
+                    info!(session, player = seat.player, nation = ?seat.nation(), "resumed");
+                    self.welcome(session, seat);
+                }
+                Err(refusal) => self.reject(session, &self.refusal(refusal)),
+            }
+            return;
         }
         // Without a nation: a sandbox seat if the server allows them, else, in the
         // lobby, a seat that claims a nation later (M4-2).
@@ -148,7 +180,6 @@ impl Sim {
         let host = self.sessions.is_host(session);
         info!(session, name, player = seat.player, ?requested_nation, host, "welcomed");
         self.welcome(session, seat);
-        self.lobby_changed();
     }
 
     /// What a client is told when the table refuses it (`Rejected`, or a lobby
@@ -164,6 +195,9 @@ impl Sim {
                 None => format!("nation {nation} is taken by player {player}"),
             },
             Refusal::NoClaim => "claim a nation before you are ready".to_owned(),
+            Refusal::UnknownToken => {
+                "no seat is kept for this resume token (kicked, or the game was loaded)".to_owned()
+            }
         }
     }
 
@@ -173,11 +207,18 @@ impl Sim {
         self.phase != Phase::Lobby
     }
 
-    /// Tells every player the lobby as it now stands (M4-2). Only a multiplayer
-    /// server has a lobby; it keeps sending the player list after the start.
-    fn lobby_changed(&self) {
-        if self.phase != Phase::SinglePlayer {
-            self.sessions.broadcast(&encode::lobby_state(&self.sessions.lobby(), self.started(), None));
+    /// Tells every player the lobby, if it differs from what they last saw (M4-2).
+    /// Comparing with that snapshot, rather than flagging each change, means no path
+    /// that changes the table can forget to. Only a multiplayer server has a lobby;
+    /// it keeps sending the player list after the start.
+    fn tell_lobby_if_changed(&mut self) {
+        if self.phase == Phase::SinglePlayer {
+            return;
+        }
+        let now = (self.sessions.lobby(), self.started());
+        if self.last_lobby.as_ref() != Some(&now) {
+            self.sessions.broadcast(&encode::lobby_state(&now.0, now.1, None));
+            self.last_lobby = Some(now);
         }
     }
 
@@ -214,7 +255,7 @@ impl Sim {
             return self.lobby_notice(session, &format!("unknown nation {n}: the scenario has {nations}"));
         }
         match self.sessions.claim(session, nation) {
-            Ok(()) => self.lobby_changed(),
+            Ok(()) => {}
             Err(refusal) => self.lobby_notice(session, &self.refusal(refusal)),
         }
     }
@@ -224,7 +265,7 @@ impl Sim {
             return;
         }
         match self.sessions.set_ready(session, ready) {
-            Ok(()) => self.lobby_changed(),
+            Ok(()) => {}
             Err(refusal) => self.lobby_notice(session, &self.refusal(refusal)),
         }
     }
@@ -243,7 +284,6 @@ impl Sim {
         }
         self.phase = Phase::Playing;
         info!(session, players = self.sessions.players(), "the game starts");
-        self.lobby_changed();
     }
 
     /// Replaces the session's subscription and answers with a `DayUpdate` for the
@@ -303,22 +343,75 @@ impl Sim {
         // The clock waits for the game to start (M4-2).
         let permitted = speed == wire::Speed::Paused || (self.sessions.is_host(session) && self.started());
         match Clock::at(speed, Instant::now()).filter(|_| permitted) {
-            Some(clock) => self.set_clock(clock, seat.player),
+            // While anyone is stalled the game waits for them (D24): a speed set now is
+            // the one it resumes at, and pausing means it stays paused when they're back.
+            Some(_) if !self.sessions.waiting_for().is_empty() => {
+                self.paused_for_fairness = (speed != wire::Speed::Paused).then_some(speed);
+                self.last_changed_by = seat.player;
+                self.sessions.broadcast(&self.server_state());
+            }
+            Some(clock) => {
+                self.paused_for_fairness = None;
+                self.set_clock(clock, Some(seat.player));
+            }
             None => {
                 debug!(session, speed = speed.0, permitted, "ignored: an unknown speed, or not the host");
-                let frame = encode::server_state(self.game.world().day, self.clock.speed(), seat.player);
-                self.send(session, Outbound::Frame(frame));
+                self.send(session, Outbound::Frame(self.server_state()));
             }
         }
     }
 
+    /// The clock as a `ServerState` frame: the speed, the player who last set it, and
+    /// the players a fairness pause waits for (D24).
+    fn server_state(&self) -> Vec<u8> {
+        // Only a running game waits for anyone; a silent player in the lobby holds up
+        // nothing until the game starts.
+        let waiting = if self.phase == Phase::Playing { self.sessions.waiting_for() } else { Vec::new() };
+        encode::server_state(self.game.world().day, self.clock.speed(), self.last_changed_by, &waiting)
+    }
+
+    /// A player has been silent past the pause threshold (D24): a running game pauses
+    /// for everyone, waiting for them. Only a started game with a seat counts.
+    /// The stall is recorded whatever the phase (the network reports it only once);
+    /// only a running game pauses for it. A game that starts, or is set going, while
+    /// a player is stalled waits for them the same way (`set_speed`).
+    fn stalled(&mut self, session: u64) {
+        if !self.sessions.stall(session) || self.phase != Phase::Playing || self.sessions.seat(session).is_none() {
+            return;
+        }
+        info!(session, "waiting for a silent player");
+        let speed = self.clock.speed();
+        if speed != wire::Speed::Paused && self.paused_for_fairness.is_none() {
+            self.paused_for_fairness = Some(speed);
+        }
+        // The server's doing, not a player's: `changed_by` keeps the last player.
+        self.set_clock(Clock::Paused, None);
+    }
+
+    /// Someone the fairness pause waited for is back, or their seat ended. When
+    /// nobody is stalled any more, the clock gets back the speed it had (D24).
+    fn fairness_changed(&mut self) {
+        if self.sessions.waiting_for().is_empty()
+            && let Some(clock) = self.paused_for_fairness.take().and_then(|s| Clock::at(s, Instant::now()))
+        {
+            info!("nobody is silent any more; the game resumes");
+            self.set_clock(clock, None);
+        } else {
+            self.sessions.broadcast(&self.server_state());
+        }
+    }
+
     /// The only place the speed changes: sets the clock and tells every welcomed
-    /// session who changed it (`ServerState`, D23).
-    fn set_clock(&mut self, clock: Clock, changed_by: u16) {
+    /// session (`ServerState`, D23). `by`: the player who set it, or `None` when the
+    /// server did (a fairness pause's resume, the last player leaving), which keeps
+    /// `changed_by` at the last player who did.
+    fn set_clock(&mut self, clock: Clock, by: Option<u16>) {
         self.clock = clock;
-        let speed = clock.speed();
-        info!(?speed, changed_by, "speed changed");
-        self.sessions.broadcast(&encode::server_state(self.game.world().day, speed, changed_by));
+        if let Some(player) = by {
+            self.last_changed_by = player;
+        }
+        info!(speed = ?clock.speed(), ?by, "speed changed");
+        self.sessions.broadcast(&self.server_state());
     }
 
     /// The session processed the update for `day`: everything up to it leaves the
@@ -434,6 +527,11 @@ impl Sim {
         // The world, its history and its derived views are replaced together (game.rs).
         self.game = Game::resume(scenario, save, last_report);
         self.queue.discard();
+        // Kept seats hold the old game's nations (M4-5 loads through the lobby).
+        self.sessions.forget_all();
+        self.paused_for_fairness = None;
+        // The new Welcomes reset every client: the lobby goes out again after them.
+        self.last_lobby = None;
         // Not `set_clock`: the `Welcome` below announces the speed with the new game.
         self.clock = Clock::Paused;
         let nations = self.game.world().nations.key.len();
@@ -458,14 +556,20 @@ impl Sim {
             s.window = UpdateWindow::default();
             self.welcome(id, seat);
         }
-        self.lobby_changed();
     }
 
     /// The host ends another player's session (D24). Anything else is ignored: a
     /// non-host's kick, the host kicking itself, a player who isn't connected.
     fn kick(&mut self, session: u64, player: u16) {
-        let target = self.sessions.session_of(player).filter(|&t| t != session);
-        let Some(target) = target.filter(|_| self.sessions.is_host(session)) else {
+        if !self.sessions.is_host(session) {
+            return debug!(session, player, "ignored kick: not the host");
+        }
+        // An away player's kept seat is dropped, which frees their nation (D24).
+        if self.sessions.forget(player) {
+            info!(session, player, "kicked an away player");
+            return;
+        }
+        let Some(target) = self.sessions.session_of(player).filter(|&t| t != session) else {
             return debug!(session, player, "ignored kick");
         };
         info!(session, target, player, "kicked by the host");
@@ -475,22 +579,24 @@ impl Sim {
         if let Some(v) = self.sessions.unseat(target) {
             self.seat_ended(target, v);
         }
-        self.lobby_changed();
     }
 
     /// A player's seat ended: they left, were kicked, or a load dropped them. The
     /// table has already passed the host role on (D24). When the last player
     /// leaves, nobody is watching, so the clock stops (D23), and a server the
     /// client launched stops too. Every path that ends a seat comes through here.
-    /// It doesn't tell the lobby: the request handler does, once, when the table is
-    /// final, so a batch of changes (a load) never shows half done.
+    /// It doesn't tell the lobby: `Sim::handle` does, once per event, after the
+    /// table's last change, so a batch of changes (a load) never shows half done.
     fn seat_ended(&mut self, session: u64, v: Vacated) {
+        if v.was_stalled {
+            self.fairness_changed();
+        }
         if let Some(next) = v.new_host {
             info!(session = next, "the host left; the host is now this session");
         }
         if v.last {
             info!(session, player = v.seat.player, "the last player left");
-            self.set_clock(Clock::Paused, v.seat.player);
+            self.set_clock(Clock::Paused, None);
             if self.exit_when_idle {
                 info!("the client left; exiting (--exit-when-idle)");
                 self.stop = true;
@@ -501,7 +607,8 @@ impl Sim {
     fn welcome(&self, session: u64, seat: Seat) {
         let info = WelcomeInfo {
             player: seat.player,
-            resume_token: 0, // resuming a dropped session is M4 (D24)
+            // The wire uses 0 for "no token" (Hello: a new session).
+            resume_token: self.sessions.token(session).map_or(0, std::num::NonZeroU64::get),
             nation: seat.nation(),
             scenario: &self.game.scenario().name,
             content_hash: self.game.scenario().content_hash,
@@ -532,8 +639,11 @@ impl Sim {
     pub(crate) fn handle(&mut self, event: Inbound) -> bool {
         match event {
             Inbound::Connected { session, conn } => self.sessions.connect(session, conn),
-            Inbound::Request { session, request: Request::Hello { major, minor, name, requested_nation, .. } } => {
-                self.hello(session, major, minor, name.as_deref(), requested_nation);
+            Inbound::Request {
+                session,
+                request: Request::Hello { major, minor, name, requested_nation, resume_token },
+            } => {
+                self.hello(session, major, minor, name.as_deref(), requested_nation, resume_token);
             }
             // The admission choke point: only welcomed sessions get past here.
             Inbound::Request { session, request } if self.sessions.seat(session).is_none() => {
@@ -558,15 +668,24 @@ impl Sim {
             },
             Inbound::Closed { session } => {
                 // The others play on (D24); see `seat_ended`.
-                if let Some(v) = self.sessions.remove(session) {
+                // In a started multiplayer game the seat waits for the resume token.
+                let on_leave = if self.phase == Phase::Playing { OnLeave::KeepSeat } else { OnLeave::EndSeat };
+                if let Some(v) = self.sessions.remove(session, on_leave) {
                     self.seat_ended(session, v);
-                    self.lobby_changed();
+                }
+            }
+            Inbound::Stalled { session } => self.stalled(session),
+            Inbound::Resumed { session } => {
+                if self.sessions.unstall(session) {
+                    self.fairness_changed();
                 }
             }
             Inbound::Shutdown => self.stop = true,
             #[cfg(test)]
             Inbound::Crash => panic!("injected crash for a test"),
         }
+        // The lobby, once per event, after its last change, and only if it changed.
+        self.tell_lobby_if_changed();
         !self.stop
     }
 }
@@ -666,6 +785,8 @@ mod tests {
         },
         /// The speed, and the player who set it.
         State(wire::Speed, u16),
+        /// A `ServerState` while a fairness pause waits for these players (D24).
+        Waiting(wire::Speed, Vec<u16>),
         Saved {
             name: String,
             error: String,
@@ -703,7 +824,10 @@ mod tests {
                     } else if let Some(u) = m.payload_as_day_update() {
                         Sent::Update { day: u.day(), skipped: u.skipped() }
                     } else if let Some(s) = m.payload_as_server_state() {
-                        Sent::State(s.speed(), s.changed_by())
+                        match s.waiting_for().map(|w| w.iter().collect::<Vec<u16>>()).unwrap_or_default() {
+                            waiting if waiting.is_empty() => Sent::State(s.speed(), s.changed_by()),
+                            waiting => Sent::Waiting(s.speed(), waiting),
+                        }
                     } else if let Some(r) = m.payload_as_save_result() {
                         Sent::Saved {
                             name: r.name().unwrap_or_default().into(),
@@ -987,7 +1111,11 @@ mod tests {
         let (mut guest, _) = join(&mut sim, 2, Some(1));
         start(&mut sim, &[1, 2]);
         speed(&mut sim, 2, wire::Speed::Fast);
-        assert_eq!(drain(&mut guest), [Sent::State(wire::Speed::Paused, 1)], "refused: told the unchanged speed");
+        assert_eq!(
+            drain(&mut guest),
+            [Sent::State(wire::Speed::Paused, 0)],
+            "refused: told the unchanged speed, and who last set it"
+        );
         assert_eq!(drain(&mut host), [], "nothing changed for anyone else");
         speed(&mut sim, 1, wire::Speed::Fast);
         assert_eq!(drain(&mut guest), [Sent::State(wire::Speed::Fast, 0)]);
@@ -1193,6 +1321,101 @@ mod tests {
         assert_eq!(drain(&mut b), [Sent::Result { seq: 2, error: wire::CommandError::None, day: 0 }]);
         req(&mut sim, 2, Request::ClaimNation { nation: Some(0) });
         assert!(matches!(lobby(&mut b).as_slice(), [Sent::Lobby { notice: Some(n), .. }] if n.contains("has started")));
+    }
+
+    fn event(sim: &mut Sim, event: Inbound) {
+        sim.handle(event);
+    }
+
+    /// M4-4: a silent player pauses a running game for everyone, which resumes at
+    /// its speed when they speak again (D24's fairness pause).
+    #[test]
+    fn a_silent_player_pauses_the_game_until_they_are_back() {
+        let (mut sim, _saves) = multiplayer(2);
+        let (mut a, _) = join(&mut sim, 1, Some(0));
+        let (mut b, _) = join(&mut sim, 2, Some(1));
+        start(&mut sim, &[1, 2]);
+        speed(&mut sim, 1, wire::Speed::Fast);
+        drain(&mut a);
+        drain(&mut b);
+        event(&mut sim, Inbound::Stalled { session: 2 });
+        assert_eq!(sim.clock, Clock::Paused);
+        assert_eq!(drain(&mut a), [Sent::Waiting(wire::Speed::Paused, vec![1])], "waiting for player 1");
+        event(&mut sim, Inbound::Resumed { session: 2 });
+        assert_eq!(sim.clock.speed(), wire::Speed::Fast, "back at its speed");
+        assert_eq!(drain(&mut a), [Sent::State(wire::Speed::Fast, 0)], "the server resumed; player 0 set Fast");
+
+        // A game the host paused stays paused when the silent player returns.
+        speed(&mut sim, 1, wire::Speed::Paused);
+        event(&mut sim, Inbound::Stalled { session: 2 });
+        event(&mut sim, Inbound::Resumed { session: 2 });
+        assert_eq!(sim.clock, Clock::Paused);
+
+        // The host's own choice overrides a fairness pause.
+        speed(&mut sim, 1, wire::Speed::Fast);
+        event(&mut sim, Inbound::Stalled { session: 2 });
+        speed(&mut sim, 1, wire::Speed::Normal);
+        event(&mut sim, Inbound::Resumed { session: 2 });
+        assert_eq!(sim.clock.speed(), wire::Speed::Normal, "the host's speed, not the interrupted one");
+
+        // A silent player who is dropped stops holding the game up.
+        speed(&mut sim, 1, wire::Speed::Fast);
+        event(&mut sim, Inbound::Stalled { session: 2 });
+        event(&mut sim, Inbound::Closed { session: 2 });
+        assert_eq!(sim.clock.speed(), wire::Speed::Fast, "the others play on (D24)");
+    }
+
+    /// A player who went silent in the lobby is still waited for once the game
+    /// starts: the network reports a stall only once, and the row keeps it (D24).
+    #[test]
+    fn a_player_silent_since_the_lobby_holds_up_the_started_game() {
+        let (mut sim, _saves) = multiplayer(2);
+        let (mut a, _) = join(&mut sim, 1, Some(0));
+        let (_b, _) = join(&mut sim, 2, Some(1));
+        sim.handle(Inbound::Request { session: 2, request: Request::SetReady { ready: true } });
+        event(&mut sim, Inbound::Stalled { session: 2 });
+        start(&mut sim, &[1]);
+        drain(&mut a);
+        speed(&mut sim, 1, wire::Speed::Fast);
+        assert_eq!(sim.clock, Clock::Paused, "the game waits for player 1");
+        assert_eq!(drain(&mut a), [Sent::Waiting(wire::Speed::Paused, vec![1])]);
+        event(&mut sim, Inbound::Resumed { session: 2 });
+        assert_eq!(sim.clock.speed(), wire::Speed::Fast, "the host's speed, once player 1 is back");
+    }
+
+    /// M4-4: a player who leaves a started game keeps their seat for their resume
+    /// token; the nation stays theirs meanwhile. A kick drops the kept seat.
+    #[test]
+    fn a_dropped_player_reclaims_their_seat_with_their_token() {
+        let (mut sim, _saves) = multiplayer(3);
+        let (_a, _) = join(&mut sim, 1, Some(0));
+        let (_b, _) = join(&mut sim, 2, Some(1));
+        start(&mut sim, &[1, 2]);
+        let token = sim.sessions.token(2).expect("a seated player has a token").get();
+        event(&mut sim, Inbound::Closed { session: 2 });
+        let (_c, sent) = join(&mut sim, 3, Some(1));
+        assert_eq!(sent, [Sent::Rejected, Sent::Close], "nation 1 waits for its player");
+        let rejoin = |sim: &mut Sim, id: u64, token: u64| {
+            let (conn, mut rx) = ConnHandle::for_test();
+            sim.handle(Inbound::Connected { session: id, conn });
+            let hello = Request::Hello {
+                major: PROTOCOL_MAJOR,
+                minor: 0,
+                name: None,
+                requested_nation: None,
+                resume_token: token,
+            };
+            sim.handle(Inbound::Request { session: id, request: hello });
+            drain(&mut rx)
+        };
+        assert_eq!(rejoin(&mut sim, 4, token ^ 1), [Sent::Rejected, Sent::Close], "a forged token");
+        assert_eq!(rejoin(&mut sim, 5, token), [Sent::Welcome { player: 1 }], "the same player id");
+        assert_eq!(sim.sessions.seat(5).and_then(|s| s.nation()), Some(1), "and the same nation");
+        // Away again, then kicked: the nation is free.
+        event(&mut sim, Inbound::Closed { session: 5 });
+        sim.handle(Inbound::Request { session: 1, request: Request::Kick { player: 1 } });
+        assert_eq!(rejoin(&mut sim, 6, token), [Sent::Rejected, Sent::Close], "the kick dropped the kept seat");
+        assert_eq!(join(&mut sim, 7, Some(1)).1, [Sent::Welcome { player: 1 }]);
     }
 
     /// A single-player server has no lobby and never sends LobbyState: lobby

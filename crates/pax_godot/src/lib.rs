@@ -328,6 +328,14 @@ impl PaxClient {
         }
     }
 
+    /// Reclaims the seat a dropped session kept (D24): `token` is the old `Welcome`'s
+    /// `RESUME_TOKEN`. A `Welcome` answers, or `Rejected` if no seat is kept for it.
+    #[func]
+    fn resume(&mut self, token: i64) -> GString {
+        // The token's bits, as the Welcome dictionary carried them.
+        self.with_connection(|c| c.resume(token as u64))
+    }
+
     /// Lobby: marks this player ready, or not.
     #[func]
     fn set_ready(&mut self, ready: bool) -> GString {
@@ -410,10 +418,11 @@ fn event_dictionary(event: ServerEvent) -> VarDictionary {
             d.set(keys::COMMAND_ERROR, i64::from(error.0));
             d.set(keys::APPLIES_ON_DAY, count(applies_on_day));
         }
-        ServerEvent::ServerState { day, speed, changed_by } => {
+        ServerEvent::ServerState { day, speed, changed_by, waiting_for } => {
             d.set(keys::DAY, count(day));
             d.set(keys::SPEED, i64::from(speed.0));
             d.set(keys::CHANGED_BY, i64::from(changed_by));
+            d.set(keys::WAITING_FOR, &ints(&waiting_for));
         }
         // An identifier: its bits are kept as-is in Godot's signed 64-bit int.
         ServerEvent::Pong { nonce } => d.set(keys::NONCE, nonce as i64),
@@ -429,14 +438,16 @@ fn event_dictionary(event: ServerEvent) -> VarDictionary {
             t.set(keys::PLAYER, &ints(&players.iter().map(|p| p.player).collect::<Vec<_>>()));
             t.set(keys::NAME, &strings(&players.iter().map(|p| p.name.clone()).collect::<Vec<_>>()));
             let mut nations: Array<Variant> = Array::new();
-            let (mut sandbox, mut ready, mut host): (Array<bool>, Array<bool>, Array<bool>) =
-                (Array::new(), Array::new(), Array::new());
+            let (mut sandbox, mut ready, mut host, mut away): (Array<bool>, Array<bool>, Array<bool>, Array<bool>) =
+                (Array::new(), Array::new(), Array::new(), Array::new());
             for p in &players {
                 nations.push(&optional(p.nation.map(i64::from)));
                 sandbox.push(p.sandbox);
                 ready.push(p.ready);
                 host.push(p.host);
+                away.push(p.away);
             }
+            t.set(keys::AWAY, &away);
             t.set(keys::NATION, &nations);
             t.set(keys::SANDBOX, &sandbox);
             t.set(keys::READY, &ready);
@@ -453,6 +464,8 @@ fn event_dictionary(event: ServerEvent) -> VarDictionary {
 fn welcome(d: &mut VarDictionary, w: &WelcomeView) {
     d.set(keys::PROTOCOL_MINOR, i64::from(w.protocol_minor));
     d.set(keys::PLAYER, i64::from(w.player));
+    // An identifier: its bits are kept as-is in Godot's signed 64-bit int.
+    d.set(keys::RESUME_TOKEN, w.resume_token as i64);
     d.set(keys::NATION, &optional(w.nation.map(i64::from)));
     d.set(keys::DAY, count(w.day));
     d.set(keys::SPEED, i64::from(w.speed.0));

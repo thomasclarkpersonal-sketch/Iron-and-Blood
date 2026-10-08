@@ -177,8 +177,14 @@ table CommandResult {
 table ServerState {
   day: ulong;
   speed: Speed;
-  /// The player who changed it (M4); the M3 player is 0.
+  /// The player who last set the speed (M4); the M3 player is 0. A fairness pause
+  /// and its resume, or the last player leaving, are the server's doing and keep
+  /// it: `waiting_for` says why the game paused (D24).
   changed_by: ushort;
+  /// Players the game is waiting for: silent past the server's pause threshold,
+  /// which paused it for everyone (D24's fairness pause, protocol 1.5). Empty when
+  /// nobody is. The game resumes by itself when they are all back or dropped.
+  waiting_for: [ushort];
 }
 
 table Pong {
@@ -211,6 +217,9 @@ table LobbyPlayer {
   sandbox: bool;
   ready: bool;
   host: bool;
+  /// Left the started game: the seat (player id and nation) is kept for their
+  /// resume token (D24, protocol 1.5). Nobody plays the nation meanwhile.
+  away: bool;
 }
 
 /// The lobby of a multiplayer server (D24, protocol 1.4), sent to every player

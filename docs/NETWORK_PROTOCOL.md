@@ -57,14 +57,20 @@ sequenceDiagram
    - `content_hash` covers every file the scenario loader reads, maps included, each keyed by its role rather than its path. It identifies the game content in logs and saves (D23).
 3. **Subscribe** replaces the whole subscription. The server immediately answers with a `DayUpdate` for the current day, even while paused, so a newly opened panel fills at once.
 4. **Daily updates** follow the flow-control rule in §5.
-5. **Keep-alive:** a session silent for `pax_protocol::IDLE_TIMEOUT` (10 seconds, D22) is closed, so the client sends `Ping` at least every fifth of that (2 seconds). Both sides take the value from that one constant. M4's lag rules are in D24.
+5. **Keep-alive:** a session silent for `pax_protocol::IDLE_TIMEOUT` (10 seconds, D22) is closed, so the client sends `Ping` at least every fifth of that (2 seconds). Both sides take the value from that one constant.
+   - **In multiplayer (D24, M4-4)**, a player silent for 5 s (`--pause-after`) pauses a running game for everyone. Every `ServerState` lists who it waits for (`waiting_for`, protocol 1.5). The pause and its resume are the server's doing: `changed_by` keeps the last player who set the speed.
+   - When they speak again, or are dropped after 30 s of silence (`--drop-after`), the game resumes at its speed, or at the speed the host set while it waited.
 6. **LoadGame** ends with a new `Welcome` to **every** player, because the scenario and its tables may differ. Each client must drop everything it holds from the old session, whether or not it asked for the load.
 7. **Leaving:** when a player leaves, the others play on (D24). When the last one leaves, the game pauses, because D23 never runs a game nobody is watching.
 8. **The lobby (M4-2, protocol 1.4):** a multiplayer server (`--players` above 1) starts in a lobby. Single player has none and never sends `LobbyState`.
    - `Hello`'s nation is the player's first claim. Without one, the player joins unclaimed (or as a sandbox seat on a `--sandbox` server).
    - Players `ClaimNation` and `SetReady`; every change goes to every player as a `LobbyState`. A refused request gets a `LobbyState` with a `notice`, to the asker only. A player must hold a nation (or a sandbox seat) to be ready, and changing a claim clears the ready mark.
    - The host's `StartGame` succeeds once every player is ready. Until then commands get `NotStarted` and the clock stays paused; after it, the host unpauses.
-   - The scenario is the one the server was started with. Choosing a save in the lobby is M4-5, and rejoining after a drop is M4-4. After the start, a new `Hello` must name a free nation.
+   - The scenario is the one the server was started with. Choosing a save in the lobby is M4-5; rejoining after a drop is §3.9. After the start, a new `Hello` must name a free nation.
+9. **Rejoining (M4-4, protocol 1.5):** every `Welcome` carries a `resume_token`.
+   - When a player leaves a started game, the server keeps their seat: player id and nation, shown in the lobby as `away`. It does this however the player left, because it can't tell a crash from a quit.
+   - `Hello` with that token reclaims the seat. A token with no kept seat is `Rejected`: it was forged, the player was kicked, or a load replaced the game.
+   - Kept seats count toward the player limit, and their nations can't be taken.
 
 ## 4. Messages
 
@@ -72,7 +78,7 @@ sequenceDiagram
 
 | Message | Purpose | Reply |
 |---|---|---|
-| `Hello` | Open the session; request a nation (absent = sandbox, only on a server run with `--sandbox`, D24) | `Welcome` or `Rejected` |
+| `Hello` | Open the session; request a nation (absent = sandbox, only on a server run with `--sandbox`, D24), or reclaim a kept seat with `resume_token` (§3.9) | `Welcome` or `Rejected` |
 | `SubmitCommand` | One engine command (`SetIncomeTax`, `SetTransferRate`, `SetConsumptionRate`) with a client-chosen `client_seq` | exactly one `CommandResult` |
 | `SetSpeed` | Pause, or set speed 1–5. Any player may pause; only the host sets a speed (D24). A refused change, or a speed the server doesn't know (D22), gets the unchanged `ServerState`, to the asker only | `ServerState` |
 | `Subscribe` | Choose the map mode, market panel and province panel | a `DayUpdate` for the current day |
@@ -90,7 +96,7 @@ sequenceDiagram
 | `Welcome`, `Rejected` | Reply to `Hello` (and `Welcome` again, to every player, after any player's `LoadGame`) |
 | `DayUpdate` | After a simulated day, subject to flow control (§5) |
 | `CommandResult` | Reply to `SubmitCommand` |
-| `ServerState` | The speed changed (including pause and unpause) |
+| `ServerState` | The speed changed (including pause and unpause), or the players a fairness pause waits for changed (`waiting_for`, D24) |
 | `Pong`, `SaveResult`, `SaveList` | Replies |
 | `Goodbye` | The server closes the connection; the reason says why |
 | `LobbyState` | Multiplayer only (protocol 1.4): the players (id, name, nation, sandbox, ready, host) and whether the game started, whenever any of it changes; with a `notice`, to one client whose lobby request was refused |
@@ -139,7 +145,8 @@ sequenceDiagram
 - There is no Docker and no separate install: the server binary ships next to the client.
 - **Several players (M4-1, M4-3):** run the server yourself, for example `pax_server --scenario <dir> --bind 127.0.0.1:7777 --players 2`, and have each client connect to it.
   - **The host** is the first player to join. When the host leaves, the remaining player with the lowest id becomes host. On a dedicated server, `--admin NAME` makes the client named `NAME` the host instead, whenever it joins; while it is away there is no host (D24).
-  - The lobby (M4-2) and the lag rules (M4-4) are still to come, and so are TLS and a server password (M4-6). D24 requires TLS off localhost, so until M4-6 the server refuses `--players` above 1 on any other address: multiplayer is for testing on one machine until then.
+  - `--pause-after S` and `--drop-after S` set D24's lag thresholds (5 and 30 by default).
+  - TLS and a server password are still to come (M4-6). D24 requires TLS off localhost, so until M4-6 the server refuses `--players` above 1 on any other address: multiplayer is for testing on one machine until then.
 
 ## 7. Conversions and units
 
@@ -161,7 +168,7 @@ FlatBuffers stays compatible across versions only if changes follow these rules.
 - **Never delete** a field; mark it `(deprecated)`.
 - **Add union members and enum values only at the end.** Never renumber them. Receivers must ignore an unknown union member or enum value, not crash on it.
 - A change that breaks these rules bumps `protocol_major`. A compatible addition bumps `protocol_minor`.
-- A receiver treats a field added in a later minor version as *no data* when it is absent, never as an error: a newer client must still read an older server. History: 1.1 (M3) added `StaticData.map_dir`; 1.2 (M3) added `NationTable.militancy`; 1.3 (M4-3) added the `Kick` request; 1.4 (M4-2) added the lobby: `ClaimNation`, `SetReady`, `StartGame`, `LobbyState` and `CommandError.NotStarted`.
+- A receiver treats a field added in a later minor version as *no data* when it is absent, never as an error: a newer client must still read an older server. History: 1.1 (M3) added `StaticData.map_dir`; 1.2 (M3) added `NationTable.militancy`; 1.3 (M4-3) added the `Kick` request; 1.4 (M4-2) added the lobby: `ClaimNation`, `SetReady`, `StartGame`, `LobbyState` and `CommandError.NotStarted`; 1.5 (M4-4) added `ServerState.waiting_for` and `LobbyPlayer.away`.
 - Rust code is generated with **flatc 24.3.25**, matching the `flatbuffers` crate version, into the `pax_protocol` crate. It is checked in, and CI regenerates it and fails on any difference. Mismatched compiler and runtime versions produce code that doesn't compile.
 
 ## 9. Testing

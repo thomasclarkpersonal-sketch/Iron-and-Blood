@@ -6,6 +6,8 @@ use pax_data::map::MapData;
 use pax_engine::World;
 use pax_protocol::wire::{self, ServerPayload};
 
+use crate::session::LobbyEntry;
+
 fn finish(
     mut b: FlatBufferBuilder<'_>,
     kind: ServerPayload,
@@ -130,9 +132,12 @@ pub fn command_result(client_seq: u32, error: wire::CommandError, applies_on_day
 }
 
 /// The speed changed (including to and from paused), sent to every session (D23).
-pub fn server_state(day: u64, speed: wire::Speed, changed_by: u16) -> Vec<u8> {
+/// The clock (D23): its speed, who set it, and the players a fairness pause waits
+/// for (D24; empty when none).
+pub fn server_state(day: u64, speed: wire::Speed, changed_by: u16, waiting_for: &[u16]) -> Vec<u8> {
     let mut b = FlatBufferBuilder::new();
-    let s = wire::ServerState::create(&mut b, &wire::ServerStateArgs { day, speed, changed_by });
+    let waiting_for = Some(b.create_vector(waiting_for));
+    let s = wire::ServerState::create(&mut b, &wire::ServerStateArgs { day, speed, changed_by, waiting_for });
     finish(b, ServerPayload::ServerState, s.as_union_value())
 }
 
@@ -154,17 +159,6 @@ pub fn save_list(names: &[String]) -> Vec<u8> {
     finish(b, ServerPayload::SaveList, l.as_union_value())
 }
 
-/// One player as the lobby shows them (`LobbyPlayer`, D24).
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct LobbyEntry {
-    pub player: u16,
-    pub name: String,
-    pub nation: Option<u32>,
-    pub sandbox: bool,
-    pub ready: bool,
-    pub host: bool,
-}
-
 /// The lobby (M4-2): every player, whether the game started, and, for the one
 /// client whose request was refused, why.
 pub fn lobby_state(players: &[LobbyEntry], started: bool, notice: Option<&str>) -> Vec<u8> {
@@ -182,6 +176,7 @@ pub fn lobby_state(players: &[LobbyEntry], started: bool, notice: Option<&str>) 
                     sandbox: p.sandbox,
                     ready: p.ready,
                     host: p.host,
+                    away: p.away,
                 },
             )
         })
