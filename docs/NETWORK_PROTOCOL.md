@@ -124,6 +124,7 @@ sequenceDiagram
 
 - The client launches `pax_server` as a child process: `pax_server --scenario <dir> --bind 127.0.0.1:0 --port-file <tmp> --exit-when-idle`. The server binds a free port and writes it to the port file (atomically, so a polling client never reads half a number). The client then connects.
 - When the client exits, it closes the connection, and `--exit-when-idle` makes the server shut down once its player has gone.
+- The client's bridge (`pax_godot::connection`) does this, and also what every client owes the server: it acknowledges each `DayUpdate` on the poll after the one that delivered it (§5), and sends a `Ping` after 2 s without sending anything, well inside the server's idle timeout.
 - There is no Docker and no separate install: the server binary ships next to the client.
 
 ## 7. Conversions and units

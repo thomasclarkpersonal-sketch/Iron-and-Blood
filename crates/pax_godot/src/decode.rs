@@ -6,18 +6,19 @@
 //! * any protocol error is fatal and permanent;
 //! * `Welcome` must come first, with a compatible protocol version and consistent
 //!   tables;
-//! * every later message must agree with those tables.
+//! * every later message must agree with those tables: every id is in range and
+//!   every column has the length its table says.
 //!
 //! None of this is left to GDScript.
 
 use pax_protocol::{Direction, FrameDecoder, PROTOCOL_MAJOR, ProtocolError, read_server_message, wire};
 
-/// A `Fixed` raw value (value × 10⁶) as a display float. This is the bridge's only
+/// A `Fixed` raw value (value × 10⁶) as a display number. This is the bridge's only
 /// float arithmetic. It is presentation (D3), and the lint stays on everywhere else,
 /// so code that builds commands (simulation input) can never use floats.
 #[allow(clippy::float_arithmetic)]
-pub fn display(fixed: wire::Fixed) -> f32 {
-    (fixed.raw() as f64 / 1_000_000.0) as f32
+pub fn display(fixed: wire::Fixed) -> f64 {
+    fixed.raw() as f64 / 1_000_000.0
 }
 
 /// Why the server's stream can't be used. Every case ends the session (D22).
@@ -49,13 +50,18 @@ impl From<ProtocolError> for StreamError {
     }
 }
 
-/// The parts of `Welcome` the client needs to lay out the map and labels. Every table
-/// is required: ids elsewhere index into them (D22).
+fn invalid(message: String) -> StreamError {
+    StreamError::Invalid(message)
+}
+
+/// The session's tables, from `Welcome`. Every id elsewhere indexes into them (D22).
 #[derive(Debug, Clone, PartialEq)]
 pub struct WelcomeView {
     pub protocol_minor: u16,
+    pub player: u16,
     pub nation: Option<u32>,
     pub day: u64,
+    pub speed: wire::Speed,
     pub scenario: String,
     pub content_hash: u64,
     /// The hash the client's copy of the map files must have (`StaticData.map_hash`);
@@ -63,39 +69,170 @@ pub struct WelcomeView {
     pub map_hash: Option<u64>,
     pub goods: Vec<String>,
     pub professions: Vec<String>,
+    pub producer_types: Vec<String>,
     pub provinces: Vec<String>,
     pub province_market: Vec<u32>,
     pub markets: Vec<String>,
     pub nations: Vec<String>,
+    /// The markets each nation owns, by nation.
+    pub nation_markets: Vec<Vec<u32>>,
 }
 
-/// The parts of `DayUpdate` the client draws so far: the day and the map mode.
+/// Table sizes a session's messages are checked against.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Tables {
+    goods: usize,
+    professions: usize,
+    producer_types: usize,
+    provinces: usize,
+    markets: usize,
+    nations: usize,
+}
+
+impl Tables {
+    fn of(w: &WelcomeView) -> Tables {
+        Tables {
+            goods: w.goods.len(),
+            professions: w.professions.len(),
+            producer_types: w.producer_types.len(),
+            provinces: w.provinces.len(),
+            markets: w.markets.len(),
+            nations: w.nations.len(),
+        }
+    }
+}
+
+/// `WorldSummary`: the whole world's figures for the day. Money in currency units.
+#[derive(Debug, Clone, PartialEq)]
+pub struct WorldSummaryView {
+    pub population: u64,
+    pub workforce: u64,
+    pub unemployed: u64,
+    pub household_spending: f64,
+    pub government_spending: f64,
+    pub input_spending: f64,
+    pub wages: f64,
+    pub dividends: f64,
+    pub taxes: f64,
+    pub transfers: f64,
+    pub deprived: u64,
+    pub life_needs: f64,
+    pub militancy: f64,
+}
+
+/// `NationTable`, one entry per nation. Rates stay raw `Fixed` integers: a policy
+/// slider edits them and sends them back as commands, so they never pass through a
+/// float (D3).
+#[derive(Debug, Clone, PartialEq)]
+pub struct NationTableView {
+    pub treasury: Vec<f64>,
+    pub income_tax_rate_raw: Vec<i64>,
+    pub transfer_rate_raw: Vec<i64>,
+    pub consumption_rate_raw: Vec<i64>,
+    pub population: Vec<u64>,
+}
+
+/// `MapView`: one value per province, except in `Nation` mode, which has none.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MapViewData {
+    pub mode: wire::MapMode,
+    pub good: u16,
+    pub values: Vec<f64>,
+}
+
+/// `MarketDetail`: one entry per good.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MarketView {
+    pub market: u32,
+    pub price: Vec<f64>,
+    pub supply: Vec<f64>,
+    pub demand: Vec<f64>,
+    pub traded: Vec<f64>,
+}
+
+/// `ProvinceDetail`: the province's POPs by profession, labour pools and producers.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ProvinceView {
+    pub province: u32,
+    pub pop_profession: Vec<u16>,
+    pub pop_people: Vec<u32>,
+    pub pop_cash: Vec<f64>,
+    pub pop_life_needs: Vec<f64>,
+    pub pop_militancy: Vec<f64>,
+    pub labour_profession: Vec<u16>,
+    pub labour_workforce: Vec<u64>,
+    pub labour_jobs: Vec<u64>,
+    pub labour_employed: Vec<u64>,
+    pub producer_type: Vec<u16>,
+    pub producer_capacity: Vec<u32>,
+    pub producer_employed: Vec<u32>,
+    pub producer_wage: Vec<f64>,
+    pub producer_cash: Vec<f64>,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct DayUpdateView {
     pub day: u64,
+    pub speed: wire::Speed,
     pub skipped: u32,
     pub state_hash: u64,
-    pub map_mode: Option<wire::MapMode>,
-    /// One display value per province, in `Welcome` order (checked).
-    pub map_values: Vec<f32>,
+    pub world: WorldSummaryView,
+    pub nations: NationTableView,
+    pub map: Option<MapViewData>,
+    pub market: Option<MarketView>,
+    pub province: Option<ProvinceView>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ServerEvent {
-    Welcome(WelcomeView),
-    DayUpdate(DayUpdateView),
-    /// A message kind the client doesn't decode yet.
-    Other(wire::ServerPayload),
+    Welcome(Box<WelcomeView>),
+    Rejected {
+        reason: String,
+    },
+    DayUpdate(Box<DayUpdateView>),
+    CommandResult {
+        client_seq: u32,
+        error: wire::CommandError,
+        applies_on_day: u64,
+    },
+    ServerState {
+        day: u64,
+        speed: wire::Speed,
+        changed_by: u16,
+    },
+    Pong {
+        nonce: u64,
+    },
+    SaveResult {
+        name: String,
+        error: String,
+    },
+    SaveList {
+        names: Vec<String>,
+    },
+    Goodbye {
+        reason: String,
+    },
+    /// A message kind newer than this client: ignored (D22).
+    Unknown(wire::ServerPayload),
 }
 
 impl ServerEvent {
     /// The tag GDScript matches on (`"welcome"`, `"day_update"`, …): the
     /// `snake_case` form of the schema's `ServerPayload` member, from one table.
     pub fn tag(&self) -> &'static str {
+        use wire::ServerPayload as P;
         payload_tag(match self {
-            ServerEvent::Welcome(_) => wire::ServerPayload::Welcome,
-            ServerEvent::DayUpdate(_) => wire::ServerPayload::DayUpdate,
-            ServerEvent::Other(kind) => *kind,
+            ServerEvent::Welcome(_) => P::Welcome,
+            ServerEvent::Rejected { .. } => P::Rejected,
+            ServerEvent::DayUpdate(_) => P::DayUpdate,
+            ServerEvent::CommandResult { .. } => P::CommandResult,
+            ServerEvent::ServerState { .. } => P::ServerState,
+            ServerEvent::Pong { .. } => P::Pong,
+            ServerEvent::SaveResult { .. } => P::SaveResult,
+            ServerEvent::SaveList { .. } => P::SaveList,
+            ServerEvent::Goodbye { .. } => P::Goodbye,
+            ServerEvent::Unknown(kind) => *kind,
         })
     }
 }
@@ -116,78 +253,206 @@ fn payload_tag(kind: wire::ServerPayload) -> &'static str {
     }
 }
 
-fn required<T>(value: Option<T>, what: &str) -> Result<T, StreamError> {
-    value.ok_or_else(|| StreamError::Invalid(format!("Welcome without {what}")))
+/// `snake_case` name of a `CommandError`, for messages and the UI.
+pub fn command_error_name(e: wire::CommandError) -> &'static str {
+    match e {
+        wire::CommandError::None => "none",
+        wire::CommandError::UnknownNation => "unknown_nation",
+        wire::CommandError::RateOutOfRange => "rate_out_of_range",
+        wire::CommandError::NoBasket => "no_basket",
+        wire::CommandError::Malformed => "malformed",
+        wire::CommandError::NotPermitted => "not_permitted",
+        wire::CommandError::RateLimited => "rate_limited",
+        _ => "unknown",
+    }
 }
 
-fn strings(
-    v: Option<flatbuffers::Vector<'_, flatbuffers::ForwardsUOffset<&str>>>,
-    what: &str,
-) -> Result<Vec<String>, StreamError> {
+fn required<T>(value: Option<T>, what: &str) -> Result<T, StreamError> {
+    value.ok_or_else(|| invalid(format!("missing {what}")))
+}
+
+type StrVector<'a> = flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<&'a str>>;
+
+fn strings(v: Option<StrVector<'_>>, what: &str) -> Result<Vec<String>, StreamError> {
     Ok(required(v, what)?.iter().map(str::to_owned).collect())
+}
+
+/// A required column of `len` values.
+fn column<'a, T: flatbuffers::Follow<'a> + 'a, U>(
+    v: Option<flatbuffers::Vector<'a, T>>,
+    len: usize,
+    what: &str,
+    f: impl Fn(T::Inner) -> U,
+) -> Result<Vec<U>, StreamError> {
+    let v = required(v, what)?;
+    if v.len() != len {
+        return Err(invalid(format!("{what} has {} entries, expected {len}", v.len())));
+    }
+    Ok(v.iter().map(f).collect())
+}
+
+fn fixeds<'a>(
+    v: Option<flatbuffers::Vector<'a, wire::Fixed>>,
+    len: usize,
+    what: &str,
+) -> Result<Vec<f64>, StreamError> {
+    column(v, len, what, |f: &wire::Fixed| display(*f))
+}
+
+fn raws<'a>(v: Option<flatbuffers::Vector<'a, wire::Fixed>>, len: usize, what: &str) -> Result<Vec<i64>, StreamError> {
+    column(v, len, what, |f: &wire::Fixed| f.raw())
+}
+
+/// An id that must index a table of `len` entries.
+fn id_in<T: Copy + Into<u64>>(ids: &[T], len: usize, what: &str) -> Result<(), StreamError> {
+    match ids.iter().map(|&i| i.into()).find(|&i| i >= len as u64) {
+        Some(i) => Err(invalid(format!("{what} {i} is not in the {len}-entry table"))),
+        None => Ok(()),
+    }
 }
 
 fn welcome(w: wire::Welcome<'_>) -> Result<WelcomeView, StreamError> {
     if w.protocol_major() != PROTOCOL_MAJOR {
         return Err(StreamError::IncompatibleVersion { server_major: w.protocol_major() });
     }
-    let defs = required(w.defs(), "StaticData")?;
+    let defs = required(w.defs(), "Welcome StaticData")?;
+    let nation_defs = required(defs.nations(), "Welcome nations")?;
     let view = WelcomeView {
         protocol_minor: w.protocol_minor(),
+        player: w.player(),
         nation: w.nation(),
         day: w.day(),
-        scenario: required(w.scenario(), "a scenario name")?.to_owned(),
+        speed: w.speed(),
+        scenario: required(w.scenario(), "Welcome scenario name")?.to_owned(),
         content_hash: w.content_hash(),
         map_hash: defs.map_hash(),
-        goods: strings(defs.goods(), "goods")?,
-        professions: strings(defs.professions(), "professions")?,
-        provinces: strings(defs.provinces(), "provinces")?,
-        province_market: required(defs.province_market(), "province_market")?.iter().collect(),
-        markets: strings(defs.markets(), "markets")?,
-        nations: required(defs.nations(), "nations")?
+        goods: strings(defs.goods(), "Welcome goods")?,
+        professions: strings(defs.professions(), "Welcome professions")?,
+        producer_types: strings(defs.producer_types(), "Welcome producer_types")?,
+        provinces: strings(defs.provinces(), "Welcome provinces")?,
+        province_market: required(defs.province_market(), "Welcome province_market")?.iter().collect(),
+        markets: strings(defs.markets(), "Welcome markets")?,
+        nations: nation_defs
             .iter()
             .map(|n| required(n.key(), "a nation key").map(str::to_owned))
             .collect::<Result<_, _>>()?,
+        nation_markets: nation_defs
+            .iter()
+            .map(|n| n.markets().map(|m| m.iter().collect()).unwrap_or_default())
+            .collect(),
     };
     if view.province_market.len() != view.provinces.len() {
-        return Err(StreamError::Invalid(format!(
+        return Err(invalid(format!(
             "{} provinces but {} province_market entries",
             view.provinces.len(),
             view.province_market.len()
         )));
     }
-    if let Some(m) = view.province_market.iter().find(|&&m| m as usize >= view.markets.len()) {
-        return Err(StreamError::Invalid(format!(
-            "province_market names market {m}, but there are {}",
-            view.markets.len()
-        )));
+    id_in(&view.province_market, view.markets.len(), "province_market's market")?;
+    for markets in &view.nation_markets {
+        id_in(markets, view.markets.len(), "a nation's market")?;
     }
-    if let Some(n) = view.nation.filter(|&n| n as usize >= view.nations.len()) {
-        return Err(StreamError::Invalid(format!(
-            "this session's nation {n} is not in the {}-nation table",
-            view.nations.len()
-        )));
+    if let Some(n) = view.nation {
+        id_in(&[n], view.nations.len(), "this session's nation")?;
     }
     Ok(view)
 }
 
-fn day_update(u: wire::DayUpdate<'_>, provinces: usize) -> Result<DayUpdateView, StreamError> {
-    let map = u.map();
-    let map_values: Vec<f32> =
-        map.and_then(|m| m.values()).map(|v| v.iter().map(|f| display(*f)).collect()).unwrap_or_default();
-    // Nation mode carries no values (drawn from StaticData); every other mode has one per province.
-    if let Some(m) = map
-        && m.mode() != wire::MapMode::Nation
-        && map_values.len() != provinces
-    {
-        return Err(StreamError::Invalid(format!("map has {} values for {provinces} provinces", map_values.len())));
+fn world_summary(w: wire::WorldSummary<'_>) -> WorldSummaryView {
+    let money = |f: Option<&wire::Fixed>| f.map_or(0.0, |f| display(*f));
+    WorldSummaryView {
+        population: w.population(),
+        workforce: w.workforce(),
+        unemployed: w.unemployed(),
+        household_spending: money(w.household_spending()),
+        government_spending: money(w.government_spending()),
+        input_spending: money(w.input_spending()),
+        wages: money(w.wages()),
+        dividends: money(w.dividends()),
+        taxes: money(w.taxes()),
+        transfers: money(w.transfers()),
+        deprived: w.deprived(),
+        life_needs: money(w.life_needs()),
+        militancy: money(w.militancy()),
     }
+}
+
+fn nation_table(n: wire::NationTable<'_>, t: Tables) -> Result<NationTableView, StreamError> {
+    Ok(NationTableView {
+        treasury: fixeds(n.treasury(), t.nations, "NationTable treasury")?,
+        income_tax_rate_raw: raws(n.income_tax_rate(), t.nations, "NationTable income_tax_rate")?,
+        transfer_rate_raw: raws(n.transfer_rate(), t.nations, "NationTable transfer_rate")?,
+        consumption_rate_raw: raws(n.consumption_rate(), t.nations, "NationTable consumption_rate")?,
+        population: column(n.population(), t.nations, "NationTable population", |p| p)?,
+    })
+}
+
+fn map_view(m: wire::MapView<'_>, t: Tables) -> Result<MapViewData, StreamError> {
+    let mode = m.mode();
+    // Nation mode carries no values (drawn from StaticData); every other mode has one per province.
+    let values = match mode {
+        wire::MapMode::Nation | wire::MapMode::None => Vec::new(),
+        _ => fixeds(m.values(), t.provinces, "MapView values")?,
+    };
+    if mode == wire::MapMode::Price {
+        id_in(&[m.good()], t.goods, "MapView good")?;
+    }
+    Ok(MapViewData { mode, good: m.good(), values })
+}
+
+fn market_view(m: wire::MarketDetail<'_>, t: Tables) -> Result<MarketView, StreamError> {
+    id_in(&[m.market()], t.markets, "MarketDetail market")?;
+    Ok(MarketView {
+        market: m.market(),
+        price: fixeds(m.price(), t.goods, "MarketDetail price")?,
+        supply: fixeds(m.supply(), t.goods, "MarketDetail supply")?,
+        demand: fixeds(m.demand(), t.goods, "MarketDetail demand")?,
+        traded: fixeds(m.traded(), t.goods, "MarketDetail traded")?,
+    })
+}
+
+fn province_view(p: wire::ProvinceDetail<'_>, t: Tables) -> Result<ProvinceView, StreamError> {
+    id_in(&[p.province()], t.provinces, "ProvinceDetail province")?;
+    let pops = required(p.pops(), "ProvinceDetail pops")?;
+    let labour = required(p.labour(), "ProvinceDetail labour")?;
+    let producers = required(p.producers(), "ProvinceDetail producers")?;
+    let n = required(pops.profession(), "PopRows profession")?.len();
+    let l = required(labour.profession(), "LabourRows profession")?.len();
+    let f = required(producers.producer_type(), "ProducerRows producer_type")?.len();
+    let view = ProvinceView {
+        province: p.province(),
+        pop_profession: column(pops.profession(), n, "PopRows profession", |c| c)?,
+        pop_people: column(pops.people(), n, "PopRows people", |c| c)?,
+        pop_cash: fixeds(pops.cash(), n, "PopRows cash")?,
+        pop_life_needs: fixeds(pops.life_needs(), n, "PopRows life_needs")?,
+        pop_militancy: fixeds(pops.militancy(), n, "PopRows militancy")?,
+        labour_profession: column(labour.profession(), l, "LabourRows profession", |c| c)?,
+        labour_workforce: column(labour.workforce(), l, "LabourRows workforce", |c| c)?,
+        labour_jobs: column(labour.jobs(), l, "LabourRows jobs", |c| c)?,
+        labour_employed: column(labour.employed(), l, "LabourRows employed", |c| c)?,
+        producer_type: column(producers.producer_type(), f, "ProducerRows producer_type", |c| c)?,
+        producer_capacity: column(producers.capacity(), f, "ProducerRows capacity", |c| c)?,
+        producer_employed: column(producers.employed(), f, "ProducerRows employed", |c| c)?,
+        producer_wage: fixeds(producers.wage(), f, "ProducerRows wage")?,
+        producer_cash: fixeds(producers.cash(), f, "ProducerRows cash")?,
+    };
+    id_in(&view.pop_profession, t.professions, "a POP's profession")?;
+    id_in(&view.labour_profession, t.professions, "a labour pool's profession")?;
+    id_in(&view.producer_type, t.producer_types, "a producer's type")?;
+    Ok(view)
+}
+
+fn day_update(u: wire::DayUpdate<'_>, t: Tables) -> Result<DayUpdateView, StreamError> {
     Ok(DayUpdateView {
         day: u.day(),
+        speed: u.speed(),
         skipped: u.skipped(),
         state_hash: u.state_hash(),
-        map_mode: map.map(|m| m.mode()),
-        map_values,
+        world: world_summary(required(u.world(), "DayUpdate WorldSummary")?),
+        nations: nation_table(required(u.nations(), "DayUpdate NationTable")?, t)?,
+        map: u.map().map(|m| map_view(m, t)).transpose()?,
+        market: u.market().map(|m| market_view(m, t)).transpose()?,
+        province: u.province().map(|p| province_view(p, t)).transpose()?,
     })
 }
 
@@ -198,10 +463,11 @@ enum Phase {
     /// Before the first `Welcome`: only `Welcome`, `Rejected` or `Goodbye` may arrive.
     AwaitingWelcome,
     /// After `Welcome`: every message is checked against its tables.
-    Session { provinces: usize },
-    /// The client sent `LoadGame` ([`ServerStream::begin_reload`]): the next
-    /// `Welcome` replaces the tables (NETWORK_PROTOCOL §3).
-    Reloading { provinces: usize },
+    Session(Tables),
+    /// The client sent `LoadGame` ([`ServerStream::begin_reload`]): a new `Welcome`
+    /// may replace the tables (NETWORK_PROTOCOL §3). A failed load answers with a
+    /// `SaveResult` instead, and the session goes on with the old tables.
+    Reloading(Tables),
 }
 
 /// The server's side of one connection, as seen by the client. Feed it bytes in any
@@ -257,8 +523,8 @@ impl ServerStream {
     /// Call when sending `LoadGame`: the server answers with a new `Welcome` whose
     /// tables replace the current ones. Without this, a second `Welcome` is fatal.
     pub fn begin_reload(&mut self) {
-        if let Phase::Session { provinces } = self.phase {
-            self.phase = Phase::Reloading { provinces };
+        if let Phase::Session(t) = self.phase {
+            self.phase = Phase::Reloading(t);
         }
     }
 
@@ -266,37 +532,73 @@ impl ServerStream {
         use wire::ServerPayload as P;
         let msg = read_server_message(frame)?;
         let kind = msg.payload_type();
-        match (self.phase, kind) {
+        let tables = match (self.phase, kind) {
             // A Welcome opens a session, or replaces it after a requested reload.
-            (Phase::AwaitingWelcome | Phase::Reloading { .. }, P::Welcome) => {
-                let view = welcome(required(msg.payload_as_welcome(), "a body")?)?;
-                self.phase = Phase::Session { provinces: view.provinces.len() };
-                Ok(ServerEvent::Welcome(view))
+            (Phase::AwaitingWelcome | Phase::Reloading(_), P::Welcome) => {
+                let view = welcome(required(msg.payload_as_welcome(), "Welcome body")?)?;
+                self.phase = Phase::Session(Tables::of(&view));
+                return Ok(ServerEvent::Welcome(Box::new(view)));
             }
-            (Phase::Session { .. }, P::Welcome) => {
-                Err(StreamError::Invalid("a second Welcome without a LoadGame".to_owned()))
-            }
+            (Phase::Session(_), P::Welcome) => return Err(invalid("a second Welcome without a LoadGame".to_owned())),
             // Before the first Welcome, only a refusal can explain why there will be none.
-            (Phase::AwaitingWelcome, P::Rejected | P::Goodbye) => Ok(ServerEvent::Other(kind)),
-            (Phase::AwaitingWelcome, _) => Err(StreamError::Invalid(format!("{} before Welcome", payload_tag(kind)))),
-            (Phase::Session { provinces } | Phase::Reloading { provinces }, P::DayUpdate) => {
-                let update = msg
-                    .payload_as_day_update()
-                    .ok_or_else(|| StreamError::Invalid("DayUpdate without a body".to_owned()))?;
-                Ok(ServerEvent::DayUpdate(day_update(update, provinces)?))
+            (Phase::AwaitingWelcome, P::Rejected | P::Goodbye) => None,
+            (Phase::AwaitingWelcome, _) => return Err(invalid(format!("{} before Welcome", payload_tag(kind)))),
+            (Phase::Session(t) | Phase::Reloading(t), _) => Some(t),
+        };
+        Ok(match kind {
+            P::Rejected => {
+                let r = required(msg.payload_as_rejected(), "Rejected body")?;
+                ServerEvent::Rejected { reason: r.reason().unwrap_or_default().to_owned() }
             }
-            (Phase::Session { .. } | Phase::Reloading { .. }, _) => Ok(ServerEvent::Other(kind)),
-        }
+            P::Goodbye => {
+                let g = required(msg.payload_as_goodbye(), "Goodbye body")?;
+                ServerEvent::Goodbye { reason: g.reason().unwrap_or_default().to_owned() }
+            }
+            P::DayUpdate => {
+                let u = required(msg.payload_as_day_update(), "DayUpdate body")?;
+                ServerEvent::DayUpdate(Box::new(day_update(u, tables.expect("checked above"))?))
+            }
+            P::CommandResult => {
+                let r = required(msg.payload_as_command_result(), "CommandResult body")?;
+                ServerEvent::CommandResult {
+                    client_seq: r.client_seq(),
+                    error: r.error(),
+                    applies_on_day: r.applies_on_day(),
+                }
+            }
+            P::ServerState => {
+                let s = required(msg.payload_as_server_state(), "ServerState body")?;
+                ServerEvent::ServerState { day: s.day(), speed: s.speed(), changed_by: s.changed_by() }
+            }
+            P::Pong => ServerEvent::Pong { nonce: required(msg.payload_as_pong(), "Pong body")?.nonce() },
+            P::SaveResult => {
+                let r = required(msg.payload_as_save_result(), "SaveResult body")?;
+                if let Phase::Reloading(t) = self.phase {
+                    // The load failed (a successful one answers with Welcome).
+                    self.phase = Phase::Session(t);
+                }
+                ServerEvent::SaveResult {
+                    name: r.name().unwrap_or_default().to_owned(),
+                    error: r.error().unwrap_or_default().to_owned(),
+                }
+            }
+            P::SaveList => {
+                let l = required(msg.payload_as_save_list(), "SaveList body")?;
+                ServerEvent::SaveList {
+                    names: l.names().map(|n| n.iter().map(str::to_owned).collect()).unwrap_or_default(),
+                }
+            }
+            _ => ServerEvent::Unknown(kind),
+        })
     }
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
-    use crate::demo;
     use flatbuffers::FlatBufferBuilder;
 
-    fn server_frame(
+    pub(crate) fn server_frame(
         b: &mut FlatBufferBuilder<'_>,
         kind: wire::ServerPayload,
         payload: flatbuffers::WIPOffset<flatbuffers::UnionWIPOffset>,
@@ -313,8 +615,9 @@ mod tests {
         server_frame(&mut b, wire::ServerPayload::Pong, p.as_union_value())
     }
 
-    /// A Welcome with `provinces` provinces whose province_market has `markets_listed` entries.
-    fn welcome_frame(major: u16, provinces: usize, markets_listed: usize, with_defs: bool) -> Vec<u8> {
+    /// A Welcome with `provinces` provinces in one market, one nation, whose
+    /// province_market has `markets_listed` entries.
+    pub(crate) fn welcome_frame(major: u16, provinces: usize, markets_listed: usize, with_defs: bool) -> Vec<u8> {
         let mut b = FlatBufferBuilder::new();
         let names: Vec<_> = (0..provinces).map(|p| b.create_string(&format!("p{p}"))).collect();
         let names = b.create_vector(&names);
@@ -322,7 +625,11 @@ mod tests {
         let market = b.create_string("m0");
         let markets = b.create_vector(&[market]);
         let empty_strings = b.create_vector::<flatbuffers::WIPOffset<&str>>(&[]);
-        let nations = b.create_vector::<flatbuffers::WIPOffset<wire::NationDef>>(&[]);
+        let key = b.create_string("n0");
+        let nation_markets = b.create_vector(&[0u32]);
+        let nation =
+            wire::NationDef::create(&mut b, &wire::NationDefArgs { key: Some(key), markets: Some(nation_markets) });
+        let nations = b.create_vector(&[nation]);
         let defs = with_defs.then(|| {
             wire::StaticData::create(
                 &mut b,
@@ -346,20 +653,64 @@ mod tests {
         server_frame(&mut b, wire::ServerPayload::Welcome, w.as_union_value())
     }
 
+    /// A DayUpdate for one nation with a population map of `map_values` values.
+    pub(crate) fn day_update_frame(day: u64, map_values: usize) -> Vec<u8> {
+        let mut b = FlatBufferBuilder::new();
+        let world =
+            wire::WorldSummary::create(&mut b, &wire::WorldSummaryArgs { population: 10, ..Default::default() });
+        let one = [wire::Fixed::new(1)];
+        let (treasury, income, transfer, consumption) =
+            (b.create_vector(&one), b.create_vector(&one), b.create_vector(&one), b.create_vector(&one));
+        let population = b.create_vector(&[10u64]);
+        let nations = wire::NationTable::create(
+            &mut b,
+            &wire::NationTableArgs {
+                treasury: Some(treasury),
+                income_tax_rate: Some(income),
+                transfer_rate: Some(transfer),
+                consumption_rate: Some(consumption),
+                population: Some(population),
+            },
+        );
+        let values = b.create_vector(&vec![wire::Fixed::new(5_000_000); map_values]);
+        let map = wire::MapView::create(
+            &mut b,
+            &wire::MapViewArgs { mode: wire::MapMode::Population, good: 0, values: Some(values) },
+        );
+        let u = wire::DayUpdate::create(
+            &mut b,
+            &wire::DayUpdateArgs {
+                day,
+                world: Some(world),
+                nations: Some(nations),
+                map: Some(map),
+                ..Default::default()
+            },
+        );
+        server_frame(&mut b, wire::ServerPayload::DayUpdate, u.as_union_value())
+    }
+
+    fn session(provinces: usize) -> Vec<u8> {
+        let mut bytes = welcome_frame(PROTOCOL_MAJOR, provinces, provinces, true);
+        bytes.extend(day_update_frame(1, provinces));
+        bytes
+    }
+
     #[test]
-    fn decodes_the_demo_session() {
+    fn decodes_a_session() {
         let mut s = ServerStream::default();
-        let events = s.push(&demo::frames(12));
+        let events = s.push(&session(12));
         assert_eq!(s.error(), None);
         let [ServerEvent::Welcome(w), ServerEvent::DayUpdate(u)] = events.as_slice() else { panic!("got {events:?}") };
-        assert_eq!((w.provinces.len(), w.province_market.len(), w.nations.len()), (12, 12, 2));
-        assert_eq!((u.map_mode, u.map_values.len()), (Some(wire::MapMode::Population), 12));
-        assert!(u.map_values.iter().all(|v| v.is_finite() && *v > 0.0));
+        assert_eq!((w.provinces.len(), w.province_market.len(), w.nations.len()), (12, 12, 1));
+        let map = u.map.as_ref().unwrap();
+        assert_eq!((map.mode, map.values.len(), map.values[0]), (wire::MapMode::Population, 12, 5.0));
+        assert_eq!((u.world.population, u.nations.income_tax_rate_raw[0]), (10, 1));
     }
 
     #[test]
     fn any_chunking_gives_the_same_events() {
-        let bytes = demo::frames(30);
+        let bytes = session(30);
         let whole = ServerStream::default().push(&bytes);
         let mut s = ServerStream::default();
         let mut chunked = Vec::new();
@@ -371,7 +722,7 @@ mod tests {
 
     #[test]
     fn errors_latch_and_later_frames_are_never_decoded() {
-        let mut bytes = demo::frames(5);
+        let mut bytes = session(5);
         let corrupt_at = bytes.len();
         bytes.extend(pong());
         bytes[corrupt_at + 8..corrupt_at + 12].copy_from_slice(b"PAXC"); // wrong identifier
@@ -389,7 +740,7 @@ mod tests {
     fn a_welcome_without_tables_or_with_mismatched_tables_is_fatal() {
         let mut s = ServerStream::default();
         assert!(s.push(&welcome_frame(PROTOCOL_MAJOR, 3, 3, false)).is_empty());
-        assert_eq!(s.error(), Some(&StreamError::Invalid("Welcome without StaticData".into())));
+        assert_eq!(s.error(), Some(&StreamError::Invalid("missing Welcome StaticData".into())));
 
         let mut s = ServerStream::default();
         assert!(s.push(&welcome_frame(PROTOCOL_MAJOR, 3, 2, true)).is_empty());
@@ -416,9 +767,25 @@ mod tests {
         assert_eq!(s.push(&welcome_frame(PROTOCOL_MAJOR, 2, 2, true)).len(), 1);
         s.begin_reload();
         assert_eq!(s.push(&welcome_frame(PROTOCOL_MAJOR, 5, 5, true)).len(), 1);
-        let update = &demo::frames(5)[demo::welcome_len(5)..]; // 5 map values: matches the new tables
-        assert_eq!(s.push(update).len(), 1);
+        assert_eq!(s.push(&day_update_frame(2, 5)).len(), 1, "5 map values: matches the new tables");
         assert_eq!(s.error(), None);
+    }
+
+    #[test]
+    fn a_failed_load_keeps_the_old_tables() {
+        let mut s = ServerStream::default();
+        s.push(&welcome_frame(PROTOCOL_MAJOR, 2, 2, true));
+        s.begin_reload();
+        let mut b = FlatBufferBuilder::new();
+        let error = b.create_string("there is no save");
+        let r = wire::SaveResult::create(&mut b, &wire::SaveResultArgs { name: None, error: Some(error) });
+        let failed = server_frame(&mut b, wire::ServerPayload::SaveResult, r.as_union_value());
+        assert!(
+            matches!(s.push(&failed).as_slice(), [ServerEvent::SaveResult { error, .. }] if error.contains("no save"))
+        );
+        // A Welcome now is no longer expected.
+        assert!(s.push(&welcome_frame(PROTOCOL_MAJOR, 2, 2, true)).is_empty());
+        assert!(matches!(s.error(), Some(StreamError::Invalid(e)) if e.contains("second Welcome")));
     }
 
     #[test]
@@ -432,16 +799,18 @@ mod tests {
     fn a_map_with_the_wrong_province_count_is_fatal() {
         let mut s = ServerStream::default();
         let mut bytes = welcome_frame(PROTOCOL_MAJOR, 4, 4, true);
-        bytes.extend(&demo::frames(5)[demo::welcome_len(5)..]); // a DayUpdate with 5 map values
+        bytes.extend(day_update_frame(1, 5));
         let events = s.push(&bytes);
         assert_eq!(events.len(), 1);
-        assert!(matches!(s.error(), Some(StreamError::Invalid(e)) if e.contains("5 values for 4 provinces")));
+        assert!(
+            matches!(s.error(), Some(StreamError::Invalid(e)) if e.contains("MapView values has 5 entries, expected 4"))
+        );
     }
 
     #[test]
     fn tags_are_snake_case_for_every_message() {
         let mut s = ServerStream::default();
-        let mut bytes = demo::frames(2);
+        let mut bytes = session(2);
         bytes.extend(pong());
         let tags: Vec<_> = s.push(&bytes).iter().map(ServerEvent::tag).collect();
         assert_eq!(tags, ["welcome", "day_update", "pong"]);

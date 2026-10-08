@@ -13,17 +13,17 @@ crate-type = ["cdylib", "rlib"]
 
 # Depends on the protocol only, never on pax_engine: the client must not be able to
 # simulate (D10, D12). CI checks this with `cargo tree`.
-[features]
-# The M3-0 spike's demo data (PaxDemo), until pax_server sends real frames. Off in
-# release clients: build the spike with `cargo build -p pax_godot --features demo`.
-demo = []
-
 [dependencies]
 pax_protocol.workspace = true
 flatbuffers.workspace = true
 # Pinned exactly: godot-rust is pre-1.0 and breaks between minor versions. api-4-7
 # builds against Godot 4.7's API, and the extension then loads in Godot 4.7 and later.
 godot = { version = "=0.5.5", features = ["api-4-7"] }
+
+[dev-dependencies]
+# Tests talk to a real server (tests/client.rs). Dev-only: the bridge itself never
+# links the engine (CI's crate-boundary step checks normal dependencies).
+pax_server = { path = "../pax_server" }
 
 # The workspace lints, except one. godot-rust's entry point must be an
 # `unsafe impl ExtensionLibrary`, and the workspace's `forbid(unsafe_code)` can't be

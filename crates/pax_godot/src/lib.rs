@@ -1,24 +1,32 @@
 //! `pax_godot`: the client's side of the wire protocol, as a Godot GDExtension (D12).
 //!
-//! GDScript owns the UI. This library owns everything about the protocol: framing,
-//! size limits, verification, session rules, and decoding into Godot values. That
-//! logic lives in `decode.rs` as plain Rust, unit-tested without Godot and shared with
-//! the server through `pax_protocol`. This file only converts its results into Godot
-//! types.
+//! GDScript owns the UI. This library owns everything about the protocol: the
+//! connection and the local server (`connection.rs`), framing, size limits,
+//! verification, session rules and decoding (`decode.rs`), and building client
+//! messages (`encode.rs`). All of that is plain Rust, tested without Godot (much of
+//! it against a real `pax_server`). This file only converts between it and Godot
+//! types, with every Dictionary key named once in `keys.rs`.
 //!
 //! It depends on `pax_protocol` only, never on `pax_engine`, so the client can't
 //! simulate (D10). Float arithmetic is linted everywhere except `decode::display`:
 //! code that builds commands (simulation input) must use integers (D3).
-//!
-//! **M3-0 state:** decoding `Welcome` and `DayUpdate`, plus demo data behind the
-//! `demo` feature. The TCP connection and the remaining messages arrive with M3-8.
 
+pub mod connection;
 pub mod decode;
-#[cfg(any(test, feature = "demo"))]
-pub mod demo;
+pub mod encode;
+pub mod keys;
 
-use decode::{ServerEvent, ServerStream};
+use std::path::Path;
+use std::time::Duration;
+
+use connection::{Connection, LocalServer};
+use decode::{
+    DayUpdateView, MapViewData, MarketView, NationTableView, ProvinceView, ServerEvent, WelcomeView, WorldSummaryView,
+    command_error_name,
+};
+use encode::Policy;
 use godot::prelude::*;
+use pax_protocol::wire;
 
 /// The extension's entry point. godot-rust requires it to be an `unsafe impl`; this
 /// module is the crate's only `unsafe` (see Cargo.toml).
@@ -32,46 +40,170 @@ mod entry {
     unsafe impl ExtensionLibrary for PaxExtension {}
 }
 
-/// Turns bytes from the server into decoded messages for GDScript.
+/// One session with a game server, for GDScript.
 ///
-/// Feed it whatever the socket delivered, in any chunking, with `push`. It returns
-/// every complete message as a `Dictionary`, whose `"type"` is the message's
-/// `snake_case` tag: `"welcome"`, `"day_update"`, `"pong"` and so on.
+/// Start one with `launch` (single player: starts `pax_server` on a free local port
+/// and connects, NETWORK_PROTOCOL §6) or `connect_to`, then say `hello`. Call `poll`
+/// once per frame: it returns every event since the last poll as a Dictionary whose
+/// `PaxKeys.TYPE` is the message's `snake_case` tag (`PaxKeys.WELCOME`,
+/// `PaxKeys.DAY_UPDATE`, …). When the connection ends, for any reason, one last
+/// event of type `PaxKeys.CLOSED` carries the `PaxKeys.REASON`; nothing follows it.
 ///
-/// The first protocol error ends the stream for good: `push` returns what decoded
-/// before it, `failed()` turns true, and later input is ignored. The caller must
-/// disconnect (D22). The bridge enforces this, not GDScript.
-///
-/// An absent id is `null`, never a number. A sandbox session's `"nation"`, for
-/// example, is `null`, so a lookup such as `nations[welcome["nation"]]` fails loudly
-/// instead of silently indexing from the end (D22: no `-1` sentinels).
+/// Updates are acknowledged and the session kept alive automatically (see
+/// `connection.rs`). An absent id is `null`, never a number (D22: no `-1` sentinels).
 #[derive(GodotClass)]
 #[class(base = RefCounted, init)]
-pub struct PaxServerReader {
-    stream: ServerStream,
+pub struct PaxClient {
+    connection: Option<Connection>,
+    /// Declared after `connection`, so the connection closes first and the server
+    /// can exit by itself (`--exit-when-idle`).
+    server: Option<LocalServer>,
+}
+
+/// `null` for `None`.
+fn optional<T: ToGodot>(v: Option<T>) -> Variant {
+    v.map_or(Variant::nil(), |v| v.to_variant())
+}
+
+/// An id argument from GDScript: `null` for none, otherwise a non-negative int.
+fn optional_id(v: &Variant) -> Option<u32> {
+    if v.is_nil() { None } else { v.try_to::<i64>().ok().and_then(|i| u32::try_from(i).ok()) }
 }
 
 #[godot_api]
-impl PaxServerReader {
+impl PaxClient {
+    /// Starts `server_path` for `scenario_dir`, saving into `saves_dir`, and connects.
+    /// Returns an error message, or `""` on success.
     #[func]
-    fn push(&mut self, bytes: PackedByteArray) -> Array<VarDictionary> {
+    fn launch(&mut self, server_path: GString, scenario_dir: GString, saves_dir: GString) -> GString {
+        let (server, scenario, saves) = (server_path.to_string(), scenario_dir.to_string(), saves_dir.to_string());
+        match LocalServer::launch(Path::new(&server), Path::new(&scenario), Path::new(&saves)) {
+            Ok(local) => {
+                let addr = local.addr;
+                self.server = Some(local);
+                self.connect_addr(addr)
+            }
+            Err(e) => GString::from(&e),
+        }
+    }
+
+    /// Connects to a running server. Returns an error message, or `""`.
+    #[func]
+    fn connect_to(&mut self, host: GString, port: i64) -> GString {
+        let Ok(port) = u16::try_from(port) else { return GString::from("port out of range") };
+        match format!("{host}:{port}").parse() {
+            Ok(addr) => self.connect_addr(addr),
+            Err(e) => GString::from(&format!("bad address: {e}")),
+        }
+    }
+
+    fn connect_addr(&mut self, addr: std::net::SocketAddr) -> GString {
+        match Connection::connect(addr, Duration::from_secs(5)) {
+            Ok(c) => {
+                self.connection = Some(c);
+                GString::new()
+            }
+            Err(e) => GString::from(&format!("cannot connect to {addr}: {e}")),
+        }
+    }
+
+    #[func]
+    fn is_open(&self) -> bool {
+        self.connection.as_ref().is_some_and(Connection::is_open)
+    }
+
+    /// Closes the connection (the launched server then exits by itself).
+    #[func]
+    fn disconnect_from_server(&mut self) {
+        if let Some(c) = &mut self.connection {
+            c.disconnect();
+        }
+    }
+
+    /// Every event since the last poll. Never blocks.
+    #[func]
+    fn poll(&mut self) -> Array<VarDictionary> {
         let mut out = Array::new();
-        for event in self.stream.push(bytes.as_slice()) {
-            out.push(&to_dictionary(event));
+        let Some(c) = &mut self.connection else { return out };
+        let polled = c.poll();
+        for event in polled.events {
+            out.push(&event_dictionary(event));
+        }
+        if let Some(reason) = polled.closed {
+            let mut d = VarDictionary::new();
+            d.set(keys::TYPE, keys::CLOSED);
+            d.set(keys::REASON, &GString::from(&reason));
+            out.push(&d);
         }
         out
     }
 
-    /// True once the stream has failed. It never resets.
+    /// Opens the session. `nation`: a nation index, or `null` for sandbox (M3).
     #[func]
-    fn failed(&self) -> bool {
-        self.stream.error().is_some()
+    fn hello(&mut self, nation: Variant) {
+        if let Some(c) = &mut self.connection {
+            c.hello(optional_id(&nation));
+        }
     }
 
-    /// Why the stream failed, for the connection-lost screen; empty while healthy.
+    /// `map_mode`: a `MapMode` value. `market`, `province`: an index, or `null` for
+    /// no panel.
     #[func]
-    fn error(&self) -> GString {
-        self.stream.error().map(|e| GString::from(&e.to_string())).unwrap_or_default()
+    fn subscribe(&mut self, map_mode: i64, map_good: i64, market: Variant, province: Variant) {
+        if let Some(c) = &mut self.connection {
+            let mode = wire::MapMode(u8::try_from(map_mode).unwrap_or(0));
+            let good = u16::try_from(map_good).unwrap_or(0);
+            c.subscribe(mode, good, optional_id(&market), optional_id(&province));
+        }
+    }
+
+    /// `speed`: 0 pauses, 1 to 5 run from slowest to fastest (D23).
+    #[func]
+    fn set_speed(&mut self, speed: i64) {
+        if let Some(c) = &mut self.connection {
+            c.set_speed(wire::Speed(u8::try_from(speed).unwrap_or(0)));
+        }
+    }
+
+    /// Sends a policy command and returns its `client_seq` (0 when not connected).
+    /// `policy` is `"income_tax"`, `"transfer"` or `"consumption"`. `rate_raw` is the
+    /// rate as a raw `Fixed` integer (0.15 is 150000): commands never carry floats (D3).
+    #[func]
+    fn submit_policy(&mut self, policy: GString, nation: i64, rate_raw: i64) -> i64 {
+        let policy = match policy.to_string().as_str() {
+            "income_tax" => Policy::IncomeTax,
+            "transfer" => Policy::Transfer,
+            "consumption" => Policy::Consumption,
+            other => {
+                godot_error!("unknown policy {other:?}");
+                return 0;
+            }
+        };
+        match (&mut self.connection, u32::try_from(nation)) {
+            (Some(c), Ok(nation)) => i64::from(c.submit(policy, nation, rate_raw)),
+            _ => 0,
+        }
+    }
+
+    #[func]
+    fn save_game(&mut self, name: GString) {
+        if let Some(c) = &mut self.connection {
+            c.save_game(&name.to_string());
+        }
+    }
+
+    #[func]
+    fn load_game(&mut self, name: GString) {
+        if let Some(c) = &mut self.connection {
+            c.load_game(&name.to_string());
+        }
+    }
+
+    #[func]
+    fn list_saves(&mut self) {
+        if let Some(c) = &mut self.connection {
+            c.list_saves();
+        }
     }
 }
 
@@ -79,59 +211,158 @@ fn strings(v: &[String]) -> PackedStringArray {
     v.iter().map(GString::from).collect()
 }
 
-fn to_dictionary(event: ServerEvent) -> VarDictionary {
+fn floats(v: &[f64]) -> PackedFloat64Array {
+    v.iter().copied().collect()
+}
+
+fn ints<T: Copy + Into<i64>>(v: &[T]) -> PackedInt64Array {
+    v.iter().map(|&x| x.into()).collect()
+}
+
+/// Counts that may exceed `i64::MAX` in theory, saturated (display only).
+fn counts(v: &[u64]) -> PackedInt64Array {
+    v.iter().map(|&x| i64::try_from(x).unwrap_or(i64::MAX)).collect()
+}
+
+fn count(x: u64) -> i64 {
+    i64::try_from(x).unwrap_or(i64::MAX)
+}
+
+fn event_dictionary(event: ServerEvent) -> VarDictionary {
     let mut d = VarDictionary::new();
-    d.set("type", event.tag());
+    d.set(keys::TYPE, event.tag());
     match event {
-        ServerEvent::Welcome(w) => {
-            d.set("protocol_minor", i64::from(w.protocol_minor));
-            d.set("nation", &w.nation.map_or(Variant::nil(), |n| Variant::from(i64::from(n))));
-            d.set("day", w.day as i64);
-            d.set("scenario", &GString::from(&w.scenario));
-            // Godot ints are signed 64-bit; the hash is an identifier, so its bits are kept as-is.
-            d.set("content_hash", w.content_hash as i64);
-            // null when the scenario has no map (D22: absent ids/values are null, never a sentinel).
-            d.set("map_hash", &w.map_hash.map_or(Variant::nil(), |h| Variant::from(h as i64)));
-            d.set("goods", &strings(&w.goods));
-            d.set("professions", &strings(&w.professions));
-            d.set("provinces", &strings(&w.provinces));
-            d.set("province_market", &w.province_market.iter().map(|&m| m as i32).collect::<PackedInt32Array>());
-            d.set("markets", &strings(&w.markets));
-            d.set("nations", &strings(&w.nations));
+        ServerEvent::Welcome(w) => welcome(&mut d, &w),
+        ServerEvent::Rejected { reason } | ServerEvent::Goodbye { reason } => {
+            d.set(keys::REASON, &GString::from(&reason))
         }
-        ServerEvent::DayUpdate(u) => {
-            d.set("day", u.day as i64);
-            d.set("skipped", i64::from(u.skipped));
-            // Godot ints are signed 64-bit; the hash is an identifier, so its bits are kept as-is.
-            d.set("state_hash", u.state_hash as i64);
-            d.set("map_mode", u.map_mode.map_or(0, |m| i64::from(m.0)));
-            d.set("map_values", &u.map_values.into_iter().collect::<PackedFloat32Array>());
+        ServerEvent::DayUpdate(u) => day_update(&mut d, &u),
+        ServerEvent::CommandResult { client_seq, error, applies_on_day } => {
+            d.set(keys::CLIENT_SEQ, i64::from(client_seq));
+            d.set(keys::ERROR, command_error_name(error));
+            d.set(keys::APPLIES_ON_DAY, count(applies_on_day));
         }
-        ServerEvent::Other(_) => {}
+        ServerEvent::ServerState { day, speed, changed_by } => {
+            d.set(keys::DAY, count(day));
+            d.set(keys::SPEED, i64::from(speed.0));
+            d.set(keys::CHANGED_BY, i64::from(changed_by));
+        }
+        // An identifier: its bits are kept as-is in Godot's signed 64-bit int.
+        ServerEvent::Pong { nonce } => d.set(keys::NONCE, nonce as i64),
+        ServerEvent::SaveResult { name, error } => {
+            d.set(keys::NAME, &GString::from(&name));
+            d.set(keys::ERROR, &GString::from(&error));
+        }
+        ServerEvent::SaveList { names } => d.set(keys::NAMES, &strings(&names)),
+        ServerEvent::Unknown(_) => {}
     }
     d
 }
 
-/// Demo data for the M3-0 spike (see `demo.rs`), only with the `demo` feature.
-#[cfg(feature = "demo")]
-#[derive(GodotClass)]
-#[class(base = RefCounted, init)]
-pub struct PaxDemo;
-
-#[cfg(feature = "demo")]
-#[godot_api]
-impl PaxDemo {
-    /// A `Welcome` then a `DayUpdate` for `provinces` provinces, as raw server bytes.
-    #[func]
-    fn frames(provinces: i64) -> PackedByteArray {
-        PackedByteArray::from(demo::frames(provinces.clamp(1, 65_535) as usize).as_slice())
+fn welcome(d: &mut VarDictionary, w: &WelcomeView) {
+    d.set(keys::PROTOCOL_MINOR, i64::from(w.protocol_minor));
+    d.set(keys::PLAYER, i64::from(w.player));
+    d.set(keys::NATION, &optional(w.nation.map(i64::from)));
+    d.set(keys::DAY, count(w.day));
+    d.set(keys::SPEED, i64::from(w.speed.0));
+    d.set(keys::SCENARIO, &GString::from(&w.scenario));
+    // Identifiers: their bits are kept as-is in Godot's signed 64-bit int.
+    d.set(keys::CONTENT_HASH, w.content_hash as i64);
+    d.set(keys::MAP_HASH, &optional(w.map_hash.map(|h| h as i64)));
+    d.set(keys::GOODS, &strings(&w.goods));
+    d.set(keys::PROFESSIONS, &strings(&w.professions));
+    d.set(keys::PRODUCER_TYPES, &strings(&w.producer_types));
+    d.set(keys::PROVINCES, &strings(&w.provinces));
+    d.set(keys::PROVINCE_MARKET, &ints(&w.province_market));
+    d.set(keys::MARKETS, &strings(&w.markets));
+    d.set(keys::NATIONS, &strings(&w.nations));
+    let mut nation_markets: Array<PackedInt64Array> = Array::new();
+    for markets in &w.nation_markets {
+        nation_markets.push(&ints(markets));
     }
+    d.set(keys::NATION_MARKETS, &nation_markets);
+}
 
-    /// An RGB8 province-ID image (`r + 256·g` = province index) for the map shader.
-    #[func]
-    fn province_id_image(width: i64, height: i64, provinces: i64) -> PackedByteArray {
-        let (w, h, n) =
-            (width.clamp(1, 8192) as usize, height.clamp(1, 8192) as usize, provinces.clamp(1, 65_535) as usize);
-        PackedByteArray::from(demo::province_id_image(w, h, n).as_slice())
-    }
+fn day_update(d: &mut VarDictionary, u: &DayUpdateView) {
+    d.set(keys::DAY, count(u.day));
+    d.set(keys::SPEED, i64::from(u.speed.0));
+    d.set(keys::SKIPPED, i64::from(u.skipped));
+    d.set(keys::STATE_HASH, u.state_hash as i64);
+    d.set(keys::WORLD, &world_summary(&u.world));
+    d.set(keys::NATIONS, &nation_table(&u.nations));
+    d.set(keys::MAP, &optional(u.map.as_ref().map(map_view)));
+    d.set(keys::MARKET, &optional(u.market.as_ref().map(market_view)));
+    d.set(keys::PROVINCE, &optional(u.province.as_ref().map(province_view)));
+}
+
+fn world_summary(w: &WorldSummaryView) -> VarDictionary {
+    let mut d = VarDictionary::new();
+    d.set(keys::POPULATION, count(w.population));
+    d.set(keys::WORKFORCE, count(w.workforce));
+    d.set(keys::UNEMPLOYED, count(w.unemployed));
+    d.set(keys::HOUSEHOLD_SPENDING, w.household_spending);
+    d.set(keys::GOVERNMENT_SPENDING, w.government_spending);
+    d.set(keys::INPUT_SPENDING, w.input_spending);
+    d.set(keys::WAGES, w.wages);
+    d.set(keys::DIVIDENDS, w.dividends);
+    d.set(keys::TAXES, w.taxes);
+    d.set(keys::TRANSFERS, w.transfers);
+    d.set(keys::DEPRIVED, count(w.deprived));
+    d.set(keys::LIFE_NEEDS, w.life_needs);
+    d.set(keys::MILITANCY, w.militancy);
+    d
+}
+
+fn nation_table(n: &NationTableView) -> VarDictionary {
+    let mut d = VarDictionary::new();
+    d.set(keys::TREASURY, &floats(&n.treasury));
+    d.set(keys::INCOME_TAX_RATE_RAW, &ints(&n.income_tax_rate_raw));
+    d.set(keys::TRANSFER_RATE_RAW, &ints(&n.transfer_rate_raw));
+    d.set(keys::CONSUMPTION_RATE_RAW, &ints(&n.consumption_rate_raw));
+    d.set(keys::POPULATION, &counts(&n.population));
+    d
+}
+
+fn map_view(m: &MapViewData) -> VarDictionary {
+    let mut d = VarDictionary::new();
+    d.set(keys::MODE, i64::from(m.mode.0));
+    d.set(keys::GOOD, i64::from(m.good));
+    d.set(keys::VALUES, &floats(&m.values));
+    d
+}
+
+fn market_view(m: &MarketView) -> VarDictionary {
+    let mut d = VarDictionary::new();
+    d.set(keys::MARKET, i64::from(m.market));
+    d.set(keys::PRICE, &floats(&m.price));
+    d.set(keys::SUPPLY, &floats(&m.supply));
+    d.set(keys::DEMAND, &floats(&m.demand));
+    d.set(keys::TRADED, &floats(&m.traded));
+    d
+}
+
+fn province_view(p: &ProvinceView) -> VarDictionary {
+    let mut pops = VarDictionary::new();
+    pops.set(keys::PROFESSION, &ints(&p.pop_profession));
+    pops.set(keys::PEOPLE, &ints(&p.pop_people));
+    pops.set(keys::CASH, &floats(&p.pop_cash));
+    pops.set(keys::LIFE_NEEDS, &floats(&p.pop_life_needs));
+    pops.set(keys::MILITANCY, &floats(&p.pop_militancy));
+    let mut labour = VarDictionary::new();
+    labour.set(keys::PROFESSION, &ints(&p.labour_profession));
+    labour.set(keys::WORKFORCE, &counts(&p.labour_workforce));
+    labour.set(keys::JOBS, &counts(&p.labour_jobs));
+    labour.set(keys::EMPLOYED, &counts(&p.labour_employed));
+    let mut producers = VarDictionary::new();
+    producers.set(keys::PRODUCER_TYPE, &ints(&p.producer_type));
+    producers.set(keys::CAPACITY, &ints(&p.producer_capacity));
+    producers.set(keys::EMPLOYED, &ints(&p.producer_employed));
+    producers.set(keys::WAGE, &floats(&p.producer_wage));
+    producers.set(keys::CASH, &floats(&p.producer_cash));
+    let mut d = VarDictionary::new();
+    d.set(keys::PROVINCE, i64::from(p.province));
+    d.set(keys::POPS, &pops);
+    d.set(keys::LABOUR, &labour);
+    d.set(keys::PRODUCERS, &producers);
+    d
 }
