@@ -325,3 +325,33 @@ fn a_dropped_player_rejoins_with_its_join_target() {
             if players.iter().any(|p| p.player == player && !p.away && p.name == "bo"))
     });
 }
+
+/// M4-9: a game the client hosts ends cleanly when the client stops it. Its players
+/// are told "the server is shutting down" (`Goodbye`), not cut off, and `stop`
+/// returns at once (Godot's main thread never waits for the server).
+#[test]
+fn a_stopped_hosted_game_says_goodbye_to_its_players() {
+    let saves = TempDir::new("stop");
+    std::fs::create_dir_all(&saves.0).unwrap();
+    let mut hosted = LocalServer::host(&server_binary(), &repo().join("scenarios/two_states"), &saves.0, 2)
+        .expect("the hosted game starts");
+    assert_eq!(hosted.fingerprint.len(), 64, "the fingerprint was read back");
+    let target =
+        JoinTarget { addr: hosted.server.addr, fingerprint: hosted.fingerprint.clone(), password: None, name: None };
+    let mut c = Tester::new(target.connect(Duration::from_secs(5)).unwrap());
+    c.hello(Some(0));
+    c.wait_for(|e| matches!(e, ServerEvent::Welcome(_)));
+
+    let started = Instant::now();
+    hosted.server.stop();
+    assert!(started.elapsed() < Duration::from_millis(500), "stop doesn't wait for the server");
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let reason = loop {
+        if let Some(reason) = c.c.poll().closed {
+            break reason;
+        }
+        assert!(Instant::now() < deadline, "the session must end");
+        std::thread::sleep(Duration::from_millis(10));
+    };
+    assert!(reason.contains("the server is shutting down"), "a Goodbye, not a cut: {reason}");
+}

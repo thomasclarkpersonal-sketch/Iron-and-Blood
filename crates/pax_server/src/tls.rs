@@ -15,11 +15,6 @@ use rustls::pki_types::pem::PemObject;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use tokio_rustls::TlsAcceptor;
 
-/// The name a self-signed certificate carries. Cosmetic: clients pin the fingerprint
-/// and ignore the name. The bridge sends the same one as SNI
-/// (`pax_godot::transport::SERVER_NAME`).
-const SERVER_NAME: &str = "pax-server";
-
 /// A server's TLS: what accepts connections, and what clients pin.
 #[derive(Clone)]
 pub(crate) struct Tls {
@@ -43,7 +38,8 @@ pub(crate) fn fingerprint(certificate: &[u8]) -> String {
 
 /// A fresh self-signed certificate, for a player-hosted game.
 pub(crate) fn self_signed() -> Result<Tls, String> {
-    let generated = rcgen::generate_simple_self_signed(vec![SERVER_NAME.to_owned()])
+    // Cosmetic: clients pin the fingerprint and ignore the name.
+    let generated = rcgen::generate_simple_self_signed(vec![pax_protocol::TLS_SERVER_NAME.to_owned()])
         .map_err(|e| format!("cannot make a certificate: {e}"))?;
     let certificate = generated.cert.der().clone();
     let key = PrivateKeyDer::Pkcs8(generated.key_pair.serialize_der().into());

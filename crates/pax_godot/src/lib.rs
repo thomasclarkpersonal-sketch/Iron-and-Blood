@@ -121,8 +121,7 @@ impl PaxClient {
     #[func]
     fn launch(&mut self, server_path: GString, scenario_dir: GString, saves_dir: GString) -> GString {
         self.end_session();
-        self.hosting = None;
-        self.joined = None;
+        self.forget_multiplayer();
         let (server, scenario, saves) = (server_path.to_string(), scenario_dir.to_string(), saves_dir.to_string());
         self.scenario_dir = Some(scenario.clone().into());
         match LocalServer::launch(Path::new(&server), Path::new(&scenario), Path::new(&saves)) {
@@ -152,8 +151,7 @@ impl PaxClient {
             return rejected(format!("{players} players: a hosted game has at least 2"));
         };
         self.end_session();
-        self.hosting = None;
-        self.joined = None;
+        self.forget_multiplayer();
         let (server, scenario, saves) = (server_path.to_string(), scenario_dir.to_string(), saves_dir.to_string());
         let hosted = match LocalServer::host(Path::new(&server), Path::new(&scenario), Path::new(&saves), players) {
             Ok(hosted) => hosted,
@@ -185,6 +183,7 @@ impl PaxClient {
         name: GString,
         scenario_dir: GString,
     ) -> GString {
+        self.forget_multiplayer();
         let addr = match self.new_session(&host, port) {
             Ok(addr) => addr,
             Err(e) => return e,
@@ -256,7 +255,7 @@ impl PaxClient {
     /// Connects to a running server. Returns an error message, or `""`.
     #[func]
     fn connect_to(&mut self, host: GString, port: i64) -> GString {
-        self.joined = None;
+        self.forget_multiplayer();
         match self.new_session(&host, port) {
             Ok(addr) => self.connect_addr(addr),
             Err(e) => e,
@@ -276,6 +275,14 @@ impl PaxClient {
         self.welcome = None;
         self.map = None;
         self.scenario_dir = None;
+    }
+
+    /// Leaves multiplayer: ends the game this client hosts, if any, and forgets the
+    /// game to rejoin. Every connect path but `rejoin` starts with it, so a client is
+    /// in at most one multiplayer game.
+    fn forget_multiplayer(&mut self) {
+        self.hosting = None;
+        self.joined = None;
     }
 
     /// Starts a new session to `host:port`: nothing of the previous one carries over,
@@ -498,14 +505,6 @@ impl PaxClient {
             Ok(n) => self.with_connection(|c| c.claim_nation(n)),
             Err(e) => rejected(e),
         }
-    }
-
-    /// Reclaims the seat a dropped session kept (D24): `token` is the old `Welcome`'s
-    /// `RESUME_TOKEN`. A `Welcome` answers, or `Rejected` if no seat is kept for it.
-    #[func]
-    fn resume(&mut self, token: i64) -> GString {
-        // The token's bits, as the Welcome dictionary carried them.
-        self.with_connection(|c| c.resume(token as u64))
     }
 
     /// Lobby: marks this player ready, or not.

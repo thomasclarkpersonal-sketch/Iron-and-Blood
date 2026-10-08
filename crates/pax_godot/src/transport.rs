@@ -36,11 +36,6 @@ pub fn normalise(fingerprint: &str) -> Option<String> {
     (hex.len() == 64 && hex.bytes().all(|b| b.is_ascii_hexdigit())).then_some(hex)
 }
 
-/// The name sent as SNI. It only fills SNI, and matches what the server's
-/// self-signed certificate names (`pax_server::tls::SERVER_NAME`): trust comes from
-/// the pinned fingerprint, never from the name.
-const SERVER_NAME: &str = "pax-server";
-
 #[derive(Debug)]
 pub enum Transport {
     Plain(TcpStream),
@@ -58,7 +53,8 @@ impl Transport {
             .dangerous()
             .with_custom_certificate_verifier(Arc::new(Pinned { pinned, provider }))
             .with_no_client_auth();
-        let name = ServerName::try_from(SERVER_NAME).expect("a valid DNS name");
+        // Only fills SNI: trust comes from the pinned fingerprint, never the name.
+        let name = ServerName::try_from(pax_protocol::TLS_SERVER_NAME).expect("a valid DNS name");
         let tls = ClientConnection::new(Arc::new(config), name).map_err(io::Error::other)?;
         Ok(Transport::Tls { tls: Box::new(tls), socket })
     }

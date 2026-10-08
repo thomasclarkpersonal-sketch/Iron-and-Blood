@@ -1,8 +1,9 @@
-//! `pax_server --scenario DIR [--bind ADDR] [--port-file PATH] [--saves DIR] [--players N] [--sandbox] [--admin NAME --admin-password-file PATH] [--password-file PATH] [--commands-per-second N] [--pause-after S] [--drop-after S] [--updates-per-second N] [--map-every N] [--tls-self-signed | --tls-cert PEM --tls-key PEM] [--fingerprint-file PATH] [--exit-when-idle]`
+//! `pax_server --scenario DIR [--bind ADDR] [--port-file PATH] [--saves DIR] [--players N] [--sandbox] [--admin NAME --admin-password-file PATH] [--password-file PATH] [--commands-per-second N] [--pause-after S] [--drop-after S] [--updates-per-second N] [--map-every N] [--tls-self-signed | --tls-cert PEM --tls-key PEM] [--fingerprint-file PATH] [--exit-when-idle] [--exit-when-stdin-closes]`
 //!
 //! The authoritative game server (D10). In single player the client launches it with
-//! `--scenario <dir> --bind 127.0.0.1:0 --port-file <tmp> --sandbox --exit-when-idle`
-//! and reads the port from the file (NETWORK_PROTOCOL §6). `--players N` lets up to N
+//! `--scenario <dir> --bind 127.0.0.1:0 --sandbox --exit-when-idle --exit-when-stdin-closes`
+//! `--port-file <tmp>` and reads the port from the file (NETWORK_PROTOCOL §6); it
+//! stops the server by closing its stdin. `--players N` lets up to N
 //! clients play at once (M4-1; default 1). `--sandbox` accepts sessions without a
 //! nation. `--admin NAME --admin-password-file PATH` makes the client of that name
 //! the host when it gives the admin password (D24, M4-3, M4-6): a name alone proves
@@ -25,7 +26,7 @@ use std::time::Duration;
 use pax_server::{Config, Secret, Server, TlsSetting};
 use tracing::error;
 
-const USAGE: &str = "usage: pax_server --scenario DIR [--bind ADDR] [--port-file PATH] [--saves DIR] [--players N] [--sandbox] [--admin NAME --admin-password-file PATH] [--password-file PATH] [--commands-per-second N] [--pause-after S] [--drop-after S] [--updates-per-second N] [--map-every N] [--tls-self-signed | --tls-cert PEM --tls-key PEM] [--fingerprint-file PATH] [--exit-when-idle]";
+const USAGE: &str = "usage: pax_server --scenario DIR [--bind ADDR] [--port-file PATH] [--saves DIR] [--players N] [--sandbox] [--admin NAME --admin-password-file PATH] [--password-file PATH] [--commands-per-second N] [--pause-after S] [--drop-after S] [--updates-per-second N] [--map-every N] [--tls-self-signed | --tls-cert PEM --tls-key PEM] [--fingerprint-file PATH] [--exit-when-idle] [--exit-when-stdin-closes]";
 
 /// The most players `--players` allows. Player ids are `u16` on the wire; the cap is
 /// far below that, a sanity limit for a server whose every player gets every update.
@@ -43,13 +44,18 @@ fn secret(flag: &str, path: Option<String>) -> Result<Secret, String> {
     Ok(Secret::new(password))
 }
 
-/// Files the server writes once it listens.
+/// How this process deals with whoever launched it: the files it writes once it
+/// listens, and whether it watches its stdin.
 #[derive(Debug, Default, PartialEq)]
 struct Outputs {
     /// The port, for the client that launched it (NETWORK_PROTOCOL §6).
     port_file: Option<PathBuf>,
     /// The TLS certificate's SHA-256, for the host to share with players (M4-6).
     fingerprint_file: Option<PathBuf>,
+    /// `--exit-when-stdin-closes`: stop, telling every player, once stdin ends. The
+    /// client launches its servers this way, so ending a hosted game, or the client
+    /// crashing, stops the server cleanly on every platform (NETWORK_PROTOCOL §6).
+    exit_when_stdin_closes: bool,
 }
 
 /// Parses the arguments after the program name.
@@ -76,10 +82,12 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> Result<(Config, Outputs
         value.parse::<u32>().ok().filter(|&n| n > 0).ok_or(format!("{flag}: '{value}' is not a whole number above 0"))
     };
     let (mut admin_name, mut admin_password) = (None, None);
+    let mut exit_when_stdin_closes = false;
     while let Some(flag) = it.next() {
         match flag.as_str() {
             "--scenario" => scenario = Some(PathBuf::from(it.next().ok_or("--scenario needs a value")?)),
             "--exit-when-idle" => config.exit_when_idle = true,
+            "--exit-when-stdin-closes" => exit_when_stdin_closes = true,
             "--sandbox" => config.sandbox = true,
             "--tls-self-signed" => tls_self_signed = true,
             "--tls-cert" => tls_cert = Some(PathBuf::from(it.next().ok_or("--tls-cert needs a value")?)),
@@ -146,7 +154,7 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> Result<(Config, Outputs
     }
     // The rules every way of building a server shares (`Config::validate`).
     config.validate().map_err(|e| e.to_string())?;
-    Ok((config, Outputs { port_file, fingerprint_file }))
+    Ok((config, Outputs { port_file, fingerprint_file, exit_when_stdin_closes }))
 }
 
 /// Writes `text` atomically, so a client polling the file never reads half of it.
@@ -192,6 +200,15 @@ fn main() -> ExitCode {
         let _ = server.shutdown();
         return ExitCode::FAILURE;
     }
+    if outputs.exit_when_stdin_closes {
+        let stopper = server.stopper();
+        std::thread::spawn(move || {
+            // Read until the launcher closes our stdin (or exits), then stop.
+            let _ = std::io::copy(&mut std::io::stdin().lock(), &mut std::io::sink());
+            tracing::info!("stdin closed; stopping (--exit-when-stdin-closes)");
+            stopper.stop();
+        });
+    }
     match server.wait() {
         Ok(()) => ExitCode::SUCCESS,
         Err(failure) => {
@@ -212,13 +229,14 @@ mod tests {
     /// The exact command line NETWORK_PROTOCOL §6 tells the client to run.
     #[test]
     fn the_documented_launch_command_parses() {
-        let (config, port_file) = parse_args(args(
-            "--scenario scenarios/two_states --bind 127.0.0.1:0 --port-file /tmp/p --sandbox --exit-when-idle",
+        let (config, outputs) = parse_args(args(
+            "--scenario scenarios/two_states --bind 127.0.0.1:0 --sandbox --exit-when-idle --exit-when-stdin-closes --port-file /tmp/p --saves /tmp/s",
         ))
         .unwrap();
+        assert!(outputs.exit_when_stdin_closes);
         assert_eq!(config.scenario, PathBuf::from("scenarios/two_states"));
         assert_eq!(config.bind, "127.0.0.1:0".parse().unwrap());
-        assert_eq!(port_file.port_file, Some(PathBuf::from("/tmp/p")));
+        assert_eq!(outputs.port_file, Some(PathBuf::from("/tmp/p")));
         assert!(config.exit_when_idle);
         assert_eq!(config.max_players, 1, "single player by default");
         assert!(config.sandbox);

@@ -34,7 +34,7 @@ flowchart LR
         GD[GDScript UI: map, panels, menus] -->|PaxClient| Bridge[pax_godot: connection, decoding, launcher]
     end
     Bridge <-->|"127.0.0.1, FlatBuffers (D22)"| Net
-    Bridge -.->|launches, --exit-when-idle| Server
+    Bridge -.->|launches, --exit-when-stdin-closes| Server
     subgraph Server [pax_server process]
         Net[tokio: one task per connection] <-->|bounded channels| Sim[sim thread: owns the World]
         Sim --> Views[view builders]

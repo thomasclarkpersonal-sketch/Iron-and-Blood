@@ -303,6 +303,19 @@ impl From<std::io::Error> for StartError {
 }
 
 /// A running server.
+/// Stops a running server from another thread ([`Server::stopper`]); `main.rs` uses
+/// it when the process that launched the server closes its stdin (M4-9).
+#[derive(Clone, Debug)]
+pub struct Stopper(flume::Sender<net::Inbound>);
+
+impl Stopper {
+    /// Asks the sim thread to stop; [`Server::wait`] then returns. Nothing if it
+    /// already stopped.
+    pub fn stop(&self) {
+        let _ = self.0.send(net::Inbound::Shutdown);
+    }
+}
+
 pub struct Server {
     local_addr: SocketAddr,
     /// The TLS certificate's SHA-256 that clients pin; `None` without TLS.
@@ -373,6 +386,12 @@ impl Server {
         // Give connections a moment to flush their final Goodbye.
         self.runtime.shutdown_timeout(Duration::from_secs(1));
         outcome
+    }
+
+    /// A handle that stops this server from another thread, as [`Self::shutdown`]
+    /// does: every player is told "the server is shutting down" (`Goodbye`).
+    pub fn stopper(&self) -> Stopper {
+        Stopper(self.to_sim.clone())
     }
 
     /// Stops the server and waits for it.

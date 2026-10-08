@@ -263,12 +263,15 @@ impl Connection {
     }
 }
 
-/// A `pax_server` the client launched (NETWORK_PROTOCOL §6). With `--exit-when-idle`
-/// it stops by itself when the client disconnects; dropping this waits briefly for
-/// that, then kills it.
+/// A `pax_server` the client launched (NETWORK_PROTOCOL §6). It runs with
+/// `--exit-when-stdin-closes`, and this holds its stdin: [`LocalServer::stop`] (or
+/// dropping this, or the client's process ending) closes it, and the server tells its
+/// players and exits. A single-player server also stops by itself when its player
+/// leaves (`--exit-when-idle`).
 #[derive(Debug)]
 pub struct LocalServer {
-    child: Child,
+    /// `None` once stopped or killed.
+    child: Option<Child>,
     /// Where this machine reaches it (loopback).
     pub addr: SocketAddr,
 }
@@ -284,12 +287,25 @@ pub struct HostedServer {
 /// How to reach a multiplayer game over TLS (D24, M4-6, M4-9): its address, the
 /// pinned fingerprint, and what the player gave. The bridge keeps the last one, so
 /// a rejoin replays the whole handshake in Rust, the same way as the first time.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct JoinTarget {
     pub addr: SocketAddr,
     pub fingerprint: String,
     pub password: Option<String>,
     pub name: Option<String>,
+}
+
+impl std::fmt::Debug for JoinTarget {
+    /// Never the password: the bridge keeps this for the client's lifetime, and a
+    /// log of it must not leak one (as the server's `Secret`, M4-6).
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("JoinTarget")
+            .field("addr", &self.addr)
+            .field("fingerprint", &self.fingerprint)
+            .field("password", &self.password.as_ref().map(|_| "…"))
+            .field("name", &self.name)
+            .finish()
+    }
 }
 
 impl JoinTarget {
@@ -311,7 +327,7 @@ impl LocalServer {
     pub fn launch(server: &Path, scenario: &Path, saves: &Path) -> Result<LocalServer, String> {
         // Single player plays sandbox (any nation), which a server allows only with
         // --sandbox (D24).
-        LocalServer::start(server, scenario, saves, &["--bind", "127.0.0.1:0", "--sandbox"])
+        LocalServer::start(server, scenario, saves, &["--bind", "127.0.0.1:0", "--sandbox", "--exit-when-idle"])
     }
 
     /// Starts `server` as a player-hosted multiplayer game for `players` (M4-9):
@@ -322,6 +338,8 @@ impl LocalServer {
         let fingerprint_file = port_file_path().with_extension("fingerprint");
         let _ = std::fs::remove_file(&fingerprint_file);
         let file = fingerprint_file.to_string_lossy();
+        // No --exit-when-idle: the game goes on while its host's client runs, even if
+        // nobody is connected for a moment (the host can rejoin); the client stops it.
         let args = ["--bind", "0.0.0.0:0", "--players", &players, "--tls-self-signed", "--fingerprint-file", &file];
         let mut server = LocalServer::start(server, scenario, saves, &args)?;
         // The server writes the fingerprint before the port (NETWORK_PROTOCOL §6), so
@@ -329,12 +347,16 @@ impl LocalServer {
         // such, not a fingerprint the player got wrong.
         let read = std::fs::read_to_string(&fingerprint_file);
         let _ = std::fs::remove_file(&fingerprint_file);
-        match read.ok().and_then(|text| transport::normalise(&text)) {
-            Some(fingerprint) => Ok(HostedServer { server, fingerprint }),
-            None => {
+        let fingerprint = match read {
+            Ok(text) => transport::normalise(&text).ok_or_else(|| format!("{:?} is not a fingerprint", text.trim())),
+            Err(e) => Err(e.to_string()),
+        };
+        match fingerprint {
+            Ok(fingerprint) => Ok(HostedServer { server, fingerprint }),
+            Err(e) => {
                 server.kill();
                 Err(format!(
-                    "the server gave its port but no certificate fingerprint in {}",
+                    "the server gave its port, but not its certificate fingerprint ({}): {e}",
                     fingerprint_file.display()
                 ))
             }
@@ -346,17 +368,19 @@ impl LocalServer {
         let port_file = port_file_path();
         let _ = std::fs::remove_file(&port_file);
         let mut command = Command::new(server);
-        command.arg("--scenario").arg(scenario).args(args).arg("--exit-when-idle");
+        command.arg("--scenario").arg(scenario).args(args).arg("--exit-when-stdin-closes");
         command.arg("--port-file").arg(&port_file).arg("--saves").arg(saves);
+        // Its stdin stays open while this client holds it: closing it (`stop`, or
+        // this process ending in any way) stops the server cleanly.
         let mut child =
-            command.stdin(Stdio::null()).spawn().map_err(|e| format!("cannot start {}: {e}", server.display()))?;
+            command.stdin(Stdio::piped()).spawn().map_err(|e| format!("cannot start {}: {e}", server.display()))?;
         let deadline = Instant::now() + Duration::from_secs(20);
         loop {
             if let Ok(text) = std::fs::read_to_string(&port_file)
                 && let Ok(port) = text.trim().parse::<u16>()
             {
                 let _ = std::fs::remove_file(&port_file);
-                return Ok(LocalServer { child, addr: SocketAddr::from(([127, 0, 0, 1], port)) });
+                return Ok(LocalServer { child: Some(child), addr: SocketAddr::from(([127, 0, 0, 1], port)) });
             }
             if let Ok(Some(status)) = child.try_wait() {
                 return Err(format!("the server exited before it was ready ({status})"));
@@ -374,22 +398,42 @@ impl LocalServer {
 impl LocalServer {
     /// Kills the server at once, as a crash would.
     pub fn kill(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
+        if let Some(mut child) = self.child.take() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
+
+    /// Stops the server cleanly without waiting for it: closing its stdin makes it
+    /// tell every player "the server is shutting down" (`Goodbye`) and exit
+    /// (`--exit-when-stdin-closes`). A background thread reaps it, and kills it if it
+    /// hasn't exited after `STOP_GRACE`, so the caller (Godot's main thread) never
+    /// blocks.
+    pub fn stop(&mut self) {
+        let Some(mut child) = self.child.take() else { return };
+        drop(child.stdin.take());
+        std::thread::spawn(move || {
+            let deadline = Instant::now() + STOP_GRACE;
+            while Instant::now() < deadline {
+                if let Ok(Some(_)) = child.try_wait() {
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            let _ = child.kill();
+            let _ = child.wait();
+        });
     }
 }
 
+/// How long a stopped server has to say goodbye and exit before it is killed.
+const STOP_GRACE: Duration = Duration::from_secs(5);
+
 impl Drop for LocalServer {
+    /// Ending the server is always [`LocalServer::stop`]: single player or a hosted
+    /// game alike, its players are told, and nothing blocks.
     fn drop(&mut self) {
-        let deadline = Instant::now() + Duration::from_secs(2);
-        while Instant::now() < deadline {
-            if let Ok(Some(_)) = self.child.try_wait() {
-                return;
-            }
-            std::thread::sleep(Duration::from_millis(20));
-        }
-        let _ = self.child.kill();
-        let _ = self.child.wait();
+        self.stop();
     }
 }
 

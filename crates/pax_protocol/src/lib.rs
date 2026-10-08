@@ -75,6 +75,11 @@ pub const PROTOCOL_MAJOR: u16 = 1;
 /// Protocol minor version: bumped for compatible additions (NETWORK_PROTOCOL §8).
 pub const PROTOCOL_MINOR: u16 = 6;
 
+/// The name a server's self-signed TLS certificate carries, and the SNI clients send
+/// (D24, M4-6). Cosmetic: clients pin the certificate's fingerprint and never check
+/// the name. Here so the server and the client's bridge share one copy.
+pub const TLS_SERVER_NAME: &str = "pax-server";
+
 /// How long the server waits for any message before it ends a silent session (D22).
 /// Clients send a `Ping` well within it; the client's bridge derives its keep-alive
 /// from this, so the two can't drift apart.
