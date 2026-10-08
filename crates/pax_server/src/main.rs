@@ -1,4 +1,4 @@
-//! `pax_server --scenario DIR [--bind ADDR] [--port-file PATH] [--saves DIR] [--players N] [--sandbox] [--admin NAME] [--pause-after S] [--drop-after S] [--updates-per-second N] [--map-every N] [--exit-when-idle]`
+//! `pax_server --scenario DIR [--bind ADDR] [--port-file PATH] [--saves DIR] [--players N] [--sandbox] [--admin NAME --admin-password-file PATH] [--password-file PATH] [--commands-per-second N] [--pause-after S] [--drop-after S] [--updates-per-second N] [--map-every N] [--exit-when-idle]`
 //!
 //! The authoritative game server (D10). In single player the client launches it with
 //! `--scenario <dir> --bind 127.0.0.1:0 --port-file <tmp> --sandbox --exit-when-idle`
@@ -21,11 +21,23 @@ use std::time::Duration;
 use pax_server::{Config, Server};
 use tracing::error;
 
-const USAGE: &str = "usage: pax_server --scenario DIR [--bind ADDR] [--port-file PATH] [--saves DIR] [--players N] [--sandbox] [--admin NAME] [--pause-after S] [--drop-after S] [--updates-per-second N] [--map-every N] [--exit-when-idle]";
+const USAGE: &str = "usage: pax_server --scenario DIR [--bind ADDR] [--port-file PATH] [--saves DIR] [--players N] [--sandbox] [--admin NAME --admin-password-file PATH] [--password-file PATH] [--commands-per-second N] [--pause-after S] [--drop-after S] [--updates-per-second N] [--map-every N] [--exit-when-idle]";
 
 /// The most players `--players` allows. Player ids are `u16` on the wire; the cap is
 /// far below that, a sanity limit for a server whose every player gets every update.
 const MAX_PLAYERS: u16 = 64;
+
+/// A password from the file at `path` (D24, M4-6): read from a file, so it never
+/// shows in the process list, with a trailing line break removed.
+fn secret(flag: &str, path: Option<String>) -> Result<String, String> {
+    let path = path.ok_or(format!("{flag} needs a value"))?;
+    let text = std::fs::read_to_string(&path).map_err(|e| format!("{flag}: cannot read {path}: {e}"))?;
+    let password = text.trim_end_matches(['\n', '\r']).to_owned();
+    if password.is_empty() {
+        return Err(format!("{flag}: {path} is empty"));
+    }
+    Ok(password)
+}
 
 /// Parses the arguments after the program name.
 fn parse_args(args: impl IntoIterator<Item = String>) -> Result<(Config, Option<PathBuf>), String> {
@@ -61,6 +73,13 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> Result<(Config, Option<
             }
             "--map-every" => config.bandwidth.map_every = count("--map-every", it.next())?,
             "--admin" => config.admin = Some(it.next().ok_or("--admin needs a value")?),
+            "--password-file" => config.password = Some(secret("--password-file", it.next())?),
+            "--admin-password-file" => config.admin_password = Some(secret("--admin-password-file", it.next())?),
+            "--commands-per-second" => {
+                let value = it.next().ok_or("--commands-per-second needs a value")?;
+                config.commands_per_second =
+                    value.parse().map_err(|_| format!("--commands-per-second: '{value}' is not a number"))?;
+            }
             "--bind" => {
                 let value = it.next().ok_or("--bind needs a value")?;
                 config.bind =
@@ -199,8 +218,18 @@ mod tests {
         let (config, _) = parse_args(args("--scenario s")).unwrap();
         assert!(!config.sandbox, "D24: sandbox only with --sandbox");
         assert_eq!(config.admin, None);
-        let (config, _) = parse_args(args("--scenario s --admin ada")).unwrap();
-        assert_eq!(config.admin.as_deref(), Some("ada"));
+        assert!(parse_args(args("--scenario s --admin ada")).unwrap_err().contains("a name alone proves nothing"));
+        let file = std::env::temp_dir().join(format!("pax-admin-pw-{}", std::process::id()));
+        std::fs::write(&file, "s3cret\n").unwrap();
+        let line = format!("--scenario s --admin ada --admin-password-file {}", file.display());
+        let (config, _) = parse_args(args(&line)).unwrap();
+        assert_eq!((config.admin.as_deref(), config.admin_password.as_deref()), (Some("ada"), Some("s3cret")));
+        let line = format!("--scenario s --password-file {}", file.display());
+        assert_eq!(parse_args(args(&line)).unwrap().0.password.as_deref(), Some("s3cret"), "line break trimmed");
+        std::fs::write(&file, "\n").unwrap();
+        assert!(parse_args(args(&line)).unwrap_err().contains("is empty"));
+        std::fs::remove_file(&file).unwrap();
+        assert!(parse_args(args("--scenario s --commands-per-second 0")).is_err());
     }
 
     #[test]

@@ -44,6 +44,8 @@ pub(crate) struct Session {
     /// Silent past the pause threshold (D24's fairness pause); cleared when it
     /// speaks again, and gone with the row.
     stalled: bool,
+    /// When its commands of the last second arrived (D24's rate limit).
+    recent_commands: std::collections::VecDeque<std::time::Instant>,
 }
 
 /// Why the session table refused a seat ([`SessionTable::sit`]) or a lobby request
@@ -67,9 +69,8 @@ pub(crate) enum HostRule {
     /// A player-hosted server: the first player is host, and when the host's seat
     /// ends, the remaining player with the lowest id.
     FirstPlayer,
-    /// A dedicated server (`--admin NAME`): the client of that name is host whenever
-    /// it plays, and nobody else ever is. The name is what the client asserts, so
-    /// multiplayer binds loopback only until M4-6 authenticates it.
+    /// A dedicated server (`--admin NAME`): the client of that name, proving it with
+    /// the admin password (M4-6), is host whenever it plays, and nobody else ever is.
     Admin(String),
 }
 
@@ -208,6 +209,7 @@ impl SessionTable {
             ready: false,
             token: None,
             stalled: false,
+            recent_commands: std::collections::VecDeque::new(),
         };
         self.rows.insert(id, row);
     }
@@ -239,7 +241,8 @@ impl SessionTable {
 
     /// Seats a connected session in the seat kept for `token` (D24): the same player
     /// id and nation. The token stays valid, for a later drop.
-    pub(crate) fn resume(&mut self, id: u64, token: NonZeroU64) -> Result<Seat, Refusal> {
+    /// `admin_proved`: the `Hello` carried the admin password (D24, M4-6).
+    pub(crate) fn resume(&mut self, id: u64, token: NonZeroU64, admin_proved: bool) -> Result<Seat, Refusal> {
         let Reservation { seat, name } = self.reserved.remove(&token).ok_or(Refusal::UnknownToken)?;
         let row = self.rows.get_mut(&id).expect("a session is connected before it says Hello");
         debug_assert!(row.seat.is_none(), "net lets a session say Hello only once");
@@ -247,7 +250,7 @@ impl SessionTable {
         row.ready = true;
         row.token = Some(token);
         row.name = name;
-        self.elect(id);
+        self.elect(id, admin_proved);
         Ok(seat)
     }
 
@@ -277,6 +280,22 @@ impl SessionTable {
     /// Drops every kept seat: a load replaced the game, whose nations they hold.
     pub(crate) fn forget_all(&mut self) {
         self.reserved.clear();
+    }
+
+    /// Counts a command from `id` arriving at `now`, if fewer than `per_second`
+    /// arrived in the second before (D24's rate limit). Returns whether it is
+    /// admitted; a refused command doesn't count.
+    pub(crate) fn admit_command(&mut self, id: u64, now: std::time::Instant, per_second: u32) -> bool {
+        let Some(row) = self.rows.get_mut(&id) else { return false };
+        let window = std::time::Duration::from_secs(1);
+        while row.recent_commands.front().is_some_and(|&t| now.duration_since(t) >= window) {
+            row.recent_commands.pop_front();
+        }
+        if row.recent_commands.len() >= per_second as usize {
+            return false;
+        }
+        row.recent_commands.push_back(now);
+        true
     }
 
     /// Marks a session silent past the pause threshold, as the network reported it
@@ -318,10 +337,12 @@ impl SessionTable {
     }
 
     /// Elects `id` host if the rule says so and nobody is host (D24).
-    fn elect(&mut self, id: u64) {
+    /// An admin must give the admin's name and prove it (`admin_proved`: the admin
+    /// password, which the sim checked): a name alone proves nothing.
+    fn elect(&mut self, id: u64, admin_proved: bool) {
         let elected = match &self.host_rule {
             HostRule::FirstPlayer => true,
-            HostRule::Admin(admin) => self.rows.get(&id).is_some_and(|s| &s.name == admin),
+            HostRule::Admin(admin) => admin_proved && self.rows.get(&id).is_some_and(|s| &s.name == admin),
         };
         if elected && self.host.is_none() {
             self.host = Some(id);
@@ -369,7 +390,14 @@ impl SessionTable {
     /// sandbox claim only if the caller has allowed it). It gets the lowest free player id, if fewer than
     /// `max_players` play and nobody holds the nation. The only way a session gets a
     /// seat.
-    pub(crate) fn sit(&mut self, id: u64, name: &str, claim: Claim, max_players: usize) -> Result<Seat, Refusal> {
+    pub(crate) fn sit(
+        &mut self,
+        id: u64,
+        name: &str,
+        claim: Claim,
+        max_players: usize,
+        admin_proved: bool,
+    ) -> Result<Seat, Refusal> {
         // Kept seats count: their players may come back (D24).
         if self.all_seats().count() >= max_players {
             return Err(Refusal::Full);
@@ -384,7 +412,7 @@ impl SessionTable {
         row.name = name.to_owned();
         row.ready = false;
         self.rows.get_mut(&id).expect("just seated").token = Some(Self::new_token());
-        self.elect(id);
+        self.elect(id, admin_proved);
         Ok(seat)
     }
 
@@ -543,7 +571,7 @@ mod tests {
         let (conn, _rx) = ConnHandle::for_test();
         table.connect(id, conn, Bandwidth::default());
         let claim = nation.map_or(Claim::Unclaimed, Claim::Nation);
-        assert_eq!(table.sit(id, "p", claim, 8), Ok(Seat { player, claim }));
+        assert_eq!(table.sit(id, "p", claim, 8, false), Ok(Seat { player, claim }));
     }
 
     #[test]
@@ -581,10 +609,32 @@ mod tests {
         assert_eq!(t.host(), None, "the first player isn't host on a dedicated server");
         let (conn, _rx) = ConnHandle::for_test();
         t.connect(2, conn, Bandwidth::default());
-        assert!(t.sit(2, "ada", Claim::Unclaimed, 8).is_ok());
+        assert!(t.sit(2, "ada", Claim::Unclaimed, 8, false).is_ok());
+        assert_eq!(t.host(), None, "the admin's name without its password is nobody");
+        let (conn, _rx) = ConnHandle::for_test();
+        t.connect(3, conn, Bandwidth::default());
+        assert!(t.sit(3, "ada", Claim::Unclaimed, 8, true).is_ok());
+        assert_eq!(t.host(), Some(3));
+        assert_eq!(t.remove(3, OnLeave::EndSeat).map(|v| v.new_host), Some(None));
+        assert_eq!(t.host(), None);
+        let _ = t.remove(2, OnLeave::EndSeat);
+        let (conn, _rx) = ConnHandle::for_test();
+        t.connect(2, conn, Bandwidth::default());
+        assert!(t.sit(2, "ada", Claim::Unclaimed, 8, true).is_ok());
         assert_eq!(t.host(), Some(2));
         assert_eq!(t.remove(2, OnLeave::EndSeat).map(|v| v.new_host), Some(None));
         assert_eq!(t.host(), None);
+    }
+
+    #[test]
+    fn commands_are_limited_per_session_per_second() {
+        let mut t = SessionTable::new(HostRule::FirstPlayer);
+        seated(&mut t, 1, 0, None);
+        let start = std::time::Instant::now();
+        let admitted = (0..30).filter(|_| t.admit_command(1, start, 20)).count();
+        assert_eq!(admitted, 20, "twenty in one instant");
+        let later = start + std::time::Duration::from_millis(1_000);
+        assert!(t.admit_command(1, later, 20), "a second later the window has room again");
     }
 
     #[test]
@@ -595,9 +645,9 @@ mod tests {
             let (conn, _rx) = ConnHandle::for_test();
             t.connect(id, conn, Bandwidth::default());
         }
-        assert_eq!(t.sit(2, "p", Claim::Nation(0), 8), Err(Refusal::NationTaken { nation: 0, player: 0 }));
-        assert_eq!(t.sit(2, "p", Claim::Nation(1), 1), Err(Refusal::Full));
-        assert_eq!(t.sit(3, "p", Claim::Nation(1), 2), Ok(Seat { player: 1, claim: Claim::Nation(1) }));
+        assert_eq!(t.sit(2, "p", Claim::Nation(0), 8, false), Err(Refusal::NationTaken { nation: 0, player: 0 }));
+        assert_eq!(t.sit(2, "p", Claim::Nation(1), 1, false), Err(Refusal::Full));
+        assert_eq!(t.sit(3, "p", Claim::Nation(1), 2, false), Ok(Seat { player: 1, claim: Claim::Nation(1) }));
         assert_eq!(t.seat(2), None, "a refused session stays unseated");
     }
 

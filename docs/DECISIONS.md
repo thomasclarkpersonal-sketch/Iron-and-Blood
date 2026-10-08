@@ -462,6 +462,6 @@ The state → national → sphere → global roll-up in the old ECONOMY_SYSTEM w
   - a resume token (64 bits from the OS's secure random source) reclaims the nation. In a started game, any player who leaves keeps their seat (player id and nation) for their token: the server can't tell a crash from a quit. A kept seat counts toward the player limit, nobody else can take its nation, and the lobby shows it as away. A kick or a load drops kept seats (M4-4).
 - **Transport:**
   - TLS whenever the server is not bound to localhost;
-  - an optional server password;
-  - a per-session command rate limit (default 20 per second).
+  - an optional server password, sent in `Hello` (`--password-file`; M4-6). A wrong or missing one is `Rejected`, and passwords are compared in constant time. On a dedicated server the admin also proves who they are with an admin password (`--admin-password-file`, required with `--admin`): a name alone proves nothing;
+  - a per-session command rate limit (default 20 per second, `--commands-per-second`): more get `RateLimited` (M4-6).
 

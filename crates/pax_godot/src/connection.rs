@@ -50,6 +50,8 @@ pub struct Connection {
     closed: Option<String>,
     /// Whether `closed` has been reported by a poll.
     reported: bool,
+    /// Sent with `Hello` (D24, protocol 1.6); `None` for a server without one.
+    password: Option<String>,
 }
 
 impl Connection {
@@ -67,6 +69,7 @@ impl Connection {
             next_client_seq: 1,
             next_nonce: 1,
             closed: None,
+            password: None,
             reported: false,
         })
     }
@@ -159,14 +162,21 @@ impl Connection {
         polled
     }
 
+    /// The password the next `Hello` carries (`None`: none).
+    pub fn set_password(&mut self, password: Option<String>) {
+        self.password = password;
+    }
+
     pub fn hello(&mut self, nation: Option<u32>) {
-        self.send(encode::hello("Iron and Blood (Godot)", nation, 0));
+        let frame = encode::hello("Iron and Blood (Godot)", nation, 0, self.password.as_deref());
+        self.send(frame);
     }
 
     /// Reclaims the seat a dropped session kept (D24): `token` is its `Welcome`'s
     /// resume token.
     pub fn resume(&mut self, token: u64) {
-        self.send(encode::hello("Iron and Blood (Godot)", None, token));
+        let frame = encode::hello("Iron and Blood (Godot)", None, token, self.password.as_deref());
+        self.send(frame);
     }
 
     pub fn subscribe(&mut self, mode: wire::MapMode, good: u16, market: Option<u32>, province: Option<u32>) {

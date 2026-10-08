@@ -72,6 +72,7 @@ fn valid_frames() -> Vec<Vec<u8>> {
         client_name: Some(name),
         requested_nation: Some(1),
         resume_token: 7,
+        password: None,
     };
     let h = wire::Hello::create(&mut b, &args);
     frames.push(frame(&mut b, P::Hello, h.as_union_value()));
@@ -167,6 +168,8 @@ fn hostile_request(n: &mut Noise, tokens: &[u64]) -> Request {
                 1 => n.next(),
                 _ => 0,
             },
+            // Mostly none; sometimes a guess.
+            password: n.chance(4).then(|| "guess".to_owned()),
         },
         1..=3 => {
             let rate_raw = (!n.chance(6)).then(|| n.rate());
@@ -255,8 +258,14 @@ fn the_sim_thread_survives_hostile_requests() {
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two_states");
     let mut config = crate::Config::local(&dir);
     config.saves_dir = saves.clone();
-    // Several players, so taken nations, the host's rules and kicks are exercised too.
-    config.max_players = 3;
+    // Several players, so taken nations, the host's rules and kicks are exercised
+    // too. Enough seats that kept ones (players who left the started game) don't
+    // fill the server, whatever the noise's sequence.
+    config.max_players = 8;
+    // The run sends hundreds of commands within a real second; D24's limit of 20
+    // would refuse nearly all, and the game paths below would go untested. The
+    // limit still applies, just higher.
+    config.commands_per_second = 10_000;
     let mut sim = Sim::new(pax_data::load_scenario(&dir).unwrap(), &config);
     let mut receivers: Vec<Receiver<Outbound>> = Vec::new();
     let mut noise = Noise::new(0xC0FF_EE00_DEAD_BEEF);

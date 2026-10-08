@@ -35,6 +35,7 @@ fn hello_and_its_defaults() {
             client_name: Some(name),
             requested_nation: Some(1),
             resume_token: 0,
+            password: None,
         },
     );
     let frame = client_frame(&mut b, ClientPayload::Hello, hello.as_union_value());

@@ -63,6 +63,8 @@ pub const UPDATES_PER_SECOND: u32 = 4;
 /// D24's default map refresh for a remote session: its `MapView` goes out with every
 /// this-many-th update, and whenever its subscription changes (`--map-every`, M4-7).
 pub const MAP_EVERY: u32 = 5;
+/// D24's default per-session command rate limit (`--commands-per-second`).
+pub const COMMANDS_PER_SECOND: u32 = 20;
 
 /// How to run a server.
 #[derive(Clone, Debug)]
@@ -88,12 +90,20 @@ pub struct Config {
     /// Accept sandbox sessions (`Hello` without a nation), which may command every
     /// nation (D24): `--sandbox`. Single player runs this way.
     pub sandbox: bool,
-    /// On a dedicated server, the client name of the host (`--admin NAME`, D24). When
-    /// unset, the first player is host, and when the host leaves, the remaining
-    /// player with the lowest id. The name is what the client asserts, so anyone
-    /// who can connect can claim it while the admin is away: until M4-6's server
-    /// password authenticates the admin, multiplayer binds loopback only (`main.rs`).
+    /// On a dedicated server, the client name of the host (`--admin NAME`, D24); the
+    /// admin proves it with `admin_password`. When unset, the first player is host,
+    /// and when the host leaves, the remaining player with the lowest id.
     pub admin: Option<String>,
+    /// Players must present this in `Hello` (`--password-file`, D24). `None`: no
+    /// password.
+    pub password: Option<String>,
+    /// The admin must present this, with the admin's name, to be host; it also
+    /// admits them (`--admin-password-file`, D24, M4-6). Required with `admin`, and
+    /// only with it.
+    pub admin_password: Option<String>,
+    /// At most this many commands per second per session; more get `RateLimited`
+    /// (`--commands-per-second`, D24's default 20).
+    pub commands_per_second: u32,
     /// Where `SaveGame` writes and `LoadGame` reads `<name>.toml` (D23).
     pub saves_dir: PathBuf,
     /// How often a remote session gets an update, and its map (D24, M4-7):
@@ -123,6 +133,13 @@ impl Config {
         }
         if self.max_players > 1 && !self.bind.ip().is_loopback() {
             return Err(ConfigError::MultiplayerNeedsTls { players: self.max_players, bind: self.bind });
+        }
+        // A name proves nothing: the admin must prove it with a password (M4-6).
+        if self.admin.is_some() != self.admin_password.is_some() {
+            return Err(ConfigError::AdminNeedsPassword);
+        }
+        if self.commands_per_second == 0 {
+            return Err(ConfigError::NoCommandsAllowed);
         }
         Ok(())
     }
@@ -158,6 +175,9 @@ impl Config {
             sandbox: true,
             admin: None,
             bandwidth: Bandwidth::default(),
+            password: None,
+            admin_password: None,
+            commands_per_second: COMMANDS_PER_SECOND,
         }
     }
 }
@@ -174,6 +194,10 @@ pub enum ConfigError {
     NoUpdates,
     /// D24: TLS off localhost, and M4-6 hasn't brought it yet.
     MultiplayerNeedsTls { players: u16, bind: SocketAddr },
+    /// `--admin` and `--admin-password-file` go together (M4-6).
+    AdminNeedsPassword,
+    /// A rate limit of 0 commands per second would refuse every command.
+    NoCommandsAllowed,
 }
 
 impl std::fmt::Display for ConfigError {
@@ -188,6 +212,10 @@ impl std::fmt::Display for ConfigError {
                 f,
                 "--players {players} on {bind} needs TLS (D24), which arrives with M4-6: until then, bind 127.0.0.1"
             ),
+            ConfigError::AdminNeedsPassword => {
+                write!(f, "--admin and --admin-password-file go together: a name alone proves nothing (D24)")
+            }
+            ConfigError::NoCommandsAllowed => write!(f, "--commands-per-second must be at least 1"),
         }
     }
 }
