@@ -169,3 +169,27 @@ jobs:
           cli=target/release/pax_cli
           if [ -f "$cli.exe" ]; then cli="$cli.exe"; fi
           PAX_CLI="$cli" cargo test --release -p pax_server --test session_replay
+
+  fuzz:
+    # M3-10: coverage-guided fuzzing of the client frame reader, for a fixed budget.
+    # Needs nightly, so it lives outside the workspace (fuzz/). Not a required check:
+    # a crash uploads its input as an artifact, to reproduce and fix.
+    name: Fuzz client frames (60 s)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: fuzz
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-fuzz
+      - run: cargo +nightly fuzz run client_frames -- -max_total_time=60
+        working-directory: fuzz
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-artifacts
+          path: fuzz/artifacts

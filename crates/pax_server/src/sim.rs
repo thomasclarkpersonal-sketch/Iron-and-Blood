@@ -340,6 +340,11 @@ impl Sim {
         self.send(session, Outbound::Frame(encode::welcome(self.game.world(), &info)));
     }
 
+    #[cfg(test)]
+    pub(crate) fn world_day(&self) -> u64 {
+        self.game.world().day
+    }
+
     /// Every command applied so far, in application order.
     #[cfg(test)]
     pub(crate) fn log(&self) -> &[save::SavedCommand] {
@@ -347,7 +352,7 @@ impl Sim {
     }
 
     /// Handles one inbound event. Returns `false` when the server should stop.
-    fn handle(&mut self, event: Inbound) -> bool {
+    pub(crate) fn handle(&mut self, event: Inbound) -> bool {
         match event {
             Inbound::Connected { session, conn } => {
                 let session_state = Session {

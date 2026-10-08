@@ -95,19 +95,7 @@ impl Client {
     }
 
     pub fn hello_with(&mut self, major: u16, nation: Option<u32>) {
-        let mut b = FlatBufferBuilder::new();
-        let name = b.create_string("test client");
-        let h = Hello::create(
-            &mut b,
-            &HelloArgs {
-                protocol_major: major,
-                protocol_minor: 0,
-                client_name: Some(name),
-                requested_nation: nation,
-                resume_token: 0,
-            },
-        );
-        self.send(&mut b, ClientPayload::Hello, h.as_union_value());
+        self.send_raw(&hello_frame(major, nation));
     }
 
     pub fn hello(&mut self, nation: Option<u32>) {
@@ -285,6 +273,26 @@ pub fn play_until(c: &mut Client, day: u64) -> u64 {
             _ => {}
         }
     }
+}
+
+/// One size-prefixed `Hello` frame.
+pub fn hello_frame(major: u16, nation: Option<u32>) -> Vec<u8> {
+    let mut b = FlatBufferBuilder::new();
+    let name = b.create_string("test client");
+    let args = HelloArgs {
+        protocol_major: major,
+        protocol_minor: 0,
+        client_name: Some(name),
+        requested_nation: nation,
+        resume_token: 0,
+    };
+    let h = Hello::create(&mut b, &args);
+    let msg = ClientMessage::create(
+        &mut b,
+        &ClientMessageArgs { payload_type: ClientPayload::Hello, payload: Some(h.as_union_value()) },
+    );
+    finish_size_prefixed_client_message_buffer(&mut b, msg);
+    b.finished_data().to_vec()
 }
 
 /// One size-prefixed `Ping` frame.

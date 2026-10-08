@@ -19,6 +19,8 @@ mod clock;
 mod commands;
 mod encode;
 mod game;
+#[cfg(test)]
+mod hostile;
 mod net;
 mod queue;
 mod request;
