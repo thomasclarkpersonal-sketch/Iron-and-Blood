@@ -323,6 +323,7 @@ pub struct Server {
     to_sim: flume::Sender<net::Inbound>,
     sim: JoinHandle<Result<(), ServerFailure>>,
     runtime: tokio::runtime::Runtime,
+    open: net::OpenConnections,
 }
 
 impl Server {
@@ -350,7 +351,8 @@ impl Server {
         };
         let fingerprint = tls.as_ref().map(|t| t.fingerprint.clone());
         let timing = net::Timing { idle: config.idle_timeout, stall_after: config.pause_after };
-        runtime.spawn(net::accept_loop(listener, to_sim.clone(), timing, tls.map(|t| t.acceptor)));
+        let open = net::OpenConnections::default();
+        runtime.spawn(net::accept_loop(listener, to_sim.clone(), timing, tls.map(|t| t.acceptor), open.clone()));
         let mut sim = sim::Sim::new(scenario, &config);
         let sim = std::thread::Builder::new().name("pax-sim".to_owned()).spawn(move || {
             // A panic is caught only to tell the clients and the caller; the default
@@ -365,7 +367,7 @@ impl Server {
             }
         })?;
         tracing::info!(%local_addr, "listening");
-        Ok(Server { local_addr, fingerprint, to_sim, sim, runtime })
+        Ok(Server { local_addr, fingerprint, to_sim, sim, runtime, open })
     }
 
     /// The TLS certificate's SHA-256 in hex, which clients pin (D24, M4-6); `None`
@@ -383,8 +385,14 @@ impl Server {
     /// simulation failed, which is the `Err`.
     pub fn wait(self) -> Result<(), ServerFailure> {
         let outcome = self.sim.join().unwrap_or_else(|payload| Err(ServerFailure(panic_message(&*payload))));
-        // Give connections a moment to flush their final Goodbye.
-        self.runtime.shutdown_timeout(Duration::from_secs(1));
+        // The sim queued a Goodbye and a Close for every session. Dropping the runtime
+        // cancels the connection tasks at once, so first let them write it and end
+        // (at most 1 s: a client that isn't reading must not hold the server up).
+        let deadline = std::time::Instant::now() + Duration::from_secs(1);
+        while self.open.count() > 0 && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        self.runtime.shutdown_timeout(Duration::from_millis(100));
         outcome
     }
 

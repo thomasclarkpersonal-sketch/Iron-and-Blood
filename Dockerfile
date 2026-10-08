@@ -4,12 +4,12 @@
 #   docker compose up                       # see compose.yaml
 #   docker build -t pax-server . && docker run -p 7777:7777 -v pax-saves:/app/saves pax-server
 #
-# Settings come from the environment (docker/entrypoint.sh): PAX_PLAYERS,
-# PAX_SCENARIO, PAX_PORT, PAX_PASSWORD_FILE, PAX_ADMIN and PAX_ADMIN_PASSWORD_FILE,
-# PAX_COMMANDS_PER_SECOND, PAX_PAUSE_AFTER, PAX_DROP_AFTER, PAX_UPDATES_PER_SECOND,
-# PAX_MAP_EVERY.
+# Settings come from PAX_* environment variables: docker/entrypoint.sh is the list,
+# and docs/HOSTING.md explains them. Arguments after the image name go straight to
+# pax_server.
 
-# The toolchain rust-toolchain.toml pins.
+# The toolchain rust-toolchain.toml pins: the base image's, so rustup has nothing
+# to fetch (the builder copies rust-toolchain.toml in either way; CI checks they match).
 ARG RUST_VERSION=1.99
 
 # Dependencies are built in their own layer (cargo-chef), so a code change doesn't
@@ -23,6 +23,9 @@ COPY . .
 RUN cargo chef prepare --recipe-path recipe.json
 
 FROM chef AS builder
+# The pinned toolchain before the dependency layer, so both builds use it (a newer
+# pin then rebuilds the layer once, not on every code change).
+COPY rust-toolchain.toml rust-toolchain.toml
 COPY --from=planner /src/recipe.json recipe.json
 RUN cargo chef cook --release -p pax_server --recipe-path recipe.json
 COPY . .

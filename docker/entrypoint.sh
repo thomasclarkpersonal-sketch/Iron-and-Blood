@@ -7,11 +7,27 @@ players="${PAX_PLAYERS:-4}"
 scenario="${PAX_SCENARIO:-scenarios/two_states}"
 port="${PAX_PORT:-7777}"
 
-# A mounted certificate (/app/tls/cert.pem and key.pem) is used as it is; otherwise
-# one is made on the first start and kept in the /app/tls volume.
-if [ ! -f /app/tls/cert.pem ] || [ ! -f /app/tls/key.pem ]; then
-    openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 3650 \
-        -subj "/CN=pax-server" -keyout /app/tls/key.pem -out /app/tls/cert.pem 2>/dev/null
+# A mounted certificate (/app/tls/cert.pem and key.pem) is used as it is. With
+# neither, one is made on the first start and kept in the /app/tls volume. With only
+# one of them, nothing is made: that would replace the operator's certificate, and
+# the fingerprint every player pinned.
+cert=/app/tls/cert.pem
+key=/app/tls/key.pem
+if [ -f "$cert" ] && [ ! -f "$key" ]; then
+    echo "error: $cert is there but $key is not: mount both, or neither to have one made" >&2
+    exit 1
+fi
+if [ ! -f "$cert" ] && [ -f "$key" ]; then
+    echo "error: $key is there but $cert is not: mount both, or neither to have one made" >&2
+    exit 1
+fi
+if [ ! -f "$cert" ]; then
+    if ! openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 3650 \
+        -subj "/CN=pax-server" -keyout "$key" -out "$cert"; then
+        echo "error: could not make a TLS certificate in /app/tls (running as uid $(id -u)):" \
+            "the directory must be writable by it, or mount cert.pem and key.pem" >&2
+        exit 1
+    fi
     echo "made a TLS certificate in /app/tls"
 fi
 

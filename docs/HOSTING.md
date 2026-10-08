@@ -23,7 +23,7 @@ docker compose up -d                       # builds the image and starts the ser
 docker compose logs pax-server | grep SHA-256   # the fingerprint to give the players
 ```
 
-Settings go in `compose.yaml`'s `environment` (see the `Dockerfile` for the full list):
+Settings go in `compose.yaml`'s `environment`; `docker/entrypoint.sh` is the full list. The defaults below are D24's ([DECISIONS.md](DECISIONS.md)), which a playtest may still change:
 
 | Setting | What |
 |---|---|

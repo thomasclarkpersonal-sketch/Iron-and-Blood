@@ -233,6 +233,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: The image's toolchain is the pinned one
+        run: |
+          pinned=$(sed -n 's/^channel = "\(.*\)"/\1/p' rust-toolchain.toml)
+          grep -qx "ARG RUST_VERSION=$pinned" Dockerfile \
+            || { echo "Dockerfile's RUST_VERSION is not rust-toolchain.toml's $pinned"; exit 1; }
       - name: Build the image
         run: docker build -t pax-server .
       - name: Start it and wait until it is healthy

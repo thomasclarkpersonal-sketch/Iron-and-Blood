@@ -193,6 +193,34 @@ impl std::fmt::Display for ReadError {
 /// that never finishes one can't hold a task forever.
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// How many connection tasks are running. When the server stops, the sim queues a
+/// `Goodbye` and `Close` for every session; `Server::wait` waits (briefly) for this
+/// to reach zero, so those tasks write it before the runtime is dropped, which
+/// would otherwise cancel them with the `Goodbye` unsent.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct OpenConnections(Arc<std::sync::atomic::AtomicUsize>);
+
+impl OpenConnections {
+    pub(crate) fn count(&self) -> usize {
+        self.0.load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    /// Counts one connection until the returned guard is dropped (its task ends,
+    /// or is cancelled).
+    fn open(&self) -> OpenGuard {
+        self.0.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+        OpenGuard(self.0.clone())
+    }
+}
+
+struct OpenGuard(Arc<std::sync::atomic::AtomicUsize>);
+
+impl Drop for OpenGuard {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, std::sync::atomic::Ordering::AcqRel);
+    }
+}
+
 /// Accepts connections. With `tls`, each one does the TLS handshake first, and a
 /// failed or slow handshake is dropped before it becomes a session (D24, M4-6).
 pub(crate) async fn accept_loop(
@@ -200,6 +228,7 @@ pub(crate) async fn accept_loop(
     sim: flume::Sender<Inbound>,
     timing: Timing,
     tls: Option<TlsAcceptor>,
+    open: OpenConnections,
 ) {
     let mut next_session = 1u64;
     loop {
@@ -212,13 +241,18 @@ pub(crate) async fn accept_loop(
                 // `to_canonical`: on a dual-stack socket, a local IPv4 client is ::ffff:127.0.0.1.
                 let remote = !peer.ip().to_canonical().is_loopback();
                 let sim = sim.clone();
+                let guard = open.open();
                 match tls.clone() {
                     None => {
                         info!(session, %peer, "connection");
-                        tokio::spawn(connection(stream, session, sim, timing, remote));
+                        tokio::spawn(async move {
+                            let _guard = guard;
+                            connection(stream, session, sim, timing, remote).await
+                        });
                     }
                     Some(acceptor) => {
                         tokio::spawn(async move {
+                            let _guard = guard;
                             match tokio::time::timeout(HANDSHAKE_TIMEOUT, acceptor.accept(stream)).await {
                                 Ok(Ok(stream)) => {
                                     info!(session, %peer, "connection");

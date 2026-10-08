@@ -100,7 +100,7 @@ Loading a save goes through the lobby, and players reclaim their nations.
 - **Configuration:** take settings through arguments or environment: scenario, bind address, password, admin name, `--sandbox`.
 - **Health check:** use a TCP probe on the port.
 - **TLS (M4-6):** the entrypoint makes a certificate once, into the `tls` volume, so the fingerprint players pin stays the same across restarts; a mounted `cert.pem` and `key.pem` are used instead. The server prints the fingerprint, and writes it to `/app/tls/fingerprint`.
-- **Settings:** `PAX_PLAYERS`, `PAX_SCENARIO`, `PAX_PORT`, `PAX_PASSWORD_FILE`, `PAX_ADMIN` with `PAX_ADMIN_PASSWORD_FILE`, `PAX_COMMANDS_PER_SECOND`, `PAX_PAUSE_AFTER`, `PAX_DROP_AFTER`, `PAX_UPDATES_PER_SECOND`, `PAX_MAP_EVERY`; more `pax_server` arguments after the image name.
+- **Settings:** `PAX_*` environment variables (`docker/entrypoint.sh` is the list, [HOSTING.md](HOSTING.md) explains them); more `pax_server` arguments after the image name.
 
 ## Definition of done
 
