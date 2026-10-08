@@ -11,8 +11,11 @@
 //! * a POP's identity for display is `(province, profession)` (D7), applied by
 //!   [`province_pops`].
 //!
-//! A map or a panel can then never disagree with the tick's `DayReport` or with
-//! `pax_cli report` about what a number means.
+//! A map or a panel then applies exactly the rules the tick's `DayReport` and
+//! `pax_cli report` apply. They describe two moments of the same day, though:
+//! `DayReport`'s life needs and militancy are weighted by the sizes the market saw,
+//! while these views use the POP table at the end of the day. The two differ only on
+//! month-end days, when demographics change sizes after the market (D4).
 
 use crate::fixed::Fixed;
 use crate::systems::labor::{self, LabourReport};
@@ -65,13 +68,12 @@ impl ProvinceStats {
             s.militancy[province].record(p.size[i], p.militancy[i]);
         }
         if let Some(labour) = labour {
-            // One call per province, so the definition of "unemployed" stays labor's.
-            let mut by_province: Vec<Vec<LabourReport>> = vec![Vec::new(); provinces];
+            // One pass, with labor's own per-pool rule.
+            let worker = world.defs.worker_professions();
             for pool in labour {
-                by_province[pool.province as usize].push(*pool);
-            }
-            for (province, pools) in by_province.iter().enumerate() {
-                (s.unemployed[province], s.workforce[province]) = labor::unemployment(&world.defs, pools);
+                let (unemployed, workforce) = labor::pool_unemployment(&worker, pool);
+                s.unemployed[pool.province as usize] += unemployed;
+                s.workforce[pool.province as usize] += workforce;
             }
         }
         s
@@ -81,6 +83,19 @@ impl ProvinceStats {
     pub fn unemployment_rate(&self, province: usize) -> Fixed {
         let (unemployed, workforce) = (self.unemployed[province], self.workforce[province]);
         if workforce == 0 { Fixed::ZERO } else { Fixed::ratio(unemployed as i64, workforce as i64) }
+    }
+
+    /// People per nation: each province counts toward the nation owning its market
+    /// (D7: ownership is derived from geography, never stored on POPs). Provinces of
+    /// stateless markets count toward none.
+    pub fn population_by_nation(&self, world: &World) -> Vec<u64> {
+        let mut population = vec![0u64; world.nations.len()];
+        for (province, &people) in self.population.iter().enumerate() {
+            if let Some(nation) = world.geography.nation_of_market(world.market_of_province(province as u32)) {
+                population[nation] += people;
+            }
+        }
+        population
     }
 
     /// The whole world's figures: the provinces' summaries added up.
@@ -132,21 +147,6 @@ pub fn province_pops(world: &World, province: u32) -> Vec<ProfessionGroup> {
     }
     groups.retain(|g| g.people > 0);
     groups
-}
-
-impl ProvinceStats {
-    /// People per nation: each province counts toward the nation owning its market
-    /// (D7: ownership is derived from geography, never stored on POPs). Provinces of
-    /// stateless markets count toward none.
-    pub fn population_by_nation(&self, world: &World) -> Vec<u64> {
-        let mut population = vec![0u64; world.nations.len()];
-        for (province, &people) in self.population.iter().enumerate() {
-            if let Some(nation) = world.geography.nation_of_market(world.market_of_province(province as u32)) {
-                population[nation] += people;
-            }
-        }
-        population
-    }
 }
 
 /// One producer as a province panel shows it.

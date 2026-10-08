@@ -535,8 +535,8 @@ mod tests {
         let runs = 20;
         let start = std::time::Instant::now();
         let mut bytes = 0;
-        // The state hash is computed once per day and shared by every session (the sim's
-        // DayCache), so it is measured separately, not charged to each update.
+        // The state hash is computed once per world change and shared by every session
+        // (`game::Today`), so it is measured separately, not charged to each update.
         let hashing = std::time::Instant::now();
         let state_hash = world.state_hash();
         let hash_ms = hashing.elapsed().as_secs_f64() * 1e3;

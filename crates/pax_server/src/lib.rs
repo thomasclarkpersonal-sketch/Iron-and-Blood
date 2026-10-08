@@ -15,6 +15,7 @@
 //! subscriptions with views (M3-2, M3-3). Ticking, commands and saves arrive with
 //! M3-4 to M3-6 (`docs/MILESTONE_3.md`).
 
+mod commands;
 mod encode;
 mod game;
 mod net;
@@ -24,7 +25,6 @@ mod view;
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
-use std::sync::mpsc;
 use std::thread::JoinHandle;
 use std::time::Duration;
 
@@ -105,7 +105,7 @@ impl From<std::io::Error> for StartError {
 /// A running server.
 pub struct Server {
     local_addr: SocketAddr,
-    to_sim: mpsc::SyncSender<net::Inbound>,
+    to_sim: flume::Sender<net::Inbound>,
     sim: JoinHandle<Result<(), ServerFailure>>,
     runtime: tokio::runtime::Runtime,
 }
@@ -124,7 +124,7 @@ impl Server {
         let local_addr = listener.local_addr()?;
         // Bounded: a connection whose requests pile up stops being read (backpressure),
         // as a connection whose replies pile up is closed (net.rs).
-        let (to_sim, inbound) = mpsc::sync_channel(net::INBOUND_QUEUE);
+        let (to_sim, inbound) = flume::bounded(net::INBOUND_QUEUE);
         runtime.spawn(net::accept_loop(listener, to_sim.clone(), config.idle_timeout));
         let mut sim = sim::Sim::new(scenario, config.exit_when_idle);
         let sim = std::thread::Builder::new().name("pax-sim".to_owned()).spawn(move || {

@@ -109,3 +109,18 @@ pub fn pong(nonce: u64) -> Vec<u8> {
     let p = wire::Pong::create(&mut b, &wire::PongArgs { nonce });
     finish(b, ServerPayload::Pong, p.as_union_value())
 }
+
+/// The answer to one `SubmitCommand`. `error` is `None` when the command was
+/// accepted; `applies_on_day` is then the day at whose start it is applied.
+pub fn command_result(client_seq: u32, error: wire::CommandError, applies_on_day: u64) -> Vec<u8> {
+    let mut b = FlatBufferBuilder::new();
+    let r = wire::CommandResult::create(&mut b, &wire::CommandResultArgs { client_seq, error, applies_on_day });
+    finish(b, ServerPayload::CommandResult, r.as_union_value())
+}
+
+/// The speed changed (including to and from paused), sent to every session (D23).
+pub fn server_state(day: u64, speed: wire::Speed, changed_by: u16) -> Vec<u8> {
+    let mut b = FlatBufferBuilder::new();
+    let s = wire::ServerState::create(&mut b, &wire::ServerStateArgs { day, speed, changed_by });
+    finish(b, ServerPayload::ServerState, s.as_union_value())
+}

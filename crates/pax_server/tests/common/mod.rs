@@ -42,6 +42,17 @@ pub enum Got {
         map_values: Option<usize>,
         market: Option<u32>,
         province: Option<u32>,
+        skipped: u32,
+        tax_rates: Vec<i64>,
+    },
+    CommandResult {
+        client_seq: u32,
+        error: CommandError,
+        applies_on_day: u64,
+    },
+    ServerState {
+        day: u64,
+        speed: Speed,
     },
     Other(String),
     /// The server closed the connection.
@@ -107,6 +118,29 @@ impl Client {
         self.stream
     }
 
+    pub fn set_speed(&mut self, speed: Speed) {
+        let mut b = FlatBufferBuilder::new();
+        let s = SetSpeed::create(&mut b, &SetSpeedArgs { speed });
+        self.send(&mut b, ClientPayload::SetSpeed, s.as_union_value());
+    }
+
+    pub fn ack(&mut self, day: u64) {
+        let mut b = FlatBufferBuilder::new();
+        let a = Ack::create(&mut b, &AckArgs { day });
+        self.send(&mut b, ClientPayload::Ack, a.as_union_value());
+    }
+
+    pub fn set_income_tax(&mut self, client_seq: u32, nation: u32, rate_raw: i64) {
+        let mut b = FlatBufferBuilder::new();
+        let rate = Fixed::new(rate_raw);
+        let c = SetIncomeTax::create(&mut b, &SetIncomeTaxArgs { nation, rate: Some(&rate) });
+        let s = SubmitCommand::create(
+            &mut b,
+            &SubmitCommandArgs { client_seq, command_type: Command::SetIncomeTax, command: Some(c.as_union_value()) },
+        );
+        self.send(&mut b, ClientPayload::SubmitCommand, s.as_union_value());
+    }
+
     pub fn ping(&mut self, nonce: u64) {
         let mut b = FlatBufferBuilder::new();
         let p = Ping::create(&mut b, &PingArgs { nonce });
@@ -168,7 +202,19 @@ fn decode(frame: &[u8]) -> Got {
             map_values: u.map().and_then(|m| m.values()).map(|v| v.len()),
             market: u.market().map(|m| m.market()),
             province: u.province().map(|p| p.province()),
+            skipped: u.skipped(),
+            tax_rates: u
+                .nations()
+                .and_then(|n| n.income_tax_rate())
+                .map(|r| r.iter().map(|f| f.raw()).collect())
+                .unwrap_or_default(),
         };
+    }
+    if let Some(r) = msg.payload_as_command_result() {
+        return Got::CommandResult { client_seq: r.client_seq(), error: r.error(), applies_on_day: r.applies_on_day() };
+    }
+    if let Some(s) = msg.payload_as_server_state() {
+        return Got::ServerState { day: s.day(), speed: s.speed() };
     }
     if let Some(p) = msg.payload_as_pong() {
         return Got::Pong(p.nonce());
