@@ -41,6 +41,10 @@ mod entry {
 /// The first protocol error ends the stream for good: `push` returns what decoded
 /// before it, `failed()` turns true, and later input is ignored. The caller must
 /// disconnect (D22). The bridge enforces this, not GDScript.
+///
+/// An absent id is `null`, never a number. A sandbox session's `"nation"`, for
+/// example, is `null`, so a lookup such as `nations[welcome["nation"]]` fails loudly
+/// instead of silently indexing from the end (D22: no `-1` sentinels).
 #[derive(GodotClass)]
 #[class(base = RefCounted, init)]
 pub struct PaxServerReader {
@@ -81,7 +85,7 @@ fn to_dictionary(event: ServerEvent) -> VarDictionary {
     match event {
         ServerEvent::Welcome(w) => {
             d.set("protocol_minor", i64::from(w.protocol_minor));
-            d.set("nation", w.nation.map_or(-1, i64::from)); // GDScript has no Option: -1 means sandbox
+            d.set("nation", &w.nation.map_or(Variant::nil(), |n| Variant::from(i64::from(n))));
             d.set("day", w.day as i64);
             d.set("scenario", &GString::from(&w.scenario));
             // Godot ints are signed 64-bit; the hash is an identifier, so its bits are kept as-is.

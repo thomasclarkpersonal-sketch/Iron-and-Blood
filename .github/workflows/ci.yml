@@ -51,6 +51,8 @@ jobs:
           done
       - run: cargo fmt --all --check
       - run: cargo clippy --all-targets --release -- -D warnings
+      - name: Clippy the bridge's demo bindings (the M3-0 spike scene uses them)
+        run: cargo clippy -p pax_godot --features demo --all-targets --release -- -D warnings
       - name: Rustdoc (no broken links)
         run: cargo doc --no-deps
         env:

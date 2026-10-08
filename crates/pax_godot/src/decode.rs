@@ -81,23 +81,23 @@ pub struct DayUpdateView {
 pub enum ServerEvent {
     Welcome(WelcomeView),
     DayUpdate(DayUpdateView),
-    /// A message kind the client doesn't handle yet, by its `snake_case` tag.
-    Other(&'static str),
+    /// A message kind the client doesn't decode yet.
+    Other(wire::ServerPayload),
 }
 
 impl ServerEvent {
-    /// The tag GDScript matches on (`"welcome"`, `"day_update"`, …). It is always
-    /// the `snake_case` form of the schema's `ServerPayload` member.
+    /// The tag GDScript matches on (`"welcome"`, `"day_update"`, …): the
+    /// `snake_case` form of the schema's `ServerPayload` member, from one table.
     pub fn tag(&self) -> &'static str {
-        match self {
-            ServerEvent::Welcome(_) => "welcome",
-            ServerEvent::DayUpdate(_) => "day_update",
-            ServerEvent::Other(tag) => tag,
-        }
+        payload_tag(match self {
+            ServerEvent::Welcome(_) => wire::ServerPayload::Welcome,
+            ServerEvent::DayUpdate(_) => wire::ServerPayload::DayUpdate,
+            ServerEvent::Other(kind) => *kind,
+        })
     }
 }
 
-/// `snake_case` tag for a `ServerPayload` member: one naming scheme for every message.
+/// `snake_case` tag for a `ServerPayload` member: the only table of message names.
 fn payload_tag(kind: wire::ServerPayload) -> &'static str {
     match kind {
         wire::ServerPayload::Welcome => "welcome",
@@ -187,20 +187,36 @@ fn day_update(u: wire::DayUpdate<'_>, provinces: usize) -> Result<DayUpdateView,
     })
 }
 
+/// Where the session is. The `Welcome` tables are fixed for a session (D22), so the
+/// only way to replace them is a reload the client asked for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Phase {
+    /// Before the first `Welcome`: only `Welcome`, `Rejected` or `Goodbye` may arrive.
+    AwaitingWelcome,
+    /// After `Welcome`: every message is checked against its tables.
+    Session { provinces: usize },
+    /// The client sent `LoadGame` ([`ServerStream::begin_reload`]): the next
+    /// `Welcome` replaces the tables (NETWORK_PROTOCOL §3).
+    Reloading { provinces: usize },
+}
+
 /// The server's side of one connection, as seen by the client. Feed it bytes in any
 /// chunking. It yields events until the first error, and then nothing ever again:
 /// the caller must disconnect (D22).
 #[derive(Debug)]
 pub struct ServerStream {
     frames: FrameDecoder,
-    /// Province count from `Welcome`; `None` until it arrives.
-    provinces: Option<usize>,
+    phase: Phase,
     failed: Option<StreamError>,
 }
 
 impl Default for ServerStream {
     fn default() -> Self {
-        ServerStream { frames: FrameDecoder::new(Direction::ServerToClient), provinces: None, failed: None }
+        ServerStream {
+            frames: FrameDecoder::new(Direction::ServerToClient),
+            phase: Phase::AwaitingWelcome,
+            failed: None,
+        }
     }
 }
 
@@ -234,25 +250,39 @@ impl ServerStream {
         self.failed.as_ref()
     }
 
+    /// Call when sending `LoadGame`: the server answers with a new `Welcome` whose
+    /// tables replace the current ones. Without this, a second `Welcome` is fatal.
+    pub fn begin_reload(&mut self) {
+        if let Phase::Session { provinces } = self.phase {
+            self.phase = Phase::Reloading { provinces };
+        }
+    }
+
     fn decode(&mut self, frame: &[u8]) -> Result<ServerEvent, StreamError> {
+        use wire::ServerPayload as P;
         let msg = read_server_message(frame)?;
         let kind = msg.payload_type();
-        // Welcome first: everything else is meaningless without its tables. Rejected
-        // and Goodbye may come instead, explaining why there will be no Welcome.
-        let allowed_first =
-            matches!(kind, wire::ServerPayload::Welcome | wire::ServerPayload::Rejected | wire::ServerPayload::Goodbye);
-        if self.provinces.is_none() && !allowed_first {
-            return Err(StreamError::Invalid(format!("{} before Welcome", payload_tag(kind))));
+        match (self.phase, kind) {
+            // A Welcome opens a session, or replaces it after a requested reload.
+            (Phase::AwaitingWelcome | Phase::Reloading { .. }, P::Welcome) => {
+                let view = welcome(required(msg.payload_as_welcome(), "a body")?)?;
+                self.phase = Phase::Session { provinces: view.provinces.len() };
+                Ok(ServerEvent::Welcome(view))
+            }
+            (Phase::Session { .. }, P::Welcome) => {
+                Err(StreamError::Invalid("a second Welcome without a LoadGame".to_owned()))
+            }
+            // Before the first Welcome, only a refusal can explain why there will be none.
+            (Phase::AwaitingWelcome, P::Rejected | P::Goodbye) => Ok(ServerEvent::Other(kind)),
+            (Phase::AwaitingWelcome, _) => Err(StreamError::Invalid(format!("{} before Welcome", payload_tag(kind)))),
+            (Phase::Session { provinces } | Phase::Reloading { provinces }, P::DayUpdate) => {
+                let update = msg
+                    .payload_as_day_update()
+                    .ok_or_else(|| StreamError::Invalid("DayUpdate without a body".to_owned()))?;
+                Ok(ServerEvent::DayUpdate(day_update(update, provinces)?))
+            }
+            (Phase::Session { .. } | Phase::Reloading { .. }, _) => Ok(ServerEvent::Other(kind)),
         }
-        if let Some(w) = msg.payload_as_welcome() {
-            let view = welcome(w)?;
-            self.provinces = Some(view.provinces.len());
-            return Ok(ServerEvent::Welcome(view));
-        }
-        if let Some(u) = msg.payload_as_day_update() {
-            return Ok(ServerEvent::DayUpdate(day_update(u, self.provinces.unwrap_or(0))?));
-        }
-        Ok(ServerEvent::Other(payload_tag(kind)))
     }
 }
 
@@ -366,6 +396,24 @@ mod tests {
         let mut s = ServerStream::default();
         assert!(s.push(&welcome_frame(PROTOCOL_MAJOR + 1, 1, 1, true)).is_empty());
         assert_eq!(s.error(), Some(&StreamError::IncompatibleVersion { server_major: PROTOCOL_MAJOR + 1 }));
+    }
+
+    #[test]
+    fn a_second_welcome_is_fatal_unless_a_reload_was_requested() {
+        let mut s = ServerStream::default();
+        let mut bytes = welcome_frame(PROTOCOL_MAJOR, 2, 2, true);
+        bytes.extend(welcome_frame(PROTOCOL_MAJOR, 3, 3, true));
+        assert_eq!(s.push(&bytes).len(), 1);
+        assert!(matches!(s.error(), Some(StreamError::Invalid(e)) if e.contains("second Welcome")));
+
+        // After begin_reload, the new Welcome's tables replace the old ones.
+        let mut s = ServerStream::default();
+        assert_eq!(s.push(&welcome_frame(PROTOCOL_MAJOR, 2, 2, true)).len(), 1);
+        s.begin_reload();
+        assert_eq!(s.push(&welcome_frame(PROTOCOL_MAJOR, 5, 5, true)).len(), 1);
+        let update = &demo::frames(5)[demo::welcome_len(5)..]; // 5 map values: matches the new tables
+        assert_eq!(s.push(update).len(), 1);
+        assert_eq!(s.error(), None);
     }
 
     #[test]
