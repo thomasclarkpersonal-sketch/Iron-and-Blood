@@ -24,6 +24,15 @@ M4 builds on [Milestone 3](MILESTONE_3.md) without replacing it: the same server
 | Transport | plain TCP on 127.0.0.1 | TLS when not on localhost; server password |
 | Hosting | launched by the client | player-hosted (`--bind 0.0.0.0`) or dedicated (Docker) |
 
+### Carried over from M3
+
+Found during M3 and left for M4, with the reason:
+- **Broadcast `Welcome` after another player's load.** The client's decoder accepts a second `Welcome` only as the answer to its own `LoadGame`. D23 sends every session a new `Welcome` after a load, so with several players (D24) the other clients must accept it too.
+- **Non-blocking server start in the bridge.** `PaxClient.launch` waits for the local server on the main thread (two_states starts in well under a second). A pollable start-up state keeps the UI responsive for large scenarios.
+- **A faster state hash.** The per-day `state_hash` costs about 31 ms at 1M POP rows (M3 kept it, by the owner's decision). FNV over 8-byte words would cut it to a few ms, but changes every golden file (D11).
+- **`pax_cli bench --scale` overflows at month end.** The copies `--scale` makes share their identities, so the month-end compaction merges them past `u32`. The default 30 days reaches month end, so the AGENTS.md D13 command panics as written; `--days 29` works (38 ms/day at 1M rows on 8 threads). The benchmark should give the copies distinct identities.
+- **Saves record the scenario by path.** A save stops loading if the game or scenario directory moves. Record the scenario by name, resolved against the server's scenarios root, before saves are shared.
+
 ## Design (D24, proposed)
 
 **Authority.** A session commands at most one nation.

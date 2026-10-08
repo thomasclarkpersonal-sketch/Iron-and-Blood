@@ -65,7 +65,7 @@ flowchart LR
 | M3-8 ✅ | **Godot client:** launches the server (NETWORK_PROTOCOL §6); map with map modes (political, population, unemployment, life needs, militancy, price of a good); top bar (date, speed, pause); nation panel with the three policy sliders; market panel; province panel; save/load menu; connection-lost screen; debug overlay showing `state_hash` | M3-0, M3-3 to M3-7 | Map rendering: one province-ID texture plus a small per-province colour lookup texture updated from `MapView` (a shader), so a map-mode change rewrites one small texture. **M3-8a done:** the bridge (full decoder, encoder, connection with auto-ack and keep-alive, local-server launcher, generated `PaxKeys`), tested against a real server; the app shell with top bar and debug overlay; a headless smoke test in CI. **M3-8b done:** the province map from the shared `pax_map` reader, checked against `map_hash`; the shader with the per-province colour table; map modes with legends; zoom, pan and province selection. **M3-8c done:** side panels for the world, the nation (three policy sliders, with command results), the market and the province. **M3-8d done:** the save/load menu and the connection-lost screen; the CI smoke test now plays a province panel, a value map mode, a policy and a save/list/load round trip |
 | M3-9 ✅ | **Session replay test:** a scripted headless Rust client plays a session (commands on several days, speed changes, a save), then `pax_cli replay` on the save must reproduce the server's final `state_hash` | M3-6 | Runs in CI on Linux, Windows and macOS. It is the determinism gate for the server. **Done:** `pax_server/tests/session_replay.rs`, through the real `pax_cli` binary in CI |
 | M3-10 ✅ | **Hostile input:** fuzz the frame reader and message handling; the server closes the session and never panics | M3-2 | `cargo fuzz` target, run in CI for a fixed budget. **Done:** seeded stable tests (decoder, sim thread, TCP storm) in every build, plus `fuzz/` (`client_frames`, 60 s per PR, nightly; 3.3M local runs clean) |
-| M3-11 | **Docs:** ARCHITECTURE (crates, processes), BACKEND_SCHEMA (API boundary), DATA_FORMAT (map files, save files), ONBOARDING (how to run the server and client), this file's status | all | Same PR as the code, per AGENTS.md §8 |
+| M3-11 ✅ | **Docs:** ARCHITECTURE (crates, processes), BACKEND_SCHEMA (API boundary), DATA_FORMAT (map files, save files), ONBOARDING (how to run the server and client), this file's status | all | Same PR as the code, per AGENTS.md §8 |
 
 ### Map data format (done in M3-7)
 
@@ -104,6 +104,17 @@ M3 is done when all of these hold. Each is checked by a test or a recorded measu
    - killing the client stops the server.
 6. **Documented:** D12, D22 and D23 are accepted; the docs in M3-11 are updated.
 
+### Status against the definition of done
+
+| # | Status | Evidence |
+|---|---|---|
+| 1 | Built and checked headless; **a human playtest remains** | The client does all of it. CI's `--smoke` drives the client headless: it starts `two_states`, runs at full speed, sets an income tax and checks the nation table, opens a province panel and a value map, then saves, lists and loads and plays on. The nation panel shows treasury and militancy (protocol 1.1). Quitting and relaunching the client, then loading, is for the playtest |
+| 2 | Met | No simulation code in the client. The bridge links `pax_protocol`, plus the side-neutral `pax_map` and `pax_content` (the owner approved this D12 exception on 2026-10-08; CI allowlists exactly these), and never `pax_engine`, not even in tests (CI checks dev edges) |
+| 3 | Met | `pax_server/tests/session_replay.rs` through the real `pax_cli replay`, on Linux, Windows and macOS (M3-9) |
+| 4 | Met; the per-day hash is accepted outside it (owner's decision, 2026-10-08) | At about 1M POP rows on 8 threads (`game::tests::server_day_budget`, 2026-10-08): tick 126 ms, state hash 31 ms, stats and one update 7.5 ms (6% of the tick). `DayUpdate`: 8.3 KB summary-only, 91 KB with every view (M3-1). View building: 2.4–4.0 ms (M3-3). A command gets its `CommandResult` on arrival, before the next tick. The hash adds about 25% per day, which the owner accepted: see Risks |
+| 5 | Met | A second client is refused, a silent client times out, and killing the client stops the server (`pax_server/tests/session.rs`). Hostile input closes the session without a panic, fuzzed (M3-10) |
+| 6 | Met | D12, D22, D23 accepted; ARCHITECTURE, BACKEND_SCHEMA, DATA_FORMAT, ONBOARDING, NETWORK_PROTOCOL and this file updated (M3-11) |
+
 ## Out of scope for M3
 
 Several clients, lobbies, nation assignment and permissions (all M4). Also out:
@@ -120,6 +131,6 @@ Several clients, lobbies, nation assignment and permissions (all M4). Also out:
 |---|---|
 | The client-language spike shows no good FlatBuffers path for Godot | M3-0 comes first and is time-boxed. The schema is language-neutral, and C# has an official library |
 | Map art for many provinces is slow to produce | M3 needs only `two_states`'s map. Bigger maps are content work after M3 |
-| Hashing the whole world costs about 30 ms per day at D13 long-term scale (measured in M3-3). Every `DayUpdate` carries the hash (D10, D22), computed once per day | **Your decision:** keep it, or send it only on 30-day checkpoint days. That would change D10 and D22, so it needs the `contract-change` label |
+| Hashing the whole world costs about 30 ms per day at D13 long-term scale (measured in M3-3; 31 ms beside a 126 ms tick in `server_day_budget`). Every `DayUpdate` carries the hash (D10, D22), computed once per day | **Decided (owner, 2026-10-08): keep the hash in every update.** Every update stays pinnable for a bug report, and the hash is accepted outside the +10% view budget. A faster hash (for example FNV over 8-byte words, which re-records every golden file) is an M4 candidate |
 | Replay-based loading is too slow for long games | Resolved in M3-6b: loads read a binary snapshot (67 ms at 1M POP rows, D23); replay remains the determinism check |
 | M2 features change state the client shows | Protocol evolution rules (NETWORK_PROTOCOL §8); new data arrives as new fields and map modes |

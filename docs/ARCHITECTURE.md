@@ -6,7 +6,7 @@ This document describes the high-level software architecture of the simulation e
 
 ```mermaid
 flowchart TD
-    UI[Godot client, D12] <-->|FlatBuffers over TCP, D22| Server(pax_server, M3)
+    UI[Godot client: GDScript UI + pax_godot bridge, D12] <-->|size-prefixed FlatBuffers over TCP, D22| Server(pax_server, D23)
     CLI[pax_cli: headless runner] --> Engine
     Data[(data/ + scenarios/ TOML)] --> Loader[pax_data: load + validate]
     Loader --> Engine
@@ -22,8 +22,44 @@ flowchart TD
         Step --> Monthly[5-7 Month end: mobility, politics, demographics, compaction]
     end
 
+    Server --> Loader
     Server --> Engine
 ```
+
+## 🖥️ Processes and threads (M3)
+
+```mermaid
+flowchart LR
+    subgraph Client [Godot process]
+        GD[GDScript UI: map, panels, menus] -->|PaxClient| Bridge[pax_godot: connection, decoding, launcher]
+    end
+    Bridge <-->|"127.0.0.1, FlatBuffers (D22)"| Net
+    Bridge -.->|launches, --exit-when-idle| Server
+    subgraph Server [pax_server process]
+        Net[tokio: one task per connection] <-->|bounded channels| Sim[sim thread: owns the World]
+        Sim --> Views[view builders]
+        Sim --> Saves[command log, saves, snapshots]
+    end
+```
+
+- **Single player:** the client launches `pax_server` on a free local port and connects (NETWORK_PROTOCOL §6). The server stops when its player leaves.
+- **The sim thread** owns the `World`. It handles requests in arrival order, ticks at the chosen speed (rayon inside the tick), and builds each day's views once for every session. There are no locks around world state.
+- **Network tasks** only frame, verify and decode. A full outbound queue closes its connection instead of growing memory.
+- **The client** never simulates. The bridge does everything about the protocol: decoding, acknowledgements, keep-alive and argument checks. GDScript only draws.
+
+## 🧱 Crates and boundaries
+
+| Crate | Role | May depend on |
+|---|---|---|
+| `pax_engine` | state and systems, no IO | nothing in the workspace |
+| `pax_data` | TOML loading and validation, saves, snapshots | engine, `pax_content`, `pax_map` |
+| `pax_cli` | headless runner | engine, data |
+| `pax_server` | the authoritative server, the only crate seeing engine and wire types | engine, data, protocol |
+| `pax_protocol` | generated FlatBuffers code and framing | nothing in the workspace |
+| `pax_godot` | the client's bridge (D12) | protocol, plus the side-neutral crates |
+| `pax_content`, `pax_map` | side-neutral: the content-hash scheme and the province-map reader, shared by both sides | nothing with engine or wire types |
+
+CI's crate-boundary step enforces these rules (dev dependencies included, for the client side).
 
 ## 🔄 The Game Loop
 
@@ -93,5 +129,10 @@ Developers iterate on economic mechanics without a client.
 ## 🐳 Infrastructure & Environment
 
 - **Development** happens in WSL/Linux with the toolchain pinned in `rust-toolchain.toml`.
-- **CI** (`.github/workflows/ci.yml`) runs format, clippy, tests and the determinism gate. The gate runs on Linux at 1 and 4 threads, and on Windows and macOS to confirm cross-platform determinism.
+- **CI** (`.github/workflows/ci.yml`) runs:
+  - format, clippy and rustdoc, and the crate-boundary check;
+  - the tests, in debug and release;
+  - the determinism gate, on Linux at 1 and 4 threads, and on Windows and macOS;
+  - the session replay through `pax_cli replay`, on all three platforms;
+  - on PRs: the benchmark regression gate, the headless client smoke test (Godot), and 60 s of fuzzing.
 - **Docker** is for dedicated multiplayer servers in M4 (task M4-8). Single player (M3) runs `pax_server` directly, launched by the client, and the headless tools don't need a container.
