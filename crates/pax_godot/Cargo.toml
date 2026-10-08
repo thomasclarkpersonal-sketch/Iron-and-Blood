@@ -20,7 +20,7 @@ demo = []
 
 [dependencies]
 pax_protocol.workspace = true
-flatbuffers = "=24.3.25"
+flatbuffers.workspace = true
 # Pinned exactly: godot-rust is pre-1.0 and breaks between minor versions. api-4-7
 # builds against Godot 4.7's API, and the extension then loads in Godot 4.7 and later.
 godot = { version = "=0.5.5", features = ["api-4-7"] }

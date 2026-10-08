@@ -16,6 +16,9 @@ pax_protocol = { path = "crates/pax_protocol" }
 rayon = "1.12"
 serde = { version = "1", features = ["derive"] }
 toml = "1.1"
+# Pinned exactly, once for the whole workspace: generated protocol code only works
+# with the runtime of the flatc version that produced it (scripts/gen-protocol.sh, D22).
+flatbuffers = "=24.3.25"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

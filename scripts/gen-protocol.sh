@@ -5,7 +5,7 @@
 # differs, so the schemas and the code can never drift apart.
 #
 # flatc must be exactly FLATC_VERSION: generated code only works with the same
-# version of the `flatbuffers` runtime crate (pinned in crates/pax_protocol/Cargo.toml).
+# version of the `flatbuffers` runtime crate (pinned once, in the root Cargo.toml).
 # On Linux the pinned release is downloaded and checksum-verified into target/tools/.
 # Elsewhere, set FLATC to a flatc binary of that version.
 set -euo pipefail

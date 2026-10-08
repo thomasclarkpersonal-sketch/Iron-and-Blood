@@ -48,6 +48,7 @@ sequenceDiagram
 2. **Welcome** carries `StaticData`: the key tables (goods, professions, producer types, provinces, markets), the province→market map, and each nation with the markets it owns (a market no nation lists is stateless).
    - Every id in the protocol is an index into these tables, and the indices stay fixed for the whole session.
    - The client checks `content_hash` against its own copy of the content (the map image and labels). On a mismatch it shows an error rather than mislabelling provinces.
+   - The hash is FNV-1a over every file the scenario loader reads (`scenario.toml`, the four definition files, the command log), each keyed by its role rather than its path (`pax_data::Scenario::content_hash`).
 3. **Subscribe** replaces the whole subscription. The server immediately answers with a `DayUpdate` for the current day, even while paused, so a newly opened panel fills at once.
 4. **Daily updates** follow the flow-control rule in §5.
 5. **Keep-alive:** the client sends `Ping` at least every 2 seconds. A session silent for 10 seconds (M3) is closed. M4's lag rules are in D24.
@@ -114,8 +115,8 @@ sequenceDiagram
 
 ## 6. Single player: how the client runs the server
 
-- The client launches `pax_server` as a child process: `pax_server --scenario <path> --bind 127.0.0.1:0 --port-file <tmp>`. The server binds a free port, writes it to the port file, and the client connects.
-- When the client exits, it closes the connection, and the server shuts down once its last session has gone (`--exit-when-idle`).
+- The client launches `pax_server` as a child process: `pax_server --scenario <dir> --bind 127.0.0.1:0 --port-file <tmp> --exit-when-idle`. The server binds a free port and writes it to the port file (atomically, so a polling client never reads half a number). The client then connects.
+- When the client exits, it closes the connection, and `--exit-when-idle` makes the server shut down once its player has gone.
 - There is no Docker and no separate install: the server binary ships next to the client.
 
 ## 7. Conversions and units
