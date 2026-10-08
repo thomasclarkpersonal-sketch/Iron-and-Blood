@@ -67,7 +67,7 @@ sequenceDiagram
 |---|---|---|
 | `Hello` | Open the session; request a nation (absent = sandbox, M3 only) | `Welcome` or `Rejected` |
 | `SubmitCommand` | One engine command (`SetIncomeTax`, `SetTransferRate`, `SetConsumptionRate`) with a client-chosen `client_seq` | exactly one `CommandResult` |
-| `SetSpeed` | Pause, or set speed 1–5 | `ServerState` |
+| `SetSpeed` | Pause, or set speed 1–5. A speed the server doesn't know is ignored: the reply is the unchanged `ServerState` (D22) | `ServerState` |
 | `Subscribe` | Choose the map mode, market panel and province panel | a `DayUpdate` for the current day |
 | `Ack` | Finished processing the `DayUpdate` for `day` | — |
 | `Ping` | Keep-alive and round-trip measurement | `Pong` |

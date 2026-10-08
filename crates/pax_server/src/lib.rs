@@ -15,6 +15,7 @@
 //! subscriptions with views (M3-2, M3-3). Ticking, commands and saves arrive with
 //! M3-4 to M3-6 (`docs/MILESTONE_3.md`).
 
+mod clock;
 mod commands;
 mod encode;
 mod game;

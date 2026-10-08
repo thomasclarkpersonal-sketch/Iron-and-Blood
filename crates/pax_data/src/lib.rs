@@ -571,7 +571,8 @@ pub struct Outcomes {
     /// The scenario's scripted commands for the day (`commands.toml`), in the order
     /// they applied, each with its outcome.
     pub scripted: Vec<(Command, Result<(), CommandError>)>,
-    /// The outcome of each of the players' commands, in the order given.
+    /// The outcome of each of the players' commands: index-aligned with the
+    /// `players` slice passed to [`step_day`], which holds the commands themselves.
     pub players: Vec<Result<(), CommandError>>,
 }
 

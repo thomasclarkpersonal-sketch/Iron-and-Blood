@@ -1,15 +1,16 @@
-//! The game the sim thread runs: the scenario's world, and everything the views
-//! derive from it (D22).
+//! The game the sim thread runs: the scenario's world, the log of every command
+//! that applied to it (D21, D23), and everything the views derive from it (D22).
 //!
-//! Derived data can't go stale here because there is no cache to invalidate.
 //! [`Game`] owns the world, which is read-only from outside. Every method that
-//! changes the world rebuilds [`Today`] in the same step, so a world change without
-//! fresh views can't be written (AGENTS.md §1, D7).
+//! changes the world appends what applied to the log and rebuilds [`Today`] in the
+//! same step. So a world change that isn't logged, or that leaves the views stale,
+//! can't be written (AGENTS.md §1, D7). Saves are built from this log (D23).
 
-use pax_data::{DayStep, Outcomes, Scenario};
+use pax_data::{DayStep, Scenario};
 use pax_engine::views::ProvinceStats;
-use pax_engine::{Command, DayReport, World};
+use pax_engine::{Command, CommandError, DayReport, World};
 
+use crate::queue::Pending;
 use crate::view::DayViews;
 
 /// Everything derived from the world's current state that every session's update
@@ -32,16 +33,29 @@ impl Today {
     }
 }
 
-/// The scenario being played, with its derived [`Today`].
+/// A command that applied: the game's history (D21). Saves are the scenario plus
+/// this log (D23).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Logged {
+    /// The day at whose start it applied.
+    pub day: u64,
+    /// `None` for the scenario's own scripted commands (`commands.toml`).
+    pub player: Option<u16>,
+    pub command: Command,
+}
+
+/// The scenario being played, its history, and its derived [`Today`].
 pub(crate) struct Game {
     scenario: Scenario,
+    /// Every command that applied, in application order.
+    log: Vec<Logged>,
     today: Today,
 }
 
 impl Game {
     pub(crate) fn new(scenario: Scenario) -> Game {
         let today = Today::of(&scenario.world, None);
-        Game { scenario, today }
+        Game { scenario, log: Vec::new(), today }
     }
 
     pub(crate) fn world(&self) -> &World {
@@ -52,14 +66,40 @@ impl Game {
         &self.scenario
     }
 
+    /// Every command that applied so far, in application order. (Saves read it from
+    /// M3-6 on.)
+    #[cfg(test)]
+    pub(crate) fn log(&self) -> &[Logged] {
+        &self.log
+    }
+
     /// Runs one day through the shared day step ([`pax_data::step_day`]): the
-    /// scenario's scripted commands, then `players`, already in stamp order. Rebuilds
-    /// [`Today`] from the result in the same step, which keeps the day's report.
-    pub(crate) fn step(&mut self, players: &[Command]) -> Outcomes {
+    /// scenario's scripted commands, then `players`, already in stamp order. Logs
+    /// every command that applied and rebuilds [`Today`], in the same step.
+    ///
+    /// Returns the players' commands that failed when applied (none can today), for
+    /// their late error `CommandResult`. A rejected scripted command is logged as a
+    /// warning: a running game can't stop for a scenario's mistake (`step_day`).
+    pub(crate) fn step(&mut self, players: Vec<Pending>) -> Vec<(Pending, CommandError)> {
+        let day = self.scenario.world.day;
+        let commands: Vec<Command> = players.iter().map(|p| p.command).collect();
         let DayStep { report, outcomes } =
-            pax_data::step_day(&mut self.scenario.world, &self.scenario.commands, players);
+            pax_data::step_day(&mut self.scenario.world, &self.scenario.commands, &commands);
+        for (command, result) in outcomes.scripted {
+            match result {
+                Ok(()) => self.log.push(Logged { day, player: None, command }),
+                Err(e) => tracing::warn!(day, ?command, %e, "scripted command rejected"),
+            }
+        }
+        let mut rejected = Vec::new();
+        for (p, result) in players.into_iter().zip(outcomes.players) {
+            match result {
+                Ok(()) => self.log.push(Logged { day, player: Some(p.player), command: p.command }),
+                Err(e) => rejected.push((p, e)),
+            }
+        }
         self.today = Today::of(&self.scenario.world, Some(report));
-        outcomes
+        rejected
     }
 
     /// The views of the current state, shared by every session.
@@ -90,7 +130,7 @@ mod tests {
             let views = game.views();
             assert_eq!(views.state_hash, game.world().state_hash());
             assert_eq!(views.stats, &ProvinceStats::of(game.world(), views.report.map(|r| r.labour.as_slice())));
-            game.step(&[]);
+            game.step(Vec::new());
         }
         assert!(game.views().report.is_some());
     }

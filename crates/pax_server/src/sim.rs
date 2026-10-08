@@ -5,7 +5,7 @@
 //! * the handshake (`Welcome` or `Rejected`);
 //! * subscriptions and their views;
 //! * commands, checked, queued and applied at the start of the next tick;
-//! * the log of every command that applied (D21, D23);
+//! * the log of every command that applied (D21, D23), kept by [`Game`];
 //! * pacing: when ticks happen, at the session's chosen speed;
 //! * flow control: which updates each session is sent, kept in [`crate::window`].
 //!
@@ -13,13 +13,13 @@
 
 use flume::{Receiver, RecvTimeoutError, TryRecvError};
 use std::collections::BTreeMap;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use pax_data::Scenario;
-use pax_engine::Command;
 use pax_protocol::{PROTOCOL_MAJOR, PROTOCOL_MINOR, wire};
 use tracing::{debug, info};
 
+use crate::clock::Clock;
 use crate::commands;
 use crate::encode::{self, WelcomeInfo};
 use crate::game::Game;
@@ -28,73 +28,6 @@ use crate::queue::CommandQueue;
 use crate::request::{Request, WireCommand};
 use crate::view::{self, CheckedSubscription, DayViews, Subscription};
 use crate::window::UpdateWindow;
-
-/// How a speed paces the clock (D23).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Pace {
-    Paused,
-    /// One day per interval; a zero interval for `Fastest`, which ticks as fast as
-    /// the engine allows.
-    Every(Duration),
-    /// A speed newer than this server.
-    Unknown,
-}
-
-/// Days per real second at each speed (D23).
-fn pace(speed: wire::Speed) -> Pace {
-    use wire::Speed as S;
-    match speed {
-        S::Paused => Pace::Paused,
-        S::Slowest => Pace::Every(Duration::from_millis(2_000)), // 0.5 days/s
-        S::Slow => Pace::Every(Duration::from_millis(1_000)),    // 1
-        S::Normal => Pace::Every(Duration::from_millis(500)),    // 2
-        S::Fast => Pace::Every(Duration::from_millis(200)),      // 5
-        S::Fastest => Pace::Every(Duration::ZERO),
-        _ => Pace::Unknown,
-    }
-}
-
-/// The game clock: one value, so "paused" and "a tick is due" can't disagree.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Clock {
-    Paused,
-    Running { speed: wire::Speed, interval: Duration, next: Instant },
-}
-
-impl Clock {
-    /// The clock at `speed`, its first tick one interval after `now`, so unpausing
-    /// never fires a burst of catch-up ticks. `None` for an unknown speed.
-    fn at(speed: wire::Speed, now: Instant) -> Option<Clock> {
-        match pace(speed) {
-            Pace::Paused => Some(Clock::Paused),
-            Pace::Every(interval) => Some(Clock::Running { speed, interval, next: now + interval }),
-            Pace::Unknown => None,
-        }
-    }
-
-    fn speed(self) -> wire::Speed {
-        match self {
-            Clock::Paused => wire::Speed::Paused,
-            Clock::Running { speed, .. } => speed,
-        }
-    }
-
-    /// When the next tick is due; `None` while paused.
-    fn due(self) -> Option<Instant> {
-        match self {
-            Clock::Paused => None,
-            Clock::Running { next, .. } => Some(next),
-        }
-    }
-
-    /// A tick ran at `now`: the next is one interval after the one that was due,
-    /// keeping the cadence, but never in the past after a slow tick.
-    fn ticked(&mut self, now: Instant) {
-        if let Clock::Running { interval, next, .. } = self {
-            *next = (*next + *interval).max(now);
-        }
-    }
-}
 
 struct Session {
     conn: ConnHandle,
@@ -115,17 +48,6 @@ struct Seat {
     nation: Option<u32>,
 }
 
-/// A command that applied: the game's history (D21). Saves are the scenario plus
-/// this log (D23).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct Logged {
-    /// The day at whose start it applied.
-    pub day: u64,
-    /// `None` for the scenario's own scripted commands (`commands.toml`).
-    pub player: Option<u16>,
-    pub command: Command,
-}
-
 pub(crate) struct Sim {
     game: Game,
     sessions: BTreeMap<u64, Session>,
@@ -137,8 +59,6 @@ pub(crate) struct Sim {
     clock: Clock,
     /// Commands accepted for the next tick, stamped on arrival.
     queue: CommandQueue,
-    /// Every command that applied, in application order.
-    log: Vec<Logged>,
 }
 
 impl Sim {
@@ -150,7 +70,6 @@ impl Sim {
             exit_when_idle,
             clock: Clock::Paused,
             queue: CommandQueue::default(),
-            log: Vec::new(),
         }
     }
 
@@ -249,12 +168,18 @@ impl Sim {
         self.command_result(session, client_seq, wire::CommandError::None);
     }
 
-    /// A session asked for a new speed. An unknown speed is a protocol error.
+    /// A session asked for a new speed. A speed newer than this server is ignored, as
+    /// D22 requires of unknown enum values: the clock is unchanged, and the session is
+    /// told the current state so it can resynchronise.
     fn set_speed(&mut self, session: u64, speed: wire::Speed) {
         let Some(seat) = self.sessions.get(&session).and_then(|s| s.seat) else { return };
         match Clock::at(speed, Instant::now()) {
             Some(clock) => self.set_clock(clock, seat.player),
-            None => self.goodbye(session, &format!("unknown speed {}", speed.0)),
+            None => {
+                debug!(session, speed = speed.0, "ignored: unknown speed");
+                let frame = encode::server_state(self.game.world().day, self.clock.speed(), seat.player);
+                self.send(session, Outbound::Frame(frame));
+            }
         }
     }
 
@@ -281,28 +206,12 @@ impl Sim {
         }
     }
 
-    /// Runs one day through the shared day step ([`pax_data::step_day`]): the
-    /// scenario's scripted commands for the day, then the players' commands in stamp
-    /// order (D10, D23). Everything that applies is logged. Each command is
-    /// re-validated as it applies; a player's that fails there (none can today) gets
-    /// a late error `CommandResult` and is not logged.
+    /// Runs one day: the queued commands in stamp order (D10), through
+    /// [`Game::step`], which logs what applied. A player's command that fails when
+    /// applied gets a late error `CommandResult`.
     pub(crate) fn tick(&mut self) {
-        let day = self.game.world().day;
-        let pending = self.queue.take();
-        let commands: Vec<Command> = pending.iter().map(|p| p.command).collect();
-        let outcomes = self.game.step(&commands);
-        for (command, result) in outcomes.scripted {
-            match result {
-                Ok(()) => self.log.push(Logged { day, player: None, command }),
-                // A running game can't stop for a scenario's mistake (`step_day`).
-                Err(e) => tracing::warn!(day, ?command, %e, "scripted command rejected"),
-            }
-        }
-        for (p, result) in pending.into_iter().zip(outcomes.players) {
-            match result {
-                Ok(()) => self.log.push(Logged { day, player: Some(p.player), command: p.command }),
-                Err(e) => self.command_result(p.session, p.client_seq, commands::error_to_wire(&e)),
-            }
+        for (p, e) in self.game.step(self.queue.take()) {
+            self.command_result(p.session, p.client_seq, commands::error_to_wire(&e));
         }
     }
 
@@ -332,8 +241,8 @@ impl Sim {
 
     /// Every command applied so far, in application order.
     #[cfg(test)]
-    pub(crate) fn log(&self) -> &[Logged] {
-        &self.log
+    pub(crate) fn log(&self) -> &[crate::game::Logged] {
+        self.game.log()
     }
 
     /// Handles one inbound event. Returns `false` when the server should stop.
@@ -369,7 +278,7 @@ impl Sim {
                 if self.active == Some(session) {
                     self.active = None;
                     // Nobody is watching: stop the clock (D23 never runs a game unobserved).
-                    let player = seat.map_or(0, |s| s.player);
+                    let player = seat.expect("the active session was welcomed").player;
                     self.set_clock(Clock::Paused, player);
                     if self.exit_when_idle {
                         info!("the client left; exiting (--exit-when-idle)");
@@ -442,7 +351,7 @@ pub(crate) fn run(sim: &mut Sim, inbound: Receiver<Inbound>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pax_engine::Fixed;
+    use pax_engine::{Command, Fixed};
     use pax_protocol::read_server_message;
     use tokio::sync::mpsc::Receiver;
 
@@ -523,7 +432,7 @@ mod tests {
         sim.tick();
         assert_eq!(sim.game.world().nations.income_tax_rate[1], Fixed::from_raw(150_000));
         let applied = Command::SetIncomeTax { nation: 1, rate: Fixed::from_raw(150_000) };
-        assert_eq!(sim.log(), [Logged { day: 0, player: Some(0), command: applied }]);
+        assert_eq!(sim.log(), [crate::game::Logged { day: 0, player: Some(0), command: applied }]);
     }
 
     #[test]
@@ -602,8 +511,14 @@ mod tests {
         sim.handle(Inbound::Request { session: SESSION, request: Request::SetSpeed { speed: wire::Speed::Paused } });
         assert_eq!(drain(&mut rx), [Sent::State(wire::Speed::Paused)]);
         assert_eq!(sim.clock, Clock::Paused);
+        // D22: a speed newer than this server is ignored, never a protocol error. The
+        // session is told the unchanged state.
+        sim.handle(Inbound::Request { session: SESSION, request: Request::SetSpeed { speed: wire::Speed::Fast } });
+        drain(&mut rx);
+        let before = sim.clock;
         sim.handle(Inbound::Request { session: SESSION, request: Request::SetSpeed { speed: wire::Speed(9) } });
-        assert!(matches!(drain(&mut rx).as_slice(), [Sent::Goodbye(r), Sent::Close] if r.contains("unknown speed")));
+        assert_eq!(drain(&mut rx), [Sent::State(wire::Speed::Fast)]);
+        assert_eq!(sim.clock, before);
     }
 
     #[test]
@@ -612,19 +527,6 @@ mod tests {
         sim.handle(Inbound::Request { session: SESSION, request: Request::SetSpeed { speed: wire::Speed::Fast } });
         sim.handle(Inbound::Closed { session: SESSION });
         assert_eq!(sim.clock, Clock::Paused);
-    }
-
-    #[test]
-    fn the_clock_keeps_its_cadence_but_never_schedules_in_the_past() {
-        let start = Instant::now();
-        let mut clock = Clock::at(wire::Speed::Normal, start).expect("a known speed");
-        assert_eq!(clock.due(), Some(start + Duration::from_millis(500)));
-        clock.ticked(start + Duration::from_millis(600));
-        assert_eq!(clock.due(), Some(start + Duration::from_millis(1_000)), "a late tick keeps the cadence");
-        clock.ticked(start + Duration::from_millis(5_000));
-        assert_eq!(clock.due(), Some(start + Duration::from_millis(5_000)), "a slow tick never queues catch-up");
-        assert_eq!(Clock::at(wire::Speed(9), start), None);
-        assert_eq!(Clock::at(wire::Speed::Paused, start), Some(Clock::Paused));
     }
 
     /// D11 pins the server's day to the harness's: with no players, `Sim::tick`
