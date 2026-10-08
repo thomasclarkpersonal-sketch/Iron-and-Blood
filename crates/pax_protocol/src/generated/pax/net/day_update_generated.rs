@@ -47,7 +47,7 @@ impl<'a> DayUpdate<'a> {
     args: &'args DayUpdateArgs<'args>
   ) -> flatbuffers::WIPOffset<DayUpdate<'bldr>> {
     let mut builder = DayUpdateBuilder::new(_fbb);
-    if let Some(x) = args.state_hash { builder.add_state_hash(x); }
+    builder.add_state_hash(args.state_hash);
     builder.add_day(args.day);
     if let Some(x) = args.province { builder.add_province(x); }
     if let Some(x) = args.market { builder.add_market(x); }
@@ -83,17 +83,14 @@ impl<'a> DayUpdate<'a> {
     // which contains a valid value in this slot
     unsafe { self._tab.get::<u32>(DayUpdate::VT_SKIPPED, Some(0)).unwrap()}
   }
-  /// `World::state_hash` after this day, present only on checkpoint days (every 30
-  /// days, D23). Hashing the whole world costs ~30 ms at 1M POP rows, too much for
-  /// every update. A thin client can't verify it: it identifies the exact state in
-  /// logs and bug reports. Between checkpoints, the day and the last checkpoint's
-  /// hash do the same, because the simulation is deterministic.
+  /// `World::state_hash` after this day. A thin client can't verify it; it
+  /// identifies the exact state in logs and bug reports, so a session can be replayed.
   #[inline]
-  pub fn state_hash(&self) -> Option<u64> {
+  pub fn state_hash(&self) -> u64 {
     // Safety:
     // Created from valid Table for this object
     // which contains a valid value in this slot
-    unsafe { self._tab.get::<u64>(DayUpdate::VT_STATE_HASH, None)}
+    unsafe { self._tab.get::<u64>(DayUpdate::VT_STATE_HASH, Some(0)).unwrap()}
   }
   #[inline]
   pub fn world(&self) -> Option<WorldSummary<'a>> {
@@ -156,7 +153,7 @@ pub struct DayUpdateArgs<'a> {
     pub day: u64,
     pub speed: Speed,
     pub skipped: u32,
-    pub state_hash: Option<u64>,
+    pub state_hash: u64,
     pub world: Option<flatbuffers::WIPOffset<WorldSummary<'a>>>,
     pub nations: Option<flatbuffers::WIPOffset<NationTable<'a>>>,
     pub map: Option<flatbuffers::WIPOffset<MapView<'a>>>,
@@ -170,7 +167,7 @@ impl<'a> Default for DayUpdateArgs<'a> {
       day: 0,
       speed: Speed::Paused,
       skipped: 0,
-      state_hash: None,
+      state_hash: 0,
       world: None,
       nations: None,
       map: None,
@@ -199,7 +196,7 @@ impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> DayUpdateBuilder<'a, 'b, A> {
   }
   #[inline]
   pub fn add_state_hash(&mut self, state_hash: u64) {
-    self.fbb_.push_slot_always::<u64>(DayUpdate::VT_STATE_HASH, state_hash);
+    self.fbb_.push_slot::<u64>(DayUpdate::VT_STATE_HASH, state_hash, 0);
   }
   #[inline]
   pub fn add_world(&mut self, world: flatbuffers::WIPOffset<WorldSummary<'b >>) {

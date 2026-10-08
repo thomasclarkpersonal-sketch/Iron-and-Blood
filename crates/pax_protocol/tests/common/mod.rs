@@ -120,7 +120,7 @@ pub fn day_update(s: &Scale) -> Vec<u8> {
             day: 7_300,
             speed: Speed::Normal,
             skipped: 2,
-            state_hash: Some(0xDEAD_BEEF_0BAD_F00D),
+            state_hash: 0xDEAD_BEEF_0BAD_F00D,
             world: Some(world),
             nations: Some(nations),
             map,

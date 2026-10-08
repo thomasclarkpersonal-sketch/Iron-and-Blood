@@ -60,7 +60,12 @@ impl MapLayer {
             M::Militancy => MapLayer::Militancy,
             M::Price if usize::from(good) < goods => MapLayer::Price { good: usize::from(good) },
             M::Price => return Err(format!("Subscribe names good {good}, but there are {goods}")),
-            other => return Err(format!("unknown map mode {}", other.0)),
+            // A mode newer than this server: D22 says receivers ignore unknown enum
+            // values, so a newer client gets no map rather than a disconnect.
+            other => {
+                tracing::debug!(mode = other.0, "unknown map mode; showing no map");
+                MapLayer::Hidden
+            }
         })
     }
 
@@ -80,7 +85,7 @@ impl MapLayer {
 
 /// A subscription known to be valid for the current world. It can only be made by
 /// [`Subscription::checked`], so [`day_update`] never sees an unknown mode or an
-/// out-of-range id. A load that changes the world resets every subscription (D23).
+/// out-of-range id.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CheckedSubscription {
     layer: MapLayer,
@@ -124,9 +129,9 @@ pub struct DayViews<'w> {
     /// The report of the day that just ran; `None` before the first tick.
     pub report: Option<&'w DayReport>,
     pub stats: &'w ProvinceStats,
-    /// `World::state_hash` on checkpoint days only: about 30 ms at 1M POP rows, far
-    /// over the 5 ms view budget, so the sim thread computes it once per checkpoint.
-    pub state_hash: Option<u64>,
+    /// `World::state_hash` after the day (D10, D22). About 30 ms at 1M POP rows, so
+    /// the sim thread computes it once per day and every session's update shares it.
+    pub state_hash: u64,
 }
 
 fn fixed(v: Fixed) -> wire::Fixed {
@@ -382,7 +387,7 @@ mod tests {
     fn summary_matches_the_engines_own_numbers() {
         let (world, report) = world_after(45);
         let stats = stats_of(&world, Some(&report));
-        let v = DayViews { world: &world, report: Some(&report), stats: &stats, state_hash: None };
+        let v = DayViews { world: &world, report: Some(&report), stats: &stats, state_hash: world.state_hash() };
         let frame = update(&v, Subscription::default());
         let u = read_server_message(&frame).unwrap().payload_as_day_update().unwrap();
         assert_eq!((u.day(), u.skipped()), (world.day, 3));
@@ -405,15 +410,13 @@ mod tests {
     }
 
     #[test]
-    fn the_checkpoint_hash_is_sent_only_when_there_is_one() {
-        let (world, report) = world_after(60);
+    fn every_update_carries_the_days_state_hash() {
+        let (world, report) = world_after(45);
         let stats = stats_of(&world, Some(&report));
-        for state_hash in [None, Some(world.state_hash())] {
-            let v = DayViews { world: &world, report: Some(&report), stats: &stats, state_hash };
-            let frame = update(&v, Subscription::default());
-            let u = read_server_message(&frame).unwrap().payload_as_day_update().unwrap();
-            assert_eq!(u.state_hash(), state_hash);
-        }
+        let v = DayViews { world: &world, report: Some(&report), stats: &stats, state_hash: world.state_hash() };
+        let frame = update(&v, Subscription::default());
+        let u = read_server_message(&frame).unwrap().payload_as_day_update().unwrap();
+        assert_eq!(u.state_hash(), world.state_hash());
     }
 
     #[test]
@@ -421,7 +424,7 @@ mod tests {
         use wire::MapMode as M;
         let (world, report) = world_after(45);
         let stats = stats_of(&world, Some(&report));
-        let v = DayViews { world: &world, report: Some(&report), stats: &stats, state_hash: None };
+        let v = DayViews { world: &world, report: Some(&report), stats: &stats, state_hash: world.state_hash() };
         let provinces = world.geography.province_count();
         for mode in [M::Population, M::Unemployment, M::LifeNeeds, M::Militancy, M::Price] {
             let frame = update(&v, Subscription { map_mode: mode, map_good: 2, ..Default::default() });
@@ -453,7 +456,7 @@ mod tests {
     fn market_and_province_panels_match_the_world() {
         let (world, report) = world_after(45);
         let stats = stats_of(&world, Some(&report));
-        let v = DayViews { world: &world, report: Some(&report), stats: &stats, state_hash: None };
+        let v = DayViews { world: &world, report: Some(&report), stats: &stats, state_hash: world.state_hash() };
         let frame = update(&v, Subscription { market: Some(1), province: Some(0), ..Default::default() });
         let msg = read_server_message(&frame).unwrap();
         let u = msg.payload_as_day_update().unwrap();
@@ -486,7 +489,7 @@ mod tests {
     fn before_the_first_tick_spending_is_zero_but_the_map_works() {
         let world = two_states().world;
         let stats = stats_of(&world, None);
-        let v = DayViews { world: &world, report: None, stats: &stats, state_hash: None };
+        let v = DayViews { world: &world, report: None, stats: &stats, state_hash: world.state_hash() };
         let sub = Subscription { map_mode: wire::MapMode::Population, market: Some(0), ..Default::default() };
         let frame = update(&v, sub);
         let msg = read_server_message(&frame).unwrap();
@@ -506,10 +509,20 @@ mod tests {
             Subscription { map_mode: wire::MapMode::Price, map_good: 12, ..Default::default() },
             Subscription { market: Some(2), ..Default::default() },
             Subscription { province: Some(4), ..Default::default() },
-            Subscription { map_mode: wire::MapMode(200), ..Default::default() },
         ] {
             assert!(bad.checked(&world).is_err(), "{bad:?}");
         }
+    }
+
+    /// D22: an enum value newer than this server is ignored, not a protocol error.
+    #[test]
+    fn an_unknown_map_mode_shows_no_map() {
+        let world = two_states().world;
+        let sub = Subscription { map_mode: wire::MapMode(200), ..Default::default() }.checked(&world).unwrap();
+        let stats = stats_of(&world, None);
+        let v = DayViews { world: &world, report: None, stats: &stats, state_hash: 0 };
+        let frame = day_update(&v, &sub, wire::Speed::Paused, 0);
+        assert!(read_server_message(&frame).unwrap().payload_as_day_update().unwrap().map().is_none());
     }
 
     /// The M3 budget at D13's long-term scale (about 1M POP rows, 3,000 markets, 200
@@ -532,14 +545,19 @@ mod tests {
         let runs = 20;
         let start = std::time::Instant::now();
         let mut bytes = 0;
+        // The state hash is computed once per day and shared by every session (the sim's
+        // DayCache), so it is measured separately, not charged to each update.
+        let hashing = std::time::Instant::now();
+        let state_hash = world.state_hash();
+        let hash_ms = hashing.elapsed().as_secs_f64() * 1e3;
         for _ in 0..runs {
             let stats = stats_of(&world, Some(&report));
-            let views = DayViews { world: &world, report: Some(&report), stats: &stats, state_hash: None };
+            let views = DayViews { world: &world, report: Some(&report), stats: &stats, state_hash };
             bytes = day_update(&views, &sub, wire::Speed::Normal, 0).len();
         }
         let ms = start.elapsed().as_secs_f64() * 1e3 / runs as f64;
         println!(
-            "{} POP rows, {} provinces, {} markets, {} nations: {ms:.2} ms per full update, {bytes} bytes",
+            "{} POP rows, {} provinces, {} markets, {} nations: {ms:.2} ms per full update, {bytes} bytes; state hash {hash_ms:.1} ms once per day",
             world.pops.size.len(),
             world.geography.province_count(),
             world.geography.market_count(),

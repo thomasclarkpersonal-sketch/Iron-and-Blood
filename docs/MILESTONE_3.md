@@ -118,5 +118,6 @@ Several clients, lobbies, nation assignment and permissions (all M4). Also out:
 |---|---|
 | The client-language spike shows no good FlatBuffers path for Godot | M3-0 comes first and is time-boxed. The schema is language-neutral, and C# has an official library |
 | Map art for many provinces is slow to produce | M3 needs only `two_states`'s map. Bigger maps are content work after M3 |
+| Hashing the whole world costs about 30 ms per day at D13 long-term scale (measured in M3-3). Every `DayUpdate` carries the hash (D10, D22), computed once per day | **Your decision:** keep it, or send it only on 30-day checkpoint days. That would change D10 and D22, so it needs the `contract-change` label |
 | Replay-based loading is too slow for long games | Measured in M3-6, with binary checkpoints as the planned fallback |
 | M2 features change state the client shows | Protocol evolution rules (NETWORK_PROTOCOL §8); new data arrives as new fields and map modes |

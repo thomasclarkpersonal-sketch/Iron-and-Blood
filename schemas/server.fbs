@@ -139,12 +139,9 @@ table DayUpdate {
   /// Days that ran since the previous update this session received but were not
   /// sent, because the client was behind (flow control, D23).
   skipped: uint;
-  /// `World::state_hash` after this day, present only on checkpoint days (every 30
-  /// days, D23). Hashing the whole world costs ~30 ms at 1M POP rows, too much for
-  /// every update. A thin client can't verify it: it identifies the exact state in
-  /// logs and bug reports. Between checkpoints, the day and the last checkpoint's
-  /// hash do the same, because the simulation is deterministic.
-  state_hash: ulong = null;
+  /// `World::state_hash` after this day. A thin client can't verify it; it
+  /// identifies the exact state in logs and bug reports, so a session can be replayed.
+  state_hash: ulong;
   world: WorldSummary;
   nations: NationTable;
   map: MapView;

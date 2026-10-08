@@ -15,6 +15,7 @@
 pub mod golden;
 mod schema;
 
+#[cfg(feature = "bench")]
 pub mod bench;
 
 use std::collections::BTreeMap;

@@ -18,16 +18,16 @@ use crate::net::{ConnHandle, Inbound, Outbound};
 use crate::request::Request;
 use crate::view::{self, CheckedSubscription, DayViews, Subscription};
 
-/// Days between state-hash checkpoints (D23): the hash goes in that day's `DayUpdate`.
-const CHECKPOINT_DAYS: u64 = 30;
-
-/// The derived numbers every session's update for one day shares: computed once
-/// per day, never per request (D22). Keyed by the day, so a tick invalidates it.
+/// The derived numbers every session's update shares while the world is unchanged:
+/// computed once, never per request (D22). A self-validating cache (D7, AGENTS.md §1):
+/// keyed by the world's generation, which every change to the world bumps
+/// ([`Sim::world_changed`]), and cross-checked against a fresh computation in debug
+/// builds.
 struct DayCache {
-    day: u64,
+    generation: u64,
     stats: ProvinceStats,
-    /// `World::state_hash` on checkpoint days: ~30 ms at 1M POP rows, so once per day.
-    state_hash: Option<u64>,
+    /// `World::state_hash` (D10, D22): about 30 ms at 1M POP rows, so computed once.
+    state_hash: u64,
 }
 
 struct Session {
@@ -61,6 +61,9 @@ pub(crate) struct Sim {
     last_report: Option<DayReport>,
     /// The current day's shared view inputs; see [`DayCache`].
     day_cache: Option<DayCache>,
+    /// Bumped by every change to the world or its last report, so the cache can't
+    /// outlive what it was computed from.
+    generation: u64,
 }
 
 impl Sim {
@@ -73,6 +76,7 @@ impl Sim {
             speed: wire::Speed::Paused,
             last_report: None,
             day_cache: None,
+            generation: 0,
         }
     }
 
@@ -103,18 +107,31 @@ impl Sim {
         self.send(session, Outbound::Frame(frame));
     }
 
-    /// Today's views, computing the day's stats and checkpoint hash the first time
-    /// they're needed and reusing them for every later request that day.
+    /// Every change to the world (a tick, a load) must call this, so cached views
+    /// built from the old world are never served.
+    #[allow(dead_code)] // called by the tick (M3-4/5) and by loads (M3-6)
+    fn world_changed(&mut self) {
+        self.generation += 1;
+    }
+
+    /// The current views, computing the stats and the state hash the first time they're
+    /// needed and reusing them until the world changes.
     fn day_views(&mut self) -> DayViews<'_> {
         let world = &self.scenario.world;
-        if self.day_cache.as_ref().is_none_or(|c| c.day != world.day) {
+        let labour = self.last_report.as_ref().map(|r| r.labour.as_slice());
+        if self.day_cache.as_ref().is_none_or(|c| c.generation != self.generation) {
             self.day_cache = Some(DayCache {
-                day: world.day,
-                stats: ProvinceStats::of(world, self.last_report.as_ref().map(|r| r.labour.as_slice())),
-                state_hash: world.day.is_multiple_of(CHECKPOINT_DAYS).then(|| world.state_hash()),
+                generation: self.generation,
+                stats: ProvinceStats::of(world, labour),
+                state_hash: world.state_hash(),
             });
         }
         let cache = self.day_cache.as_ref().expect("filled above");
+        debug_assert_eq!(
+            cache.stats,
+            ProvinceStats::of(world, labour),
+            "stale DayCache: a world change didn't bump the generation"
+        );
         DayViews { world, report: self.last_report.as_ref(), stats: &cache.stats, state_hash: cache.state_hash }
     }
 

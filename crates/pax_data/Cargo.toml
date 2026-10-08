@@ -7,6 +7,11 @@ rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
 
+[features]
+# Benchmark worlds (D13): `pax_data::bench`, for `pax_cli bench` and the server's view
+# benchmark. Off by default: it is not part of loading data.
+bench = []
+
 [dependencies]
 pax_engine.workspace = true
 serde.workspace = true

@@ -204,10 +204,7 @@ fn day_update_with_every_view() {
     let frame =
         day_update(&Scale { nations: 3, provinces: 5, goods: 4, pops: 2, map: true, market: true, province: true });
     let u = server(&frame).payload_as_day_update().unwrap();
-    assert_eq!(
-        (u.day(), u.skipped(), u.speed(), u.state_hash()),
-        (7_300, 2, Speed::Normal, Some(0xDEAD_BEEF_0BAD_F00D))
-    );
+    assert_eq!((u.day(), u.skipped(), u.speed(), u.state_hash()), (7_300, 2, Speed::Normal, 0xDEAD_BEEF_0BAD_F00D));
     let w = u.world().unwrap();
     assert_eq!((w.population(), w.unemployed(), w.life_needs().unwrap().raw()), (250_000_000, 6_000_000, 990_000));
     assert_eq!(u.nations().unwrap().treasury().unwrap().get(2).raw(), 2_000_006);

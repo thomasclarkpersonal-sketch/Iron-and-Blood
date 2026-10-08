@@ -28,7 +28,7 @@ fn province_stats_sum_to_the_world_totals() {
         assert_eq!((people, weighted), (whole.people, whole.weighted_raw), "seed {seed}");
 
         let (unemployed, workforce) = labor::unemployment(&world.defs, &report.labour);
-        let by_province = s.unemployment.iter().fold((0, 0), |(u, w), &(pu, pw)| (u + pu, w + pw));
+        let by_province = (s.unemployed.iter().sum::<u64>(), s.workforce.iter().sum::<u64>());
         assert_eq!(by_province, (unemployed, workforce), "seed {seed}");
         for p in 0..s.population.len() {
             assert!(s.unemployment_rate(p) <= pax_engine::Fixed::ONE, "seed {seed}");
@@ -83,5 +83,5 @@ fn province_pops_partition_each_province() {
 fn without_a_labour_report_unemployment_is_zero() {
     let world = random_world(7);
     let s = ProvinceStats::of(&world, None);
-    assert!(s.unemployment.iter().all(|&u| u == (0, 0)));
+    assert!(s.unemployed.iter().chain(&s.workforce).all(|&n| n == 0));
 }

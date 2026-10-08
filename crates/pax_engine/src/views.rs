@@ -28,9 +28,11 @@ pub struct ProvinceStats {
     pub life_needs: Vec<LifeNeedsSummary>,
     /// Militancy of the province's POPs, weighted by their current sizes (D19).
     pub militancy: Vec<MilitancySummary>,
-    /// `(unemployed, workforce)` by [`labor::unemployment`]'s definition, from the
-    /// labour report passed in; zeros if none was passed.
-    pub unemployment: Vec<(u64, u64)>,
+    /// Unemployed people, by [`labor::unemployment`]'s definition, from the labour
+    /// report passed in; zeros if none was passed.
+    pub unemployed: Vec<u64>,
+    /// The workforce [`labor::unemployment`] counts them against.
+    pub workforce: Vec<u64>,
 }
 
 /// Whole-world totals of a [`ProvinceStats`].
@@ -52,7 +54,8 @@ impl ProvinceStats {
             population: vec![0; provinces],
             life_needs: vec![LifeNeedsSummary::default(); provinces],
             militancy: vec![MilitancySummary::default(); provinces],
-            unemployment: vec![(0, 0); provinces],
+            unemployed: vec![0; provinces],
+            workforce: vec![0; provinces],
         };
         let p = &world.pops;
         for i in 0..p.size.len() {
@@ -68,7 +71,7 @@ impl ProvinceStats {
                 by_province[pool.province as usize].push(*pool);
             }
             for (province, pools) in by_province.iter().enumerate() {
-                s.unemployment[province] = labor::unemployment(&world.defs, pools);
+                (s.unemployed[province], s.workforce[province]) = labor::unemployment(&world.defs, pools);
             }
         }
         s
@@ -76,7 +79,7 @@ impl ProvinceStats {
 
     /// `unemployed / workforce` in a province, or zero if it has no workforce.
     pub fn unemployment_rate(&self, province: usize) -> Fixed {
-        let (unemployed, workforce) = self.unemployment[province];
+        let (unemployed, workforce) = (self.unemployed[province], self.workforce[province]);
         if workforce == 0 { Fixed::ZERO } else { Fixed::ratio(unemployed as i64, workforce as i64) }
     }
 
@@ -87,8 +90,8 @@ impl ProvinceStats {
             t.population += self.population[p];
             t.life_needs = t.life_needs + self.life_needs[p];
             t.militancy = t.militancy + self.militancy[p];
-            t.unemployed += self.unemployment[p].0;
-            t.workforce += self.unemployment[p].1;
+            t.unemployed += self.unemployed[p];
+            t.workforce += self.workforce[p];
         }
         t
     }

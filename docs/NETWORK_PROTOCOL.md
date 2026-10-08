@@ -18,7 +18,11 @@ The schemas are the source of truth: [`schemas/common.fbs`](../schemas/common.fb
 - **File identifiers:** `PAXC` for client→server (`ClientMessage`) and `PAXS` for server→client (`ServerMessage`). A buffer with the wrong identifier is a protocol error.
 - **Limits:** client messages are at most 64 KiB and server messages at most 16 MiB. A frame over the limit is a protocol error, so the receiver never allocates for it.
 - **Verification:** run the FlatBuffers verifier on every inbound buffer before reading it. The verifier guarantees that reads are memory-safe; it does **not** detect corrupted values. Integrity in transit is TCP's job (and TLS's in M4).
-- **Protocol errors** (bad frame, failed verification, wrong identifier, anything before `Hello`, a second `Hello`): the server sends `Goodbye` with the reason and closes the connection. It never guesses.
+- **Protocol errors** end the session: the server sends `Goodbye` with the reason and closes the connection. It never guesses. They are:
+  - a bad frame, a failed verification, or the wrong identifier;
+  - anything before `Hello`, or a second `Hello`;
+  - a `Subscribe` naming a good, market or province that doesn't exist.
+- **Unknown enum values are not errors** (§8): a `Subscribe` with a map mode newer than the server simply gets no map.
 - **A client that doesn't read** is disconnected. Each connection's outbound queue holds 256 frames; when it is full, the server closes the connection *without* a `Goodbye`, because the queue that would carry it is the one that's full. Requests waiting for the server are bounded too: a client that floods requests simply stops being read until there is room (TCP backpressure).
 
 ## 3. Session lifecycle
@@ -94,9 +98,7 @@ sequenceDiagram
 \* Measured from the real schema with flatc 24.3.25: a summary-only update is 8.3 KB; with every view subscribed it is 91 KB. The budget is ≤ 16 KB summary-only and ≤ 128 KB with every view (M3 acceptance).
 
 - **POP identity:** a POP is identified by `(province, profession)`, never by row index. Month-end compaction reorders and merges rows (D7). When culture and religion arrive, they join the identity.
-- **`state_hash`** is `World::state_hash()` after the day, sent **only on checkpoint days** (every 30 days, D23). Hashing the whole world costs about 30 ms at 1M POP rows (measured in M3-3), which is too much for every update.
-  - The client can't verify it and doesn't need to.
-  - The debug overlay shows the last checkpoint's day and hash, and bug reports include them. Because the simulation is deterministic, the day plus the last checkpoint hash pin the exact state, and the server's command log can replay to it (D23).
+- **`state_hash`** is `World::state_hash()` after the day. The client can't verify it, and doesn't need to. It is shown in the debug overlay and written into bug reports, so a report pins the exact state and the server's command log can replay to it (D23). The server computes it once per day and shares it among sessions.
 - **Map modes:** `Nation` is drawn by the client from `StaticData`, so the server sends no values for it. `Unemployment`, `LifeNeeds` and `Militancy` are fractions in [0, 1]. `Population` is a count of people. `Price` is the price of `map_good` in each province's market.
 
 ## 5. Commands, ordering and flow control
@@ -142,7 +144,6 @@ FlatBuffers stays compatible across versions only if changes follow these rules.
 - **Never delete** a field; mark it `(deprecated)`.
 - **Add union members and enum values only at the end.** Never renumber them. Receivers must ignore an unknown union member or enum value, not crash on it.
 - A change that breaks these rules bumps `protocol_major`. A compatible addition bumps `protocol_minor`.
-- **Before the first release (protocol 1.0 has never shipped),** schema edits may still break these rules without a version bump, as `DayUpdate.state_hash` becoming optional did in M3-3. From the first release that includes a client, every change follows them.
 - Rust code is generated with **flatc 24.3.25**, matching the `flatbuffers` crate version, into the `pax_protocol` crate. It is checked in, and CI regenerates it and fails on any difference. Mismatched compiler and runtime versions produce code that doesn't compile.
 
 ## 9. Testing
