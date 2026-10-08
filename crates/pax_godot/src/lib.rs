@@ -57,6 +57,12 @@ mod entry {
 pub struct PaxClient {
     /// The scenario's map, once `load_map` succeeded: picking reads it.
     map: Option<map::MapImage>,
+    /// The latest `Welcome` (a load replaces it): `load_map` reads the session's
+    /// map directory, hash and provinces from it, never from GDScript.
+    welcome: Option<decode::WelcomeView>,
+    /// Where this client's copy of the scenario's files is: `launch`'s scenario, or
+    /// `set_scenario_dir` for a server started elsewhere.
+    scenario_dir: Option<std::path::PathBuf>,
     connection: Option<Connection>,
     /// Declared after `connection`, so the connection closes first and the server
     /// can exit by itself (`--exit-when-idle`).
@@ -94,7 +100,10 @@ impl PaxClient {
         // server can exit by itself (`--exit-when-idle`).
         self.connection = None;
         self.server = None;
+        self.welcome = None;
+        self.map = None;
         let (server, scenario, saves) = (server_path.to_string(), scenario_dir.to_string(), saves_dir.to_string());
+        self.scenario_dir = Some(scenario.clone().into());
         match LocalServer::launch(Path::new(&server), Path::new(&scenario), Path::new(&saves)) {
             Ok(local) => {
                 let addr = local.addr;
@@ -103,6 +112,13 @@ impl PaxClient {
             }
             Err(e) => rejected(e),
         }
+    }
+
+    /// Where this client's copy of the scenario is, for a server it didn't launch
+    /// (`launch` sets it itself). `load_map` reads the map files from there.
+    #[func]
+    fn set_scenario_dir(&mut self, scenario_dir: GString) {
+        self.scenario_dir = Some(scenario_dir.to_string().into());
     }
 
     /// Connects to a running server. Returns an error message, or `""`.
@@ -156,6 +172,11 @@ impl PaxClient {
         let Some(c) = &mut self.connection else { return out };
         let polled = c.poll();
         for event in polled.events {
+            if let ServerEvent::Welcome(w) = &event {
+                // A new session or a load: its map has to be loaded again.
+                self.welcome = Some((**w).clone());
+                self.map = None;
+            }
             out.push(&event_dictionary(event));
         }
         if let Some(reason) = polled.closed {
@@ -239,53 +260,27 @@ impl PaxClient {
         self.with_connection(|c| c.load_game(&name.to_string()))
     }
 
-    /// Loads the scenario's province map, ready to draw (see `map.rs`), from where the
-    /// session's `Welcome` said it is (`map_dir`, relative to `scenario_dir`), checked
-    /// against its `provinces` and `map_hash`. Returns a
-    /// Dictionary with `PaxKeys.ERROR` (empty when it loaded) and, on success, `WIDTH`,
-    /// `HEIGHT`, `IDS` (the RGB8 province-ID texels) and `LABELS` (one `Vector2i`
-    /// anchor per province). A scenario without a map gives an empty Dictionary
-    /// apart from `ERROR`. `province_at` then answers for this map.
+    /// Loads this session's province map, ready to draw (see `map.rs`): from where
+    /// the latest `Welcome` said it is, checked against its provinces and `map_hash`.
+    /// The bridge keeps both; GDScript passes nothing. Returns a Dictionary with
+    /// `PaxKeys.ERROR` (empty when it loaded) and, on success, `WIDTH`, `HEIGHT`, `IDS`
+    /// (the RGB8 province-ID texels) and `LABELS` (one `Vector2i` anchor per province).
+    /// A session without a map gives an empty Dictionary apart from `ERROR`.
+    /// `province_at` then answers for this map.
     #[func]
-    fn load_map(
-        &mut self,
-        scenario_dir: GString,
-        map_dir: Variant,
-        provinces: PackedStringArray,
-        map_hash: Variant,
-    ) -> VarDictionary {
+    fn load_map(&mut self) -> VarDictionary {
         let mut d = VarDictionary::new();
         self.map = None;
-        let provinces: Vec<String> = provinces.as_slice().iter().map(GString::to_string).collect();
-        // The hash is an identifier carried bit-for-bit in Godot's signed int.
-        let expected = if map_hash.is_nil() {
-            None
-        } else {
-            match map_hash.try_to::<i64>() {
-                Ok(h) => Some(h as u64),
-                Err(_) => {
-                    d.set(keys::ERROR, &rejected(format!("map_hash must be an int or null, not {map_hash}")));
-                    return d;
-                }
-            }
+        let (Some(welcome), Some(scenario_dir)) = (&self.welcome, &self.scenario_dir) else {
+            d.set(keys::ERROR, &rejected("no session or no scenario directory yet".to_owned()));
+            return d;
         };
-        let map_dir = if map_dir.is_nil() {
-            None
-        } else {
-            match map_dir.try_to::<GString>() {
-                Ok(dir) => Some(dir.to_string()),
-                Err(_) => {
-                    d.set(keys::ERROR, &rejected(format!("map_dir must be a String or null, not {map_dir}")));
-                    return d;
-                }
-            }
-        };
-        match map::load(Path::new(&scenario_dir.to_string()), map_dir.as_deref(), &provinces, expected) {
-            Ok(Some(m)) => {
+        match map::load(scenario_dir, welcome) {
+            Ok(Some((m, texels))) => {
                 d.set(keys::ERROR, &GString::new());
                 d.set(keys::WIDTH, i64::from(m.width));
                 d.set(keys::HEIGHT, i64::from(m.height));
-                d.set(keys::IDS, &PackedByteArray::from(m.texels.as_slice()));
+                d.set(keys::IDS, &PackedByteArray::from(texels.as_slice()));
                 let mut labels: Array<Vector2i> = Array::new();
                 for &[x, y] in &m.labels {
                     let coordinate = |v: u32| {

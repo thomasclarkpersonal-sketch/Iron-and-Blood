@@ -38,7 +38,8 @@ impl MapFiles {
 /// Loads and validates the map in `dir` (the scenario's `map` setting, relative to
 /// `scenario_dir`) against `world`'s provinces.
 pub(crate) fn load(scenario_dir: &Path, dir: &str, world: &World) -> Result<(MapData, MapFiles), LoadError> {
-    let path = pax_map::resolve_map_dir(scenario_dir, dir);
+    let path =
+        pax_map::resolve_map_dir(scenario_dir, dir).map_err(|e| LoadError::single(format!("scenario.toml: {e}")))?;
     let toml = read(&path.join(TOML_FILE))?;
     let png_path = path.join(PNG_FILE);
     let png = std::fs::read(&png_path).map_err(|e| LoadError::single(format!("{}: {e}", png_path.display())))?;

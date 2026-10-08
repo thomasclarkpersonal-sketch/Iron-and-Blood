@@ -338,6 +338,10 @@ fn welcome(w: wire::Welcome<'_>) -> Result<WelcomeView, StreamError> {
     if view.map_dir.is_some() && view.map_hash.is_none() {
         return Err(invalid("StaticData has a map_dir without a map_hash".to_owned()));
     }
+    // A server can't point the client outside its scenario directory.
+    if let Some(dir) = &view.map_dir {
+        pax_map::check_map_dir(dir).map_err(invalid)?;
+    }
     if view.province_market.len() != view.provinces.len() {
         return Err(invalid(format!(
             "{} provinces but {} province_market entries",

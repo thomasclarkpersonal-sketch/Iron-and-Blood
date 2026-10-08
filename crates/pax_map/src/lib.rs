@@ -118,11 +118,31 @@ fn id_of(p: usize) -> u32 {
     u32::try_from(p + 1).expect("fewer provinces than u32::MAX")
 }
 
+/// Checks a map directory setting (`scenario.toml`'s `map`, `StaticData.map_dir`): a
+/// relative path inside the scenario directory, written with `/`. That means no root,
+/// no drive, no `.`/`..` and no backslash, so every platform resolves it to the
+/// same place, and a server can never point a client outside its scenario.
+pub fn check_map_dir(map: &str) -> Result<(), String> {
+    let bad = map.is_empty()
+        || map.contains('\\')
+        || map.contains(':')
+        || map.starts_with('/')
+        || map.split('/').any(|part| part.is_empty() || part == "." || part == "..");
+    if bad {
+        return Err(format!(
+            "map directory {map:?} must be a relative path inside the scenario, with / separators and no . or .."
+        ));
+    }
+    Ok(())
+}
+
 /// Where a scenario's map lives: its `map` setting, relative to the scenario
-/// directory. The one resolution rule: `pax_data` resolves the setting it parsed,
-/// and the client the one the server sent (`StaticData.map_dir`).
-pub fn resolve_map_dir(scenario_dir: &Path, map: &str) -> PathBuf {
-    scenario_dir.join(map)
+/// directory, checked by [`check_map_dir`]. The one resolution rule: `pax_data`
+/// resolves the setting it parsed, and the client the one the server sent
+/// (`StaticData.map_dir`).
+pub fn resolve_map_dir(scenario_dir: &Path, map: &str) -> Result<PathBuf, String> {
+    check_map_dir(map)?;
+    Ok(scenario_dir.join(map))
 }
 
 /// RGB pixels of an 8-bit RGB or RGBA PNG.
@@ -200,12 +220,14 @@ fn validate(
     let (width, height, image) = decode_png(png).map_err(|e| vec![format!("map: {PNG_FILE}: {e}")])?;
 
     let keys = province_keys;
+    // Key -> index once, not a linear search per entry (up to MAX_PROVINCES of each).
+    let index: BTreeMap<&str, usize> = keys.iter().enumerate().map(|(i, k)| (k.as_str(), i)).collect();
     let mut errors = Vec::new();
     let mut colors: Vec<Option<[u8; 3]>> = vec![None; keys.len()];
     let mut labels = vec![[0, 0]; keys.len()];
     let mut owner: BTreeMap<[u8; 3], usize> = BTreeMap::new();
     for entry in &file.province {
-        let Some(p) = keys.iter().position(|k| *k == entry.key) else {
+        let Some(&p) = index.get(entry.key.as_str()) else {
             errors.push(format!("map: province '{}' is not in the scenario", entry.key));
             continue;
         };
@@ -296,7 +318,7 @@ mod tests {
     #[test]
     fn the_two_states_map_reads_with_every_pixel_assigned() {
         let keys: Vec<String> = ["riverlands", "coast", "dale", "peaks"].map(String::from).to_vec();
-        let dir = resolve_map_dir(&two_states(), "map");
+        let dir = resolve_map_dir(&two_states(), "map").unwrap();
         let (map, ids) = ProvinceMap::load_with_ids(&dir, &keys).unwrap();
         assert_eq!(ids.ids().len(), (map.width * map.height) as usize);
         for (p, &[x, y]) in map.labels.iter().enumerate() {
@@ -313,15 +335,25 @@ mod tests {
     #[test]
     fn more_provinces_than_a_map_can_draw_are_refused() {
         let keys: Vec<String> = (0..=MAX_PROVINCES).map(|p| format!("p{p}")).collect();
-        let dir = resolve_map_dir(&two_states(), "map");
+        let dir = resolve_map_dir(&two_states(), "map").unwrap();
         let errors = ProvinceMap::load_with_ids(&dir, &keys).unwrap_err();
         assert!(errors[0].contains("at most 65535"), "{errors:?}");
     }
 
     #[test]
+    fn a_map_dir_must_stay_inside_the_scenario() {
+        for ok in ["map", "maps/big", "a-b_c"] {
+            assert_eq!(check_map_dir(ok), Ok(()), "{ok}");
+        }
+        for bad in ["", "/srv/map", "../elsewhere", "maps/../..", "./map", "maps\\big", "C:/map", "maps//big"] {
+            assert!(check_map_dir(bad).is_err(), "{bad:?} should be refused");
+        }
+    }
+
+    #[test]
     fn keys_the_map_does_not_cover_are_reported() {
         let keys: Vec<String> = ["riverlands", "coast", "dale", "peaks", "nowhere"].map(String::from).to_vec();
-        let dir = resolve_map_dir(&two_states(), "map");
+        let dir = resolve_map_dir(&two_states(), "map").unwrap();
         let errors = ProvinceMap::load_with_ids(&dir, &keys).unwrap_err();
         assert_eq!(errors, ["map: province 'nowhere' has no colour"]);
     }

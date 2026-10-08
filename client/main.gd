@@ -137,8 +137,8 @@ func _check_scripted_runs(day: int) -> void:
 ## Loads this scenario's province map, checked against the server's (`map_hash`).
 func _load_map() -> void:
 	map_modes.set_goods(welcome[PaxKeys.GOODS])
-	var map: Dictionary = client.load_map(_scenario_dir(), welcome[PaxKeys.MAP_DIR], welcome[PaxKeys.PROVINCES],
-		welcome[PaxKeys.MAP_HASH])
+	# The bridge knows the session's map (from its Welcome) and the scenario (launch).
+	var map: Dictionary = client.load_map()
 	if map[PaxKeys.ERROR] != "":
 		map_view.show_message("The map can't be shown:\n" + map[PaxKeys.ERROR])
 	elif not map.has(PaxKeys.IDS):

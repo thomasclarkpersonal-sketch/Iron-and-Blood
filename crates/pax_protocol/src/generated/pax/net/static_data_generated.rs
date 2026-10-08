@@ -123,8 +123,9 @@ impl<'a> StaticData<'a> {
   }
   /// Where the map's files are, relative to the scenario's directory (its
   /// `scenario.toml` `map` setting); present exactly when `map_hash` is. The client
-  /// finds its own copy there, so only the server reads `scenario.toml` (D9). Added
-  /// in protocol 1.1.
+  /// finds its own copy there, so only the server reads `scenario.toml` (D9). A
+  /// relative path with `/` separators and no `.`/`..` (pax_map::check_map_dir); the
+  /// client refuses anything else. Added in protocol 1.1.
   #[inline]
   pub fn map_dir(&self) -> Option<&'a str> {
     // Safety:

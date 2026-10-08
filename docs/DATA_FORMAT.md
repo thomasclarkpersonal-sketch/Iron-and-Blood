@@ -138,7 +138,7 @@ Commands of the same day apply in file order. Every command is checked at load a
 
 ## Province map (`map/`, M3-7)
 
-The picture the client draws, and which province each colour is. The engine never reads it. A scenario names its map directory with `map = "map"`, and the directory holds two files:
+The picture the client draws, and which province each colour is. The engine never reads it. A scenario names its map directory with `map = "map"`: a relative path inside the scenario directory, with `/` separators and no `.` or `..` (`pax_map::check_map_dir`; the server refuses anything else at load, and the client refuses it in `StaticData.map_dir`). The directory holds two files:
 
 - **`provinces.png`:** every province painted in one unique colour, 8-bit RGB or RGBA (alpha is ignored). Province edges must be hard, because anti-aliasing creates colours that belong to no province. At most 16384 pixels per side.
 - **`provinces.toml`:**
