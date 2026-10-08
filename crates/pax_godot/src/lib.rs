@@ -90,6 +90,11 @@ struct Joined {
     resume_token: Option<std::num::NonZeroU64>,
 }
 
+/// How many players a game hosted from the client has (M4-9): the one place the
+/// rule lives; the start screen reads its bounds (`PaxClient.hosted_players_min`,
+/// `hosted_players_max`). A dedicated server's `--players` allows more.
+const HOSTED_PLAYERS: std::ops::RangeInclusive<u16> = 2..=8;
+
 /// How long a connect waits for the server.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -147,8 +152,9 @@ impl PaxClient {
         players: i64,
         name: GString,
     ) -> GString {
-        let Some(players) = u16::try_from(players).ok().filter(|&p| p >= 2) else {
-            return rejected(format!("{players} players: a hosted game has at least 2"));
+        let Some(players) = u16::try_from(players).ok().filter(|p| HOSTED_PLAYERS.contains(p)) else {
+            let (min, max) = (HOSTED_PLAYERS.start(), HOSTED_PLAYERS.end());
+            return rejected(format!("{players} players: a hosted game has {min} to {max}"));
         };
         self.end_session();
         self.forget_multiplayer();
@@ -223,6 +229,18 @@ impl PaxClient {
             }
             Err(e) => rejected(format!("cannot reach the game at {}: {e}", target.addr)),
         }
+    }
+
+    /// The fewest players a hosted game has (`HOSTED_PLAYERS`).
+    #[func]
+    fn hosted_players_min() -> i64 {
+        i64::from(*HOSTED_PLAYERS.start())
+    }
+
+    /// The most players a hosted game has (`HOSTED_PLAYERS`).
+    #[func]
+    fn hosted_players_max() -> i64 {
+        i64::from(*HOSTED_PLAYERS.end())
     }
 
     /// Ends the game this client hosts, for every player in it (a deliberate choice:

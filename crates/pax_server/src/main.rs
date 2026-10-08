@@ -44,10 +44,11 @@ fn secret(flag: &str, path: Option<String>) -> Result<Secret, String> {
     Ok(Secret::new(password))
 }
 
-/// How this process deals with whoever launched it: the files it writes once it
-/// listens, and whether it watches its stdin.
+/// What the process that launched this server gets from it: the files it writes once
+/// it listens, and whether it stops when its stdin closes. (`--exit-when-idle` is a
+/// game rule, so it is in `Config`.)
 #[derive(Debug, Default, PartialEq)]
-struct Outputs {
+struct Launcher {
     /// The port, for the client that launched it (NETWORK_PROTOCOL §6).
     port_file: Option<PathBuf>,
     /// The TLS certificate's SHA-256, for the host to share with players (M4-6).
@@ -59,7 +60,7 @@ struct Outputs {
 }
 
 /// Parses the arguments after the program name.
-fn parse_args(args: impl IntoIterator<Item = String>) -> Result<(Config, Outputs), String> {
+fn parse_args(args: impl IntoIterator<Item = String>) -> Result<(Config, Launcher), String> {
     let mut it = args.into_iter();
     let mut scenario = None;
     let mut config = Config::local(PathBuf::new());
@@ -154,7 +155,7 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> Result<(Config, Outputs
     }
     // The rules every way of building a server shares (`Config::validate`).
     config.validate().map_err(|e| e.to_string())?;
-    Ok((config, Outputs { port_file, fingerprint_file, exit_when_stdin_closes }))
+    Ok((config, Launcher { port_file, fingerprint_file, exit_when_stdin_closes }))
 }
 
 /// Writes `text` atomically, so a client polling the file never reads half of it.
@@ -166,7 +167,7 @@ fn write_atomically(path: &Path, text: &str) -> std::io::Result<()> {
 
 fn main() -> ExitCode {
     tracing_subscriber::fmt().with_max_level(tracing::Level::INFO).init();
-    let (config, outputs) = match parse_args(std::env::args().skip(1)) {
+    let (config, launcher) = match parse_args(std::env::args().skip(1)) {
         Ok(args) => args,
         Err(e) => {
             eprintln!("error: {e}\n{USAGE}");
@@ -186,21 +187,21 @@ fn main() -> ExitCode {
     }
     // The order matters: a launcher waits for the port file, then reads the
     // fingerprint (NETWORK_PROTOCOL §6), so the fingerprint is written first.
-    if let (Some(path), Some(fingerprint)) = (&outputs.fingerprint_file, server.fingerprint())
+    if let (Some(path), Some(fingerprint)) = (&launcher.fingerprint_file, server.fingerprint())
         && let Err(e) = write_atomically(path, fingerprint)
     {
         error!("could not write the fingerprint file {}: {e}", path.display());
         let _ = server.shutdown();
         return ExitCode::FAILURE;
     }
-    if let Some(path) = &outputs.port_file
+    if let Some(path) = &launcher.port_file
         && let Err(e) = write_atomically(path, &server.local_addr().port().to_string())
     {
         error!("could not write the port file {}: {e}", path.display());
         let _ = server.shutdown();
         return ExitCode::FAILURE;
     }
-    if outputs.exit_when_stdin_closes {
+    if launcher.exit_when_stdin_closes {
         let stopper = server.stopper();
         std::thread::spawn(move || {
             // Read until the launcher closes our stdin (or exits), then stop.
@@ -229,14 +230,14 @@ mod tests {
     /// The exact command line NETWORK_PROTOCOL §6 tells the client to run.
     #[test]
     fn the_documented_launch_command_parses() {
-        let (config, outputs) = parse_args(args(
+        let (config, launcher) = parse_args(args(
             "--scenario scenarios/two_states --bind 127.0.0.1:0 --sandbox --exit-when-idle --exit-when-stdin-closes --port-file /tmp/p --saves /tmp/s",
         ))
         .unwrap();
-        assert!(outputs.exit_when_stdin_closes);
+        assert!(launcher.exit_when_stdin_closes);
         assert_eq!(config.scenario, PathBuf::from("scenarios/two_states"));
         assert_eq!(config.bind, "127.0.0.1:0".parse().unwrap());
-        assert_eq!(outputs.port_file, Some(PathBuf::from("/tmp/p")));
+        assert_eq!(launcher.port_file, Some(PathBuf::from("/tmp/p")));
         assert!(config.exit_when_idle);
         assert_eq!(config.max_players, 1, "single player by default");
         assert!(config.sandbox);
@@ -249,12 +250,12 @@ mod tests {
         assert!(e.contains("needs TLS"), "{e}");
         assert!(parse_args(args("--scenario s --players 2 --bind 0.0.0.0:7777 --insecure-no-tls")).is_err());
         assert!(parse_args(args("--scenario s --players 2 --bind 127.0.0.1:7777")).is_ok());
-        let (config, outputs) = parse_args(args(
+        let (config, launcher) = parse_args(args(
             "--scenario s --players 2 --bind 0.0.0.0:7777 --tls-self-signed --fingerprint-file /tmp/f",
         ))
         .unwrap();
         assert_eq!(
-            (config.tls, outputs.fingerprint_file),
+            (config.tls, launcher.fingerprint_file),
             (Some(TlsSetting::SelfSigned), Some(PathBuf::from("/tmp/f")))
         );
         assert!(parse_args(args("--scenario s --tls-cert c.pem")).unwrap_err().contains("both"));
