@@ -66,6 +66,7 @@ New to the project? Start with **[Onboarding](docs/ONBOARDING.md)**: a codebase 
 * [Politics & State](docs/POLITICS_SYSTEM.md): fiscal policy, taxation, interest groups, and reforms.
 * [Map & Logistics](docs/MAP_AND_LOGISTICS.md): geography, iceberg transport costs, and migration.
 * [Military & Supply](docs/MILITARY_SYSTEM.md): mobilization shocks and war debt.
+* [Colonization & Imperialism](docs/COLONIZATION_SYSTEM.md): colonial logistics and extractive vs inclusive institutions (M2+ design).
 * Research notes: [Victoria 2 economy redesign](docs/research/victoria_2_economy_redesign.md), [reference textbook summaries](docs/research/economic_textbooks_summary.md).
 * [Contributing](CONTRIBUTING.md) and [AGENTS.md](AGENTS.md): rules for humans and AI agents.
 * [Repository setup](docs/REPO_SETUP.md): one-time admin steps for GitHub, CI and the blocking critic.

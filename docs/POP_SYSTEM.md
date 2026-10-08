@@ -12,15 +12,20 @@ POPs are rows in the `Pops` table ([BACKEND_SCHEMA.md](BACKEND_SCHEMA.md#pops)).
 *   **Culture** and **Religion** *(M2)*.
 
 **State:**
-*   **Demographics:** The total size is split into columns to model labor laws and mobilization:
-    *   `workforce_male`: Adult men available for employment or conscription.
-    *   `workforce_female`: Adult women available for employment (varies heavily by social laws).
-    *   `dependents`: Children, elderly, and non-working spouses. Dependents consume goods but do not work.
-*   **Cash:** the POP's **total** holdings, not per capita. Money stays with the survivors when demographics change.
+*   **Size:** number of people.
+*   **Cash:** the POP's **total** holdings, not per capita. Money stays with the survivors when size changes.
 *   **Life needs:** subsistence satisfaction `[0, 1]` from the last market day.
 *   *M2:* **Literacy** (promotion chance, research), **Militancy** (likelihood of rebelling) and **Consciousness** (demand for reforms). All are `Fixed`, never floats (D3).
 
-### 💼 Effective Workforce and Labor Laws
+### 💼 Planned (M2+): Workforce Composition and Labor Laws
+
+> [!NOTE]
+> **Status: planned, not implemented.** Today a POP has one `size` (above), and D2, D7, D18 and D20 are defined on it. Before this is built it needs a decision (a new `D#`): how `size` relates to the columns below (for example `size = workforce_male + workforce_female + dependents`), which column D2's demand, D7's splits and merges, demographics and the D18/D20 labour pools each read, and how a law change moves people between columns under D7's largest-remainder rule.
+
+The planned split of a POP's size:
+*   `workforce_male`: Adult men available for employment or conscription.
+*   `workforce_female`: Adult women available for employment (varies heavily by social laws).
+*   `dependents`: Children, elderly, and non-working spouses. Dependents consume goods but do not work.
 
 To maintain strict performance budgets (D13), we do not track separate POPs for children or working women. Instead, social dynamics are handled via **Effective Workforce** calculations based on national laws:
 
