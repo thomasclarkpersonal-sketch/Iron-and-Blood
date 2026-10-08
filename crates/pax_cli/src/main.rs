@@ -8,6 +8,7 @@
 //!     (--scale copies POP rows with identical identities, which month-end
 //!     compaction merges back; use --regions for runs past day 29)
 //! pax_cli report <scenario-dir> [--days N] [--every K]   # economy health indicators
+//! pax_cli replay <save.toml> [--threads T]      # replay a server save, verifying its checkpoints
 //! ```
 //!
 //! `verify` is the determinism gate used by CI: any change to simulation
@@ -31,10 +32,12 @@ const USAGE: &str = "usage:
   pax_cli record <scenario-dir> [--days N]
   pax_cli verify <scenario-dir> [--threads T]
   pax_cli bench  <scenario-dir> [--days N] [--scale K] [--regions R] [--threads T]
-  pax_cli report <scenario-dir> [--days N] [--every K]";
+  pax_cli report <scenario-dir> [--days N] [--every K]
+  pax_cli replay <save.toml> [--threads T]";
 
 struct Args {
     command: String,
+    /// The scenario directory; for `replay`, the save file.
     scenario: PathBuf,
     days: Option<u64>,
     every: u64,
@@ -47,7 +50,7 @@ struct Args {
 fn parse_args() -> Result<Args, String> {
     let mut it = std::env::args().skip(1);
     let command = it.next().ok_or("missing command")?;
-    let scenario = PathBuf::from(it.next().ok_or("missing scenario directory")?);
+    let scenario = PathBuf::from(it.next().ok_or("missing scenario directory (or save file, for replay)")?);
     let mut args = Args { command, scenario, days: None, every: 30, scale: 1, regions: 1, market: None, threads: None };
     while let Some(flag) = it.next() {
         let value = it.next().ok_or(format!("{flag} needs a value"))?;
@@ -88,6 +91,9 @@ fn main() -> ExitCode {
 }
 
 fn dispatch(args: &Args) -> Result<ExitCode, String> {
+    if args.command == "replay" {
+        return replay(&args.scenario);
+    }
     let scenario = pax_data::load_scenario(&args.scenario).map_err(|e| e.to_string())?;
     match args.command.as_str() {
         "run" => run(scenario.world, &scenario.commands, args.days.unwrap_or(365), args.every, args.market.as_deref()),
@@ -114,6 +120,26 @@ fn dispatch(args: &Args) -> Result<ExitCode, String> {
         "report" => report::run(scenario.world, &scenario.commands, args.days.unwrap_or(365), args.every),
         other => Err(format!("unknown command '{other}'\n{USAGE}")),
     }
+}
+
+/// Replays a server save from its scenario (D23, M3-9): every logged command on its
+/// day, every checkpoint verified, and the end checked against the save's snapshot
+/// if it has one. Prints the final day and `state_hash`, which must match what the
+/// server sent in that day's `DayUpdate` (D10).
+fn replay(save: &Path) -> Result<ExitCode, String> {
+    let started = Instant::now();
+    let loaded = pax_data::save::load_by_replay(save).map_err(|e| e.to_string())?;
+    let world = &loaded.scenario.world;
+    println!(
+        "ok: replayed {} to day {}: state_hash {:#018x}, {} checkpoints and {} commands ({:.1} s)",
+        save.display(),
+        world.day,
+        world.state_hash(),
+        loaded.save.checkpoints.len(),
+        loaded.save.commands.len(),
+        started.elapsed().as_secs_f64()
+    );
+    Ok(ExitCode::SUCCESS)
 }
 
 fn golden_path(scenario: &Path) -> PathBuf {

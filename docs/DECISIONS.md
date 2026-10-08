@@ -428,7 +428,7 @@ The state → national → sphere → global roll-up in the old ECONOMY_SYSTEM w
     - the snapshot isn't the saved day's state (see "Load time" below).
 
     Beyond these checks the log is trusted until a replay checks it. A mismatch is an error, and the running game is left untouched.
-  - **Replaying** (`pax_data::save::load_by_replay`) is the full check. It makes the same checks, then re-applies every logged command on its day through `step_day`, verifies every checkpoint, and must end exactly at the snapshot. It is the determinism check M3-9 builds on.
+  - **Replaying** (`pax_data::save::load_by_replay`, `pax_cli replay`) is the full check. It makes the same checks, then re-applies every logged command on its day through `step_day`, verifies every checkpoint, and must end exactly at the snapshot. The session replay test (M3-9) runs it in CI.
   - A successful load pauses the game and sends every session a new `Welcome`. Commands queued for the next tick are discarded, because they never applied.
   - The scenario's scripted commands for days already played are in the log; later ones still come from the scenario, so nothing applies twice.
 - **Load time:** replay runs at tick speed, about 35 ms per day at the D13 long-term scale, so roughly 4 minutes for a 20-year game. That is over the 30-second limit, so each save also writes a binary snapshot of the saved day (D10, M3-6b).

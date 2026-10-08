@@ -23,6 +23,8 @@ tracing-subscriber = "0.3"
 [dev-dependencies]
 # The view benchmark (`view_building_budget`) builds D13-scale worlds.
 pax_data = { workspace = true, features = ["bench"] }
+# The session replay test (M3-9) replays at several thread counts.
+rayon.workspace = true
 
 [lints]
 workspace = true
