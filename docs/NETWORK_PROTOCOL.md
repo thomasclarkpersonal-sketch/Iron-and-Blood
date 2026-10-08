@@ -152,5 +152,5 @@ FlatBuffers stays compatible across versions only if changes follow these rules.
 
 - **Round trip:** every message type is built, framed, verified and read back in `pax_protocol`'s tests, including absent optional fields (a `Hello` without `requested_nation` is sandbox).
 - **Size budgets:** a test builds a `DayUpdate` at the D13 long-term scale and asserts the §4 budgets.
-- **Session replay (determinism):** a scripted headless client connects, submits commands over several days, saves, and disconnects. Loading the save and running `pax_cli run` with the save's command log must reproduce the server's final `state_hash`. This ties the server to the D11 golden harness.
+- **Session replay (determinism, M3-9):** a scripted headless client connects, submits commands over several days for both nations, changes speed and subscription, saves, and disconnects. `pax_cli replay <save>` (`pax_data::save::load_by_replay`) must reproduce the server's final `state_hash` at 1 and 4 threads (`pax_server/tests/session_replay.rs`, run on Linux, Windows and macOS). A second test pins the server's day step to every scenario's `golden.hashes` (D11).
 - **Hostile input:** fuzz the frame reader and `ClientMessage` handling (oversized lengths, truncated frames, invalid unions, a message before `Hello`). The server must close the session, never panic.

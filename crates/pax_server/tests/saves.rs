@@ -3,33 +3,7 @@
 mod common;
 
 use common::*;
-use pax_protocol::wire::Speed;
 use pax_server::Config;
-
-/// Plays at Fastest, acknowledging, until at least `day`; returns the day reached.
-fn play_until(c: &mut Client, day: u64) -> u64 {
-    c.set_speed(Speed::Fastest);
-    let mut reached = 0;
-    while reached < day {
-        match c.next() {
-            Got::DayUpdate { day, .. } => {
-                c.ack(day);
-                reached = day;
-            }
-            Got::Closed => panic!("server closed the connection"),
-            _ => {}
-        }
-    }
-    c.set_speed(Speed::Paused);
-    // Drain to the pause confirmation, so later messages are the replies we expect.
-    loop {
-        match c.next() {
-            Got::ServerState { speed: Speed::Paused, day } => return day,
-            Got::DayUpdate { day, .. } => c.ack(day),
-            _ => {}
-        }
-    }
-}
 
 #[test]
 fn save_list_and_load_over_the_wire() {

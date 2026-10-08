@@ -361,22 +361,9 @@ fn load_with(path: &Path, replay: bool) -> Result<LoadedSave, LoadError> {
     Ok(LoadedSave { scenario, save, last_report })
 }
 
-/// The rate written for a command: `Fixed`'s exact six-decimal form.
-#[cfg(test)]
-fn rate_text(rate: pax_engine::Fixed) -> String {
-    rate.to_string()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pax_engine::Fixed;
-
-    #[test]
-    fn rates_are_written_exactly() {
-        assert_eq!(rate_text(Fixed::from_raw(150_000)), "0.150000");
-        assert_eq!(rate_text(Fixed::from_raw(1)), "0.000001");
-    }
 
     #[test]
     fn hashes_round_trip_as_hex() {

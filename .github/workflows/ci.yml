@@ -99,6 +99,10 @@ jobs:
             cargo run --release -p pax_cli -- verify "$s" --threads 1
             cargo run --release -p pax_cli -- verify "$s" --threads 4
           done
+      - name: Session replay through pax_cli (M3-9, the server's determinism gate)
+        run: |
+          cargo build --release -p pax_cli
+          PAX_CLI=target/release/pax_cli cargo test --release -p pax_server --test session_replay
 
   bench:
     # D13 / MILESTONE_1 T1: fail a PR that makes the daily tick > 20% slower.
@@ -158,3 +162,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo run --release -p pax_cli -- verify scenarios/mini_valley
       - run: cargo run --release -p pax_cli -- verify scenarios/two_states
+      - name: Session replay through pax_cli (M3-9)
+        shell: bash
+        run: |
+          cargo build --release -p pax_cli
+          cli=target/release/pax_cli
+          if [ -f "$cli.exe" ]; then cli="$cli.exe"; fi
+          PAX_CLI="$cli" cargo test --release -p pax_server --test session_replay

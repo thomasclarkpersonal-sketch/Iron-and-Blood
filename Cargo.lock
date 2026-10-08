@@ -384,6 +384,7 @@ dependencies = [
  "pax_data",
  "pax_engine",
  "pax_protocol",
+ "rayon",
  "tokio",
  "tracing",
  "tracing-subscriber",

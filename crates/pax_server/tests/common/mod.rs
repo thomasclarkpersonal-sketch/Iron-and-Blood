@@ -45,6 +45,7 @@ pub enum Got {
         province: Option<u32>,
         skipped: u32,
         tax_rates: Vec<i64>,
+        state_hash: u64,
     },
     CommandResult {
         client_seq: u32,
@@ -235,6 +236,7 @@ fn decode(frame: &[u8]) -> Got {
                 .and_then(|n| n.income_tax_rate())
                 .map(|r| r.iter().map(|f| f.raw()).collect())
                 .unwrap_or_default(),
+            state_hash: u.state_hash(),
         };
     }
     if let Some(r) = msg.payload_as_command_result() {
@@ -256,6 +258,33 @@ fn decode(frame: &[u8]) -> Got {
         return Got::Pong(p.nonce());
     }
     Got::Other(format!("{:?}", msg.payload_type()))
+}
+
+/// Plays at Fastest, acknowledging every update, until at least `day`, then pauses.
+/// Returns the day the game paused on.
+pub fn play_until(c: &mut Client, day: u64) -> u64 {
+    c.set_speed(Speed::Fastest);
+    let mut reached = 0;
+    while reached < day {
+        match c.next() {
+            Got::DayUpdate { day, .. } => {
+                c.ack(day);
+                reached = day;
+            }
+            Got::Closed => panic!("server closed the connection"),
+            _ => {}
+        }
+    }
+    c.set_speed(Speed::Paused);
+    // Drain to the pause confirmation, so later messages are the replies we expect.
+    loop {
+        match c.next() {
+            Got::ServerState { speed: Speed::Paused, day } => return day,
+            Got::DayUpdate { day, .. } => c.ack(day),
+            Got::Closed => panic!("server closed the connection"),
+            _ => {}
+        }
+    }
 }
 
 /// One size-prefixed `Ping` frame.

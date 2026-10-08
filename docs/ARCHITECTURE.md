@@ -85,6 +85,7 @@ Markets discover prices independently and in parallel.
 
 - `pax_cli run` prints daily market reports;
 - `pax_cli verify` replays a scenario against pinned state hashes (D11);
+- `pax_cli replay` replays a server save, verifying its checkpoints, and prints the final `state_hash` (D23, M3-9);
 - `pax_cli bench` measures tick time at scale (D13).
 
 Developers iterate on economic mechanics without a client.
