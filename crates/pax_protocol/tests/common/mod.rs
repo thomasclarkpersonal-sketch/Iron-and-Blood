@@ -66,6 +66,7 @@ pub fn day_update(s: &Scale) -> Vec<u8> {
     let transfer_rate = fixeds(&mut b, s.nations, 500);
     let consumption_rate = fixeds(&mut b, s.nations, 700);
     let population = b.create_vector(&vec![1_250_000u64; s.nations]);
+    let militancy = fixeds(&mut b, s.nations, 900);
     let nations = NationTable::create(
         &mut b,
         &NationTableArgs {
@@ -74,6 +75,7 @@ pub fn day_update(s: &Scale) -> Vec<u8> {
             transfer_rate: Some(transfer_rate),
             consumption_rate: Some(consumption_rate),
             population: Some(population),
+            militancy: Some(militancy),
         },
     );
     let map = s.map.then(|| {

@@ -31,6 +31,7 @@ impl<'a> NationTable<'a> {
   pub const VT_TRANSFER_RATE: flatbuffers::VOffsetT = 8;
   pub const VT_CONSUMPTION_RATE: flatbuffers::VOffsetT = 10;
   pub const VT_POPULATION: flatbuffers::VOffsetT = 12;
+  pub const VT_MILITANCY: flatbuffers::VOffsetT = 14;
 
   #[inline]
   pub unsafe fn init_from_table(table: flatbuffers::Table<'a>) -> Self {
@@ -42,6 +43,7 @@ impl<'a> NationTable<'a> {
     args: &'args NationTableArgs<'args>
   ) -> flatbuffers::WIPOffset<NationTable<'bldr>> {
     let mut builder = NationTableBuilder::new(_fbb);
+    if let Some(x) = args.militancy { builder.add_militancy(x); }
     if let Some(x) = args.population { builder.add_population(x); }
     if let Some(x) = args.consumption_rate { builder.add_consumption_rate(x); }
     if let Some(x) = args.transfer_rate { builder.add_transfer_rate(x); }
@@ -86,6 +88,16 @@ impl<'a> NationTable<'a> {
     // which contains a valid value in this slot
     unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'a, u64>>>(NationTable::VT_POPULATION, None)}
   }
+  /// Population-weighted mean militancy of the nation's POPs, in [0, 1] (D19). 0
+  /// for a nation nobody lives in. Added in protocol 1.1 (M3's definition of done:
+  /// the nation panel shows militancy respond to policy).
+  #[inline]
+  pub fn militancy(&self) -> Option<flatbuffers::Vector<'a, Fixed>> {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'a, Fixed>>>(NationTable::VT_MILITANCY, None)}
+  }
 }
 
 impl flatbuffers::Verifiable for NationTable<'_> {
@@ -100,6 +112,7 @@ impl flatbuffers::Verifiable for NationTable<'_> {
      .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, Fixed>>>("transfer_rate", Self::VT_TRANSFER_RATE, false)?
      .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, Fixed>>>("consumption_rate", Self::VT_CONSUMPTION_RATE, false)?
      .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, u64>>>("population", Self::VT_POPULATION, false)?
+     .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, Fixed>>>("militancy", Self::VT_MILITANCY, false)?
      .finish();
     Ok(())
   }
@@ -110,6 +123,7 @@ pub struct NationTableArgs<'a> {
     pub transfer_rate: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, Fixed>>>,
     pub consumption_rate: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, Fixed>>>,
     pub population: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, u64>>>,
+    pub militancy: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, Fixed>>>,
 }
 impl<'a> Default for NationTableArgs<'a> {
   #[inline]
@@ -120,6 +134,7 @@ impl<'a> Default for NationTableArgs<'a> {
       transfer_rate: None,
       consumption_rate: None,
       population: None,
+      militancy: None,
     }
   }
 }
@@ -150,6 +165,10 @@ impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> NationTableBuilder<'a, 'b, A> {
     self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(NationTable::VT_POPULATION, population);
   }
   #[inline]
+  pub fn add_militancy(&mut self, militancy: flatbuffers::WIPOffset<flatbuffers::Vector<'b , Fixed>>) {
+    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(NationTable::VT_MILITANCY, militancy);
+  }
+  #[inline]
   pub fn new(_fbb: &'b mut flatbuffers::FlatBufferBuilder<'a, A>) -> NationTableBuilder<'a, 'b, A> {
     let start = _fbb.start_table();
     NationTableBuilder {
@@ -172,6 +191,7 @@ impl core::fmt::Debug for NationTable<'_> {
       ds.field("transfer_rate", &self.transfer_rate());
       ds.field("consumption_rate", &self.consumption_rate());
       ds.field("population", &self.population());
+      ds.field("militancy", &self.militancy());
       ds.finish()
   }
 }

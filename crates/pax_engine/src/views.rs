@@ -89,13 +89,13 @@ impl ProvinceStats {
     /// (D7: ownership is derived from geography, never stored on POPs). Provinces of
     /// stateless markets count toward none.
     pub fn population_by_nation(&self, world: &World) -> Vec<u64> {
-        let mut population = vec![0u64; world.nations.len()];
-        for (province, &people) in self.population.iter().enumerate() {
-            if let Some(nation) = world.geography.nation_of_market(world.market_of_province(province as u32)) {
-                population[nation] += people;
-            }
-        }
-        population
+        by_nation(&self.population, world)
+    }
+
+    /// Militancy per nation, by the same ownership rule and the same size weighting
+    /// as the provinces' summaries ([`MilitancySummary::record`]).
+    pub fn militancy_by_nation(&self, world: &World) -> Vec<MilitancySummary> {
+        by_nation(&self.militancy, world)
     }
 
     /// The whole world's figures: the provinces' summaries added up.
@@ -110,6 +110,18 @@ impl ProvinceStats {
         }
         t
     }
+}
+
+/// Adds each province's `values` into the nation owning its market (the one rule
+/// for every per-nation view). Provinces of stateless markets count toward none.
+fn by_nation<T: Copy + Default + std::ops::Add<Output = T>>(values: &[T], world: &World) -> Vec<T> {
+    let mut out = vec![T::default(); world.nations.len()];
+    for (province, &value) in values.iter().enumerate() {
+        if let Some(nation) = world.geography.nation_of_market(world.market_of_province(province as u32)) {
+            out[nation] = out[nation] + value;
+        }
+    }
+    out
 }
 
 /// The POPs of one profession in one province, merged. For display, a POP is its
