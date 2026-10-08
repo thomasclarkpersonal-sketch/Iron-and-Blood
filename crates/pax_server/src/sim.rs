@@ -33,7 +33,7 @@ use crate::game::Game;
 use crate::net::{Inbound, Outbound};
 use crate::queue::CommandQueue;
 use crate::request::{Request, WireCommand};
-use crate::session::{HostRule, Refusal, Seat, Session, SessionTable, Vacated};
+use crate::session::{Claim, HostRule, Refusal, Seat, Session, SessionTable, Vacated};
 use crate::view::{self, CheckedSubscription, DayViews, Subscription};
 use crate::window::UpdateWindow;
 
@@ -125,8 +125,12 @@ impl Sim {
         }
         // Without a nation: a sandbox seat if the server allows them, else, in the
         // lobby, a seat that claims a nation later (M4-2).
-        let sandbox = requested_nation.is_none() && self.sandbox;
-        if requested_nation.is_none() && !sandbox && self.phase != Phase::Lobby {
+        let claim = match requested_nation {
+            Some(n) => Claim::Nation(n),
+            None if self.sandbox => Claim::Sandbox,
+            None => Claim::Unclaimed,
+        };
+        if claim == Claim::Unclaimed && self.phase != Phase::Lobby {
             return self.reject(session, "this server has no sandbox (it runs without --sandbox): ask for a nation");
         }
         if let Some(n) = requested_nation
@@ -137,7 +141,7 @@ impl Sim {
         // The table checks the limit and that the nation is free (D24), and picks the
         // player id. A connection's events arrive in order on one channel (Connected,
         // its requests, then Closed), so a session that sent Hello is always known.
-        let seat = match self.sessions.sit(session, name.unwrap_or(""), requested_nation, sandbox, self.max_players) {
+        let seat = match self.sessions.sit(session, name.unwrap_or(""), claim, self.max_players) {
             Ok(seat) => seat,
             Err(refusal) => return self.reject(session, &self.refusal(refusal)),
         };
@@ -433,7 +437,7 @@ impl Sim {
             let seat = self.sessions.seat(id).expect("welcomed sessions have a seat");
             // A seat is never widened: a player whose nation the loaded game lacks
             // leaves, rather than becoming a sandbox seat that commands every nation.
-            if let Some(n) = seat.nation.filter(|&n| n as usize >= nations) {
+            if let Some(n) = seat.nation().filter(|&n| n as usize >= nations) {
                 self.goodbye(id, &format!("the loaded game has no nation {n}, which you played"));
                 if let Some(v) = self.sessions.unseat(id) {
                     self.seat_ended(id, v);
@@ -486,7 +490,7 @@ impl Sim {
         let info = WelcomeInfo {
             player: seat.player,
             resume_token: 0, // resuming a dropped session is M4 (D24)
-            nation: seat.nation,
+            nation: seat.nation(),
             scenario: &self.game.scenario().name,
             content_hash: self.game.scenario().content_hash,
             map: self.game.scenario().map.as_ref(),
@@ -1097,7 +1101,7 @@ mod tests {
         let (mut sim, _saves) = multiplayer(2);
         assert_eq!(join(&mut sim, 1, None).1, [Sent::Welcome { player: 0 }]);
         let seat = sim.sessions.seat(1).unwrap();
-        assert!(!seat.sandbox && !seat.commands(0) && !seat.commands(1), "it commands nothing");
+        assert!(seat.claim == Claim::Unclaimed && !seat.commands(0) && !seat.commands(1), "it commands nothing");
     }
 
     /// M4-2: the lobby. Players claim nations and mark themselves ready; only the

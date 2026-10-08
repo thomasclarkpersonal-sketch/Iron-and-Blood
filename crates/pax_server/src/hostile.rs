@@ -191,19 +191,43 @@ fn hostile_request(n: &mut Noise) -> Request {
     }
 }
 
-/// The generator reaches every kind of request (a changed `match` must change
-/// `REQUEST_KINDS` with it). Ping is answered by the network task, never the sim.
+/// Every kind of [`Request`], numbered by an exhaustive `match`: a new variant
+/// fails to compile here until it gets the next number, and [`KINDS`] sits beside
+/// it to be raised with it.
+fn kind(request: &Request) -> usize {
+    match request {
+        Request::Hello { .. } => 0,
+        Request::SubmitCommand { .. } => 1,
+        Request::SetSpeed { .. } => 2,
+        Request::Subscribe { .. } => 3,
+        Request::Ack { .. } => 4,
+        Request::Ping { .. } => 5,
+        Request::SaveGame { .. } => 6,
+        Request::LoadGame { .. } => 7,
+        Request::ListSaves => 8,
+        Request::Kick { .. } => 9,
+        Request::ClaimNation { .. } => 10,
+        Request::SetReady { .. } => 11,
+        Request::StartGame => 12,
+    }
+}
+
+/// How many kinds [`kind`] numbers.
+const KINDS: usize = 13;
+
+/// The generator reaches every kind of request the sim thread handles: every
+/// [`kind`] but `Ping`, which the network task answers. A variant the generator
+/// misses fails here, however `hostile_request`'s own arms are counted.
 #[test]
 fn the_generator_reaches_every_request_kind() {
     let mut noise = Noise::new(7);
-    let mut seen = Vec::new();
+    let mut seen = [false; KINDS];
     for _ in 0..10_000 {
-        let kind = std::mem::discriminant(&hostile_request(&mut noise));
-        if !seen.contains(&kind) {
-            seen.push(kind);
-        }
+        seen[kind(&hostile_request(&mut noise))] = true;
     }
-    assert_eq!(seen.len(), 12, "every Request variant except Ping");
+    let ping = kind(&Request::Ping { nonce: 0 });
+    let missed: Vec<usize> = (0..KINDS).filter(|&k| k != ping && !seen[k]).collect();
+    assert!(missed.is_empty(), "hostile_request never generates request kinds {missed:?}");
 }
 
 struct TempDir(PathBuf);

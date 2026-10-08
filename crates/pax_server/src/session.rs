@@ -96,18 +96,44 @@ pub(crate) struct Seat {
     /// Distinct among the welcomed sessions. It stamps the session's commands, so it
     /// orders them within a day (D24) and names the player in the command log.
     pub player: u16,
-    /// The nation this player commands. `None`: a sandbox seat (below), or in the
-    /// lobby a player who hasn't claimed one yet (M4-2).
-    pub nation: Option<u32>,
-    /// May command every nation (D24: only on a server run with `--sandbox`).
-    pub sandbox: bool,
+    pub claim: Claim,
+}
+
+/// What a seat commands (D24): one state, so a seat can't be both a nation's and
+/// sandbox. The wire's `nation` and `sandbox` fields come from it (`encode.rs`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Claim {
+    /// In the lobby, before claiming a nation (M4-2): commands nothing.
+    Unclaimed,
+    /// One nation.
+    Nation(u32),
+    /// Every nation (only on a server run with `--sandbox`).
+    Sandbox,
+}
+
+impl Claim {
+    pub(crate) fn nation(self) -> Option<u32> {
+        match self {
+            Claim::Nation(n) => Some(n),
+            Claim::Unclaimed | Claim::Sandbox => None,
+        }
+    }
 }
 
 impl Seat {
+    /// The nation this seat holds, if it holds one.
+    pub(crate) fn nation(&self) -> Option<u32> {
+        self.claim.nation()
+    }
+
     /// Whether this seat may command `nation` (D24): its own, or any if sandbox. A
     /// player in the lobby without a claim commands nothing.
     pub(crate) fn commands(&self, nation: usize) -> bool {
-        self.sandbox || self.nation.is_some_and(|n| n as usize == nation)
+        match self.claim {
+            Claim::Sandbox => true,
+            Claim::Nation(n) => n as usize == nation,
+            Claim::Unclaimed => false,
+        }
     }
 }
 
@@ -191,27 +217,18 @@ impl SessionTable {
         self.rows.get_mut(&id)
     }
 
-    /// Seats a connected session as a new player named `name`, holding `nation`, or
-    /// none: a sandbox seat if `sandbox` (which the caller has allowed), else an
-    /// unclaimed lobby seat. It gets the lowest free player id, if fewer than
+    /// Seats a connected session as a new player named `name`, with `claim` (a
+    /// sandbox claim only if the caller has allowed it). It gets the lowest free player id, if fewer than
     /// `max_players` play and nobody holds the nation. The only way a session gets a
     /// seat.
-    pub(crate) fn sit(
-        &mut self,
-        id: u64,
-        name: &str,
-        nation: Option<u32>,
-        sandbox: bool,
-        max_players: usize,
-    ) -> Result<Seat, Refusal> {
-        debug_assert!(!(sandbox && nation.is_some()), "a sandbox seat holds no nation");
+    pub(crate) fn sit(&mut self, id: u64, name: &str, claim: Claim, max_players: usize) -> Result<Seat, Refusal> {
         if self.players() >= max_players {
             return Err(Refusal::Full);
         }
-        if let Some((nation, player)) = nation.and_then(|n| self.holder(n).map(|p| (n, p))) {
+        if let Some((nation, player)) = claim.nation().and_then(|n| self.holder(n).map(|p| (n, p))) {
             return Err(Refusal::NationTaken { nation, player });
         }
-        let seat = Seat { player: self.free_player(), nation, sandbox };
+        let seat = Seat { player: self.free_player(), claim };
         let row = self.rows.get_mut(&id).expect("a session is connected before it says Hello");
         debug_assert!(row.seat.is_none(), "net lets a session say Hello only once");
         row.seat = Some(seat);
@@ -240,9 +257,9 @@ impl SessionTable {
         }
         let row = self.rows.get_mut(&id).expect("only a seated session claims");
         let seat = row.seat.as_mut().expect("only a seated session claims");
-        if seat.nation != nation || seat.sandbox {
-            seat.nation = nation;
-            seat.sandbox = false;
+        let claim = nation.map_or(Claim::Unclaimed, Claim::Nation);
+        if seat.claim != claim {
+            seat.claim = claim;
             row.ready = false;
         }
         Ok(())
@@ -253,7 +270,7 @@ impl SessionTable {
     pub(crate) fn set_ready(&mut self, id: u64, ready: bool) -> Result<(), Refusal> {
         let row = self.rows.get_mut(&id).expect("only a seated session readies");
         let seat = row.seat.expect("only a seated session readies");
-        if ready && seat.nation.is_none() && !seat.sandbox {
+        if ready && seat.claim == Claim::Unclaimed {
             return Err(Refusal::NoClaim);
         }
         row.ready = ready;
@@ -274,8 +291,8 @@ impl SessionTable {
                 s.seat.map(|seat| LobbyEntry {
                     player: seat.player,
                     name: s.name.clone(),
-                    nation: seat.nation,
-                    sandbox: seat.sandbox,
+                    nation: seat.nation(),
+                    sandbox: seat.claim == Claim::Sandbox,
                     ready: s.ready,
                     host: self.host == Some(id),
                 })
@@ -326,7 +343,7 @@ impl SessionTable {
 
     /// The player holding `nation`, if any. Sandbox seats hold none.
     pub(crate) fn holder(&self, nation: u32) -> Option<u16> {
-        self.rows.values().filter_map(|s| s.seat).find(|s| s.nation == Some(nation)).map(|s| s.player)
+        self.rows.values().filter_map(|s| s.seat).find(|s| s.claim == Claim::Nation(nation)).map(|s| s.player)
     }
 
     /// Sends `out` to one session; a closed or unknown session is ignored.
@@ -352,7 +369,8 @@ mod tests {
     fn seated(table: &mut SessionTable, id: u64, player: u16, nation: Option<u32>) {
         let (conn, _rx) = ConnHandle::for_test();
         table.connect(id, conn);
-        assert_eq!(table.sit(id, "p", nation, false, 8), Ok(Seat { player, nation, sandbox: false }));
+        let claim = nation.map_or(Claim::Unclaimed, Claim::Nation);
+        assert_eq!(table.sit(id, "p", claim, 8), Ok(Seat { player, claim }));
     }
 
     #[test]
@@ -390,7 +408,7 @@ mod tests {
         assert_eq!(t.host(), None, "the first player isn't host on a dedicated server");
         let (conn, _rx) = ConnHandle::for_test();
         t.connect(2, conn);
-        assert!(t.sit(2, "ada", None, false, 8).is_ok());
+        assert!(t.sit(2, "ada", Claim::Unclaimed, 8).is_ok());
         assert_eq!(t.host(), Some(2));
         assert_eq!(t.remove(2).map(|v| v.new_host), Some(None));
         assert_eq!(t.host(), None);
@@ -404,9 +422,9 @@ mod tests {
             let (conn, _rx) = ConnHandle::for_test();
             t.connect(id, conn);
         }
-        assert_eq!(t.sit(2, "p", Some(0), false, 8), Err(Refusal::NationTaken { nation: 0, player: 0 }));
-        assert_eq!(t.sit(2, "p", Some(1), false, 1), Err(Refusal::Full));
-        assert_eq!(t.sit(3, "p", Some(1), false, 2), Ok(Seat { player: 1, nation: Some(1), sandbox: false }));
+        assert_eq!(t.sit(2, "p", Claim::Nation(0), 8), Err(Refusal::NationTaken { nation: 0, player: 0 }));
+        assert_eq!(t.sit(2, "p", Claim::Nation(1), 1), Err(Refusal::Full));
+        assert_eq!(t.sit(3, "p", Claim::Nation(1), 2), Ok(Seat { player: 1, claim: Claim::Nation(1) }));
         assert_eq!(t.seat(2), None, "a refused session stays unseated");
     }
 

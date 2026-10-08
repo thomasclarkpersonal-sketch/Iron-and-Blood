@@ -62,7 +62,7 @@ sequenceDiagram
 7. **Leaving:** when a player leaves, the others play on (D24). When the last one leaves, the game pauses, because D23 never runs a game nobody is watching.
 8. **The lobby (M4-2, protocol 1.4):** a multiplayer server (`--players` above 1) starts in a lobby. Single player has none and never sends `LobbyState`.
    - `Hello`'s nation is the player's first claim. Without one, the player joins unclaimed (or as a sandbox seat on a `--sandbox` server).
-   - Players `ClaimNation` and `SetReady`; every change goes to every player as a `LobbyState`. A refused request gets a `LobbyState` with a `notice`, to the asker only. A player must hold a nation to be ready, and changing a claim clears the ready mark.
+   - Players `ClaimNation` and `SetReady`; every change goes to every player as a `LobbyState`. A refused request gets a `LobbyState` with a `notice`, to the asker only. A player must hold a nation (or a sandbox seat) to be ready, and changing a claim clears the ready mark.
    - The host's `StartGame` succeeds once every player is ready. Until then commands get `NotStarted` and the clock stays paused; after it, the host unpauses.
    - The scenario is the one the server was started with. Choosing a save in the lobby is M4-5, and rejoining after a drop is M4-4. After the start, a new `Hello` must name a free nation.
 
