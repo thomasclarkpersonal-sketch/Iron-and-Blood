@@ -6,7 +6,9 @@
 //! pax_cli verify <scenario-dir> [--threads T]   # replay and compare with golden.hashes
 //! pax_cli bench  <scenario-dir> [--days N] [--scale K] [--regions R] [--threads T]
 //!     (--scale copies POP rows with identical identities, which month-end
-//!     compaction merges back; use --regions for runs past day 29)
+//!     compaction merges back, so with --scale the run stops before the first
+//!     month end: 29 days by default, and longer is refused; use --regions for
+//!     longer runs)
 //! pax_cli report <scenario-dir> [--days N] [--every K]   # economy health indicators
 //! pax_cli replay <save.toml> [--threads T]      # replay a server save, verifying its checkpoints
 //! ```
@@ -186,7 +188,7 @@ fn dispatch(args: &Args) -> Result<ExitCode, String> {
             Ok(ExitCode::SUCCESS)
         }
         Cmd::Verify => verify(scenario.world, &scenario.commands, &golden_path(&args.target)),
-        Cmd::Bench => bench(scenario.world, args.days.unwrap_or(30), args.scale, args.regions),
+        Cmd::Bench => bench(scenario.world, args.days, args.scale, args.regions),
         Cmd::Report => report::run(scenario.world, &scenario.commands, args.days.unwrap_or(365), args.every),
     }
 }
@@ -267,7 +269,24 @@ fn verify(mut world: World, log: &CommandLog, path: &Path) -> Result<ExitCode, S
     Ok(ExitCode::SUCCESS)
 }
 
-fn bench(world: World, days: u64, scale: u32, regions: u32) -> Result<ExitCode, String> {
+/// Times `days` days (default 30) of the scenario grown by `scale` and `regions`
+/// (D13). With `scale > 1` the default is the days before the first month end, and
+/// more is refused: compaction would merge the copies (`pax_data::bench`).
+fn bench(world: World, days: Option<u64>, scale: u32, regions: u32) -> Result<ExitCode, String> {
+    let days = if scale > 1 {
+        let limit = pax_data::bench::days_before_compaction(&world);
+        match days {
+            Some(d) if d > limit => {
+                return Err(format!(
+                    "--days {d} with --scale {scale}: the copies share identities, which month-end compaction merges \
+                     after day {limit} (D7); use --days {limit} or less, or --regions for longer runs"
+                ));
+            }
+            d => d.unwrap_or(limit),
+        }
+    } else {
+        days.unwrap_or(30)
+    };
     let mut world = pax_data::bench::replicate(&world, scale, regions);
     let start = Instant::now();
     for _ in 0..days {

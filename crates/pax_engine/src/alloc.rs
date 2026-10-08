@@ -35,17 +35,32 @@ pub fn allocate_raw(total: i64, weights: &[i64]) -> Option<Vec<i64>> {
     if weight_sum == 0 {
         return if total == 0 { Some(vec![0; weights.len()]) } else { None };
     }
-    let total = total as i128;
     let mut shares = Vec::with_capacity(weights.len());
     let mut remainders = Vec::with_capacity(weights.len());
     let mut assigned: i128 = 0;
-    for (i, &w) in weights.iter().enumerate() {
-        let product = total * w as i128;
-        let share = product / weight_sum;
-        assigned += share;
-        shares.push(share as i64);
-        remainders.push((product % weight_sum, i));
+    // Fast path (M4-11): when every `total × w` and the weight sum fit i64, 64-bit
+    // division gives exactly the i128 shares and remainders, without i128 division's
+    // library call. Wages, dividends and transfers split over many rows here.
+    let max_weight = weights.iter().copied().max().unwrap_or(0);
+    if let (Ok(sum), Some(_)) = (i64::try_from(weight_sum), total.checked_mul(max_weight)) {
+        for (i, &w) in weights.iter().enumerate() {
+            let product = total * w;
+            let share = product / sum;
+            assigned += share as i128;
+            shares.push(share);
+            remainders.push(((product % sum) as i128, i));
+        }
+    } else {
+        let total = total as i128;
+        for (i, &w) in weights.iter().enumerate() {
+            let product = total * w as i128;
+            let share = product / weight_sum;
+            assigned += share;
+            shares.push(share as i64);
+            remainders.push((product % weight_sum, i));
+        }
     }
+    let total = total as i128;
     let leftover = (total - assigned) as usize;
     if leftover > 0 {
         // Largest remainder first; equal remainders go to the lower index.

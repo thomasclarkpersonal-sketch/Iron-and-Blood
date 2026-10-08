@@ -181,7 +181,9 @@ mod tests {
             let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two_states");
             let mut scenario = pax_data::load_scenario(&dir).unwrap();
             let regions = 1_500;
-            let scale = (1_000_000 / (scenario.world.pops.size.len() as u32 * regions)).max(1);
+            // Ten days: well before the first month end (`pax_data::bench`).
+            let scale = pax_data::bench::scale_for_rows(&scenario.world, 1_000_000, regions);
+            assert!(u64::from(DAYS) + 1 < pax_data::bench::days_before_compaction(&scenario.world));
             scenario.world = pax_data::bench::replicate_with_nations(&scenario.world, scale, regions, Some(200));
             let rows = scenario.world.pops.size.len();
             let mut bare = scenario.world.clone();
