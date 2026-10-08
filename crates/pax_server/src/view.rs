@@ -180,6 +180,8 @@ fn nation_table<'a>(b: &mut FlatBufferBuilder<'a>, v: &DayViews<'_>) -> WIPOffse
     let transfer_rate = fixeds(b, n.transfer_rate.iter().copied());
     let consumption_rate = fixeds(b, n.consumption_rate.iter().copied());
     let population = b.create_vector(&population);
+    let militancy = v.stats.militancy_by_nation(v.world);
+    let militancy = fixeds(b, militancy.iter().map(|m| m.mean().unwrap_or(Fixed::ZERO)));
     wire::NationTable::create(
         b,
         &wire::NationTableArgs {
@@ -188,6 +190,7 @@ fn nation_table<'a>(b: &mut FlatBufferBuilder<'a>, v: &DayViews<'_>) -> WIPOffse
             transfer_rate: Some(transfer_rate),
             consumption_rate: Some(consumption_rate),
             population: Some(population),
+            militancy: Some(militancy),
         },
     )
 }
@@ -395,6 +398,17 @@ mod tests {
         let n = u.nations().unwrap();
         let rates: Vec<i64> = n.income_tax_rate().unwrap().iter().map(|r| r.raw()).collect();
         assert_eq!(rates, world.nations.income_tax_rate.iter().map(|r| r.raw()).collect::<Vec<_>>());
+        // Per-nation militancy: the same weighting as the world's, over each nation's POPs.
+        let militancy: Vec<i64> = n.militancy().unwrap().iter().map(|m| m.raw()).collect();
+        let mut by_nation = vec![pax_engine::systems::market::MilitancySummary::default(); world.nations.len()];
+        for i in 0..world.pops.size.len() {
+            let market = world.market_of_province(world.pops.province[i]);
+            if let Some(nation) = world.geography.nation_of_market(market) {
+                by_nation[nation].record(world.pops.size[i], world.pops.militancy[i]);
+            }
+        }
+        let expected: Vec<i64> = by_nation.iter().map(|m| m.mean().unwrap_or(Fixed::ZERO).raw()).collect();
+        assert_eq!(militancy, expected);
         // Every market in two_states belongs to a nation, so nation populations add up to the total.
         assert_eq!(n.population().unwrap().iter().sum::<u64>(), population);
     }

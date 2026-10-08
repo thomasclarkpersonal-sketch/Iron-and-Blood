@@ -146,11 +146,22 @@ All systems are plain functions over `&mut World`, called by `tick::step` in the
 > [!WARNING]
 > **Serialization overhead:** never use JSON for the per-tick state sync. Sending aggregated state for thousands of provinces each tick as JSON costs severe CPU time and bandwidth.
 
+| Server module | What it does |
+|---|---|
+| `net.rs` | One tokio task per connection. `RequestReader` turns bytes into requests and enforces the `Hello` rules; the rest goes to the sim thread over a bounded channel |
+| `request.rs`, `encode.rs`, `commands.rs` | Wire ↔ owned values. Engine ↔ wire conversions are exhaustive matches, with no `_` arm (NETWORK_PROTOCOL §5) |
+| `sim.rs` | The sim thread: the handshake and admission, subscriptions, command checks, speed, flow control, saves |
+| `game.rs` | `Game`: the world, its applied-command log and checkpoints, and the day's derived views (`Today`), all changed in one step |
+| `queue.rs`, `clock.rs`, `window.rs` | Command stamping `(player, sequence)`, the game clock (D23), the 3-update flow-control window |
+| `view.rs` | The views, built from `pax_engine::views` (the engine owns every rule a view applies) |
+
 **Server → client (views, not state, D22):**
-* Every day: world totals and the per-nation table (treasury, policy rates, population).
+* Every day: world totals and the per-nation table (treasury, policy rates, population, militancy).
 * On subscription: one map mode (a value per province), one market's goods, one province's POPs, labour pools and producers.
 * The full POP and producer tables are never sent. POPs are identified by `(province, profession)`, never by row index (D7).
 
-**Client → server (commands):** applied at the start of the next tick, ordered by `(day, player, sequence)`. The server stamps all three (D22).
-* **Implemented** (`pax_engine::Command`, `tick::step_with`, D21): `SetIncomeTax`, `SetTransferRate`, `SetConsumptionRate { nation, rate: Fixed }`. Rates travel as `Fixed`'s raw `i64`, never as floats.
+**Client → server (commands):** checked on arrival (well-formed, permitted, then `World::validate`, D21), stamped `(player, sequence)` and applied at the start of the next tick in stamp order, after the scenario's scripted commands, through `pax_data::step_day` (D10, D23).
+* **Implemented:** `SetIncomeTax`, `SetTransferRate`, `SetConsumptionRate { nation, rate: Fixed }`. Rates travel as `Fixed`'s raw `i64`, never as floats.
 * **Planned:** `SubsidizeFactory { producer, enabled }`, `MoveArmy { army, target_province }`.
+
+**Saves (D23):** the scenario, every applied command and a `state_hash` checkpoint every 30 days, plus a binary snapshot that loading reads (`pax_data::save`, `pax_data::snapshot`). `pax_cli replay` replays a save and checks it.

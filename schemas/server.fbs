@@ -90,6 +90,10 @@ table NationTable {
   transfer_rate: [Fixed];
   consumption_rate: [Fixed];
   population: [ulong];
+  /// Population-weighted mean militancy of the nation's POPs, in [0, 1] (D19). 0
+  /// for a nation nobody lives in. Added in protocol 1.2 (M3's definition of done:
+  /// the nation panel shows militancy respond to policy).
+  militancy: [Fixed];
 }
 
 /// One value per province, in StaticData order (see MapMode for units).

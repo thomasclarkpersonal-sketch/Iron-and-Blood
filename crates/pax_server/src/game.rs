@@ -160,4 +160,60 @@ mod tests {
         }
         assert!(game.views().report.is_some());
     }
+
+    /// M3's definition of done (item 4): the server's day costs little beyond the
+    /// tick, at D13's long-term scale on 8 threads. It reports the tick, the state hash
+    /// (per day, D10/D22) and everything else the server adds (stats and one full
+    /// update). It asserts that the server's own work stays within 10% of the tick:
+    /// the server's share only. Whether the tick itself fits D13's 100 ms is D13's
+    /// "Measured" column, and at `two_states` content it doesn't (MILESTONE_3, item 4).
+    /// The hash is reported, not asserted: the owner kept it per day, outside the
+    /// budget (MILESTONE_3's risks). Run by hand:
+    /// `cargo test -p pax_server --release -- --ignored server_day_budget --nocapture`
+    #[test]
+    #[ignore]
+    fn server_day_budget() {
+        use crate::view::{self, Subscription};
+        use pax_protocol::wire;
+        const DAYS: u32 = 10;
+        let pool = rayon::ThreadPoolBuilder::new().num_threads(8).build().unwrap();
+        pool.install(|| {
+            let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two_states");
+            let mut scenario = pax_data::load_scenario(&dir).unwrap();
+            let regions = 1_500;
+            let scale = (1_000_000 / (scenario.world.pops.size.len() as u32 * regions)).max(1);
+            scenario.world = pax_data::bench::replicate_with_nations(&scenario.world, scale, regions, Some(200));
+            let rows = scenario.world.pops.size.len();
+            let mut bare = scenario.world.clone();
+            let mut game = Game::new(scenario);
+            let sub = Subscription { map_mode: wire::MapMode::LifeNeeds, map_good: 0, market: Some(7), province: Some(11) }
+                .checked(game.world())
+                .unwrap();
+            // Warm up both, then time.
+            pax_engine::step(&mut bare);
+            game.step(Vec::new());
+            let per_day = |start: std::time::Instant| start.elapsed().as_secs_f64() * 1e3 / f64::from(DAYS);
+            let start = std::time::Instant::now();
+            for _ in 0..DAYS {
+                pax_engine::step(&mut bare);
+            }
+            let tick_ms = per_day(start);
+            let start = std::time::Instant::now();
+            for _ in 0..DAYS {
+                let _ = bare.state_hash();
+            }
+            let hash_ms = per_day(start);
+            let start = std::time::Instant::now();
+            for _ in 0..DAYS {
+                game.step(Vec::new());
+                let _ = view::day_update(&game.views(), &sub, wire::Speed::Fastest, 0);
+            }
+            let day_ms = per_day(start);
+            let server_ms = day_ms - tick_ms - hash_ms;
+            println!(
+                "{rows} POP rows, 8 threads: tick {tick_ms:.1} ms + state hash {hash_ms:.1} ms + stats and one update {server_ms:.1} ms = {day_ms:.1} ms per day"
+            );
+            assert!(server_ms <= tick_ms * 0.1, "stats and the update took {server_ms:.1} ms, over 10% of the tick");
+        });
+    }
 }

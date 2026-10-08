@@ -22,8 +22,8 @@ const DAYS_AFTER_RELOAD := 5
 ## The policy the run sets (income tax of nation 0), in per mille.
 const TAX_PER_MILLE := 123
 
-## main.gd: its `client`, `welcome`, `map_modes`, `select_province` and `finish`.
-var _app: Node
+## main.gd, typed, so a renamed member fails when the script loads, not mid-run.
+var _app: ClientApp
 var _stage := Stage.STARTING
 var _started_ms := Time.get_ticks_msec()
 ## The day the load returned to: the final check needs days after it.
@@ -32,7 +32,7 @@ var _reload_day := 0
 var _command: Variant = null
 
 
-func _init(app: Node) -> void:
+func _init(app: ClientApp) -> void:
 	_app = app
 
 
@@ -97,6 +97,10 @@ func _check(update: Dictionary) -> void:
 	var province = update[PaxKeys.PROVINCE]
 	if map == null or map[PaxKeys.MODE] != PaxKeys.MAP_MODE_PRICE or province == null or province[PaxKeys.PROVINCE_ID] != 0:
 		_fail("the update lacks the subscribed views: map %s, province %s" % [map, province])
+		return
+	# The nation panel shows militancy, which this server sends (protocol 1.2).
+	if update[PaxKeys.NATION_TABLE][PaxKeys.MILITANCY] == null:
+		_fail("the nation table lacks militancy")
 		return
 	var tax: int = update[PaxKeys.NATION_TABLE][PaxKeys.INCOME_TAX_RATE_RAW][0]
 	if tax != PaxClient.rate_from_per_mille(TAX_PER_MILLE):

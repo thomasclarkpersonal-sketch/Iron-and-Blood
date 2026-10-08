@@ -134,6 +134,9 @@ pub struct NationTableView {
     pub transfer_rate_raw: Vec<i64>,
     pub consumption_rate_raw: Vec<i64>,
     pub population: Vec<u64>,
+    /// Mean militancy per nation (protocol 1.2). `None` from an older server, which
+    /// doesn't send it: an absent addition means no data (NETWORK_PROTOCOL §8).
+    pub militancy: Option<Vec<f64>>,
 }
 
 /// `MapView`: one value per province, except in `Nation` mode, which has none.
@@ -388,6 +391,7 @@ fn nation_table(n: wire::NationTable<'_>, t: Tables) -> Result<NationTableView, 
         transfer_rate_raw: raws(n.transfer_rate(), t.nations, "NationTable transfer_rate")?,
         consumption_rate_raw: raws(n.consumption_rate(), t.nations, "NationTable consumption_rate")?,
         population: column(n.population(), t.nations, "NationTable population", |p| p)?,
+        militancy: n.militancy().map(|m| fixeds(Some(m), t.nations, "NationTable militancy")).transpose()?,
     })
 }
 
@@ -684,8 +688,14 @@ mod tests {
         server_frame(&mut b, wire::ServerPayload::Welcome, w.as_union_value())
     }
 
-    /// A DayUpdate for one nation with a population map of `map_values` values.
+    /// A DayUpdate for one nation with a population map of `map_values` values, as a
+    /// server from before `NationTable.militancy` sends it: no militancy column.
     fn day_update_frame(day: u64, map_values: usize) -> Vec<u8> {
+        day_update_frame_with(day, map_values, None)
+    }
+
+    /// The same, with a NationTable militancy column of these raw `Fixed` values.
+    fn day_update_frame_with(day: u64, map_values: usize, militancy: Option<&[i64]>) -> Vec<u8> {
         let mut b = FlatBufferBuilder::new();
         let zero = wire::Fixed::new(0);
         let z = Some(&zero);
@@ -709,6 +719,7 @@ mod tests {
         let (treasury, income, transfer, consumption) =
             (b.create_vector(&one), b.create_vector(&one), b.create_vector(&one), b.create_vector(&one));
         let population = b.create_vector(&[10u64]);
+        let militancy = militancy.map(|m| b.create_vector(&m.iter().map(|&v| wire::Fixed::new(v)).collect::<Vec<_>>()));
         let nations = wire::NationTable::create(
             &mut b,
             &wire::NationTableArgs {
@@ -717,6 +728,7 @@ mod tests {
                 transfer_rate: Some(transfer),
                 consumption_rate: Some(consumption),
                 population: Some(population),
+                militancy,
             },
         );
         let values = b.create_vector(&vec![wire::Fixed::new(5_000_000); map_values]);
@@ -753,6 +765,25 @@ mod tests {
         let map = u.map.as_ref().unwrap();
         assert_eq!((map.mode, map.values.len(), map.values[0]), (wire::MapMode::Population, 12, 5.0));
         assert_eq!((u.world.population, u.nations.income_tax_rate_raw[0]), (10, 1));
+        assert_eq!(u.nations.militancy, None, "an older server sends no militancy; that is no data, not an error");
+    }
+
+    /// Protocol 1.2's militancy column, when sent, is checked like any other column.
+    #[test]
+    fn decodes_the_militancy_column_and_checks_its_length() {
+        let mut s = ServerStream::default();
+        let mut bytes = welcome_frame(PROTOCOL_MAJOR, 2, 2, true);
+        bytes.extend(day_update_frame_with(1, 2, Some(&[250_000])));
+        let events = s.push(&bytes);
+        assert!(matches!(events.as_slice(), [_, ServerEvent::DayUpdate(u)] if u.nations.militancy == Some(vec![0.25])));
+
+        let mut s = ServerStream::default();
+        let mut bytes = welcome_frame(PROTOCOL_MAJOR, 2, 2, true);
+        bytes.extend(day_update_frame_with(1, 2, Some(&[1, 2])));
+        assert_eq!(s.push(&bytes).len(), 1);
+        assert!(
+            matches!(s.error(), Some(StreamError::Invalid(e)) if e.contains("NationTable militancy has 2 entries, expected 1"))
+        );
     }
 
     #[test]

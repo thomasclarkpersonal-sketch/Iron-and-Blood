@@ -17,6 +17,7 @@
 ##   --screenshot=PATH      run to day 30, pause, save a screenshot and quit
 ##   --smoke                headless check (smoke.gd): a province panel, the Price map, a policy,
 ##                          and a save, list and load; prints SMOKE OK and quits
+class_name ClientApp
 extends Control
 
 const PaxKeys := preload("res://pax_keys.gd")
@@ -66,6 +67,12 @@ var _finishing := false
 
 func _ready() -> void:
 	_build_ui()
+	var error := _open_tab_arg()
+	if error != "":
+		push_error(error)
+		if _flag("--smoke") or _arg("--screenshot=") != "":
+			finish(1, "FAILED: " + error)
+			return
 	if _flag("--autostart") or _flag("--smoke") or _arg("--screenshot=") != "":
 		_start()
 
@@ -94,8 +101,7 @@ func _start() -> void:
 	_smoke = Smoke.new(self) if _flag("--smoke") else null
 	_session_started = false
 	welcome = {}
-	last_update = {}
-	selected_province = null
+	_reset_session()
 	client = PaxClient.new()
 	var error := client.launch(_server_path(), _scenario_dir(), OS.get_user_data_dir().path_join("saves"))
 	if error != "":
@@ -115,9 +121,7 @@ func _handle(event: Dictionary) -> void:
 			welcome = event
 			if reload:
 				# A load replaced the game (D23): its tables may differ, so start afresh.
-				selected_province = null
-				map_view.set_selected(null)
-				save_menu.visible = false
+				_reset_session()
 			top_bar.set_session(welcome)
 			summary.set_session(welcome)
 			nation_panel.set_session(welcome)
@@ -152,6 +156,15 @@ func _handle(event: Dictionary) -> void:
 			save_menu.show_result(event)
 		PaxKeys.CLOSED:
 			_connection_lost(event[PaxKeys.REASON])
+
+
+## Forgets the old game's per-session UI state, for a new game (`_start`) and a loaded
+## one (a later Welcome) alike. The panels reset themselves in `set_session`.
+func _reset_session() -> void:
+	last_update = {}
+	selected_province = null
+	map_view.set_selected(null)
+	save_menu.visible = false
 
 
 ## The --screenshot run: once the game has run long enough, pause, capture and quit.
@@ -339,12 +352,6 @@ func _build_ui() -> void:
 	province_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	province_scroll.add_child(province_panel)
 	tabs.add_child(province_scroll)
-	# --tab names a tab (its node name), so adding or reordering tabs can't make it stale.
-	var tab := _arg("--tab=")
-	if tab != "":
-		var page := tabs.get_node_or_null(tab) as Control
-		if page != null:
-			tabs.current_tab = tabs.get_tab_idx_from_control(page)
 	body.add_child(tabs)
 	game.add_child(body)
 	add_child(game)
@@ -374,6 +381,23 @@ func _build_ui() -> void:
 			client.disconnect_from_server()
 		_start())
 	add_child(lost)
+
+
+## Opens the --tab=NAME tab. NAME is a tab's node name, so adding or reordering tabs
+## can't make it stale. Returns an error for a name that matches no tab: like the
+## bridge's arguments, it is reported, never quietly ignored.
+func _open_tab_arg() -> String:
+	var tab := _arg("--tab=")
+	if tab == "":
+		return ""
+	var page := tabs.get_node_or_null(tab) as Control
+	if page == null:
+		var names := PackedStringArray()
+		for child in tabs.get_children():
+			names.append(child.name)
+		return "--tab=%s is not a tab (%s)" % [tab, ", ".join(names)]
+	tabs.current_tab = tabs.get_tab_idx_from_control(page)
+	return ""
 
 
 func _project_dir() -> String:

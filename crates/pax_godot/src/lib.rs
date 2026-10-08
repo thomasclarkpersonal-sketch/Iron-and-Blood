@@ -459,6 +459,8 @@ fn nation_table(n: &NationTableView) -> VarDictionary {
     d.set(keys::TRANSFER_RATE_RAW, &ints(&n.transfer_rate_raw));
     d.set(keys::CONSUMPTION_RATE_RAW, &ints(&n.consumption_rate_raw));
     d.set(keys::POPULATION, &counts(&n.population));
+    // null from a server older than protocol 1.2, which doesn't send it.
+    d.set(keys::MILITANCY, &optional(n.militancy.as_deref().map(floats)));
     d
 }
 

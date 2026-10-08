@@ -19,6 +19,25 @@ cargo run --release -p pax_cli -- verify scenarios/two_states                  #
 - life-needs coverage and the share of people deprived;
 - militancy.
 
+### Play it (M3)
+
+You need Godot 4.7 or later (the standard build). See [client/README.md](../client/README.md).
+
+```bash
+cargo build -p pax_godot -p pax_server    # the client's bridge and the server it launches
+godot --path client                       # the client starts a local server and connects
+```
+
+Or run a server by itself and point any client at it:
+
+```bash
+cargo run --release -p pax_server -- --scenario scenarios/two_states --bind 127.0.0.1:7777 --saves saves
+cargo run --release -p pax_cli -- replay saves/<name>.toml   # replay a save; prints its final state_hash
+```
+
+- **In the client:** the map's buttons switch map modes, a click selects a province, the Nation tab's sliders set policy, and **Saves** saves and loads.
+- **F3** shows the day's `state_hash`, which a bug report should quote (D23).
+
 ## 2. Map of the code
 
 | Path | What lives there |
@@ -32,7 +51,12 @@ cargo run --release -p pax_cli -- verify scenarios/two_states                  #
 | `…/command.rs` | Player commands (D21) |
 | `…/systems/` | `labor`, `production`, `market`, `firms`, `government`, `mobility`, `politics`, `demographics` |
 | `crates/pax_data/` | TOML schema (`schema.rs`), validation and world building (`lib.rs`), golden files |
-| `crates/pax_cli/` | `run`, `report`, `record`, `verify`, `bench` |
+| `crates/pax_cli/` | `run`, `report`, `record`, `verify`, `bench`, `replay` |
+| `crates/pax_server/` | The game server (D10, D22, D23): the sim thread owns the `World`, tokio handles the network ([BACKEND_SCHEMA](BACKEND_SCHEMA.md) lists its modules) |
+| `crates/pax_protocol/` | The wire format: generated FlatBuffers code (`scripts/gen-protocol.sh`, never edited by hand) and framing. Schemas are in `schemas/` |
+| `crates/pax_godot/` | The client's bridge (D12): connection, decoding, the local-server launcher, `PaxKeys` |
+| `crates/pax_map/`, `pax_content/` | Shared by both sides: the province-map reader, and the content-hash scheme |
+| `client/` | The Godot project: GDScript UI only |
 | `data/` | Game content: goods, professions, production, rules |
 | `scenarios/mini_valley/` | **Frozen regression fixture**, with its own `defs/` |
 | `scenarios/two_states/` | Content scenario: 12 goods, 2 markets, 2 nations, command log |
