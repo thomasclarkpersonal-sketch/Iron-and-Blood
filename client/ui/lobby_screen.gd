@@ -95,15 +95,14 @@ func show_lobby(event: Dictionary) -> void:
 		child.queue_free()
 	var t: Dictionary = event[PaxKeys.LOBBY_PLAYERS]
 	var players: PackedInt64Array = t[PaxKeys.PLAYER]
-	var i_am_host := false
+	var mine := me(event, _me)
+	var i_am_host: bool = mine.get(PaxKeys.HOST, false)
+	if not mine.is_empty():
+		_nation.select(0 if mine[PaxKeys.NATION] == null else mine[PaxKeys.NATION] + 1)
+		_ready.set_pressed_no_signal(mine[PaxKeys.READY])
 	for row in players.size():
 		var player: int = players[row]
 		var nation = t[PaxKeys.NATION][row]
-		var mine := player == _me
-		if mine:
-			i_am_host = t[PaxKeys.HOST][row]
-			_nation.select(0 if nation == null else nation + 1)
-			_ready.set_pressed_no_signal(t[PaxKeys.READY][row])
 		var line := HBoxContainer.new()
 		var who := Label.new()
 		var playing := "sandbox" if t[PaxKeys.SANDBOX][row] else ("—" if nation == null else _nations[nation].capitalize())
@@ -114,7 +113,7 @@ func show_lobby(event: Dictionary) -> void:
 			marks.append("ready")
 		if t[PaxKeys.AWAY][row]:
 			marks.append("away")
-		if mine:
+		if player == _me:
 			marks.append("you")
 		who.text = "%d  %s · %s  %s" % [player, t[PaxKeys.NAME][row], playing,
 			"(%s)" % ", ".join(marks) if not marks.is_empty() else ""]
@@ -138,17 +137,12 @@ func show_lobby(event: Dictionary) -> void:
 
 
 ## Whether this client is the host, from the latest lobby.
-static func is_host(event: Dictionary, me: int) -> bool:
-	var t: Dictionary = event[PaxKeys.LOBBY_PLAYERS]
-	var players: PackedInt64Array = t[PaxKeys.PLAYER]
-	for row in players.size():
-		if players[row] == me:
-			return t[PaxKeys.HOST][row]
-	return false
+static func is_host(event: Dictionary, player: int) -> bool:
+	return me(event, player).get(PaxKeys.HOST, false)
 
 
 ## This client's row of the latest lobby as a Dictionary (`NATION`, `SANDBOX`, …), or
-## empty if it isn't there.
+## empty if it isn't there. The one place that finds a player's row.
 static func me(event: Dictionary, player: int) -> Dictionary:
 	if event.is_empty():
 		return {}

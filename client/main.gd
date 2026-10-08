@@ -40,6 +40,7 @@ const SaveMenu := preload("res://ui/save_menu.gd")
 const LostScreen := preload("res://ui/lost_screen.gd")
 const Smoke := preload("res://smoke.gd")
 const SmokeHost := preload("res://smoke_host.gd")
+const SmokeScript := preload("res://smoke_script.gd")
 const StartScreen := preload("res://ui/start_screen.gd")
 const LobbyScreen := preload("res://ui/lobby_screen.gd")
 
@@ -65,14 +66,31 @@ var overlay: DebugOverlay
 var save_menu: SaveMenu
 var lost: LostScreen
 
+## Where a multiplayer game is (M4-9): how to reach it again to rejoin with the resume
+## token (D24), and the name and password this player gave.
+class JoinTarget:
+	var host: String
+	var port: int
+	var fingerprint: String
+	var password: String
+	var name: String
+
+	func _init(host_: String, port_: int, fingerprint_: String, password_: String, name_: String) -> void:
+		host = host_
+		port = port_
+		fingerprint = fingerprint_
+		password = password_
+		name = name_
+
+
 ## Whether this connection has had its first Welcome (a later one is a load).
 var _session_started := false
-## The --smoke or --smoke-host run (either has `on_event` and `on_frame`), or `null`.
-var _smoke: RefCounted = null
+## The --smoke or --smoke-host run, or `null`.
+var _smoke: SmokeScript = null
 ## A multiplayer session (hosted or joined), and how to reach it again to rejoin with
-## the resume token (D24): `host`, `port`, `fingerprint`, `password`, `name`.
+## the resume token (D24).
 var _multiplayer := false
-var _join: Dictionary = {}
+var _join: JoinTarget = null
 var _resume_token := 0
 ## The latest LOBBY_STATE: who is host, and the names `waiting_for` refers to.
 var _last_lobby: Dictionary = {}
@@ -154,8 +172,7 @@ func _host(players: int, name: String) -> void:
 	if error != "":
 		return _back_to_start(error)
 	var hosted := client.hosted()
-	_join = {"host": "127.0.0.1", "port": hosted[PaxKeys.PORT], "fingerprint": hosted[PaxKeys.FINGERPRINT],
-		"password": "", "name": name}
+	_join = JoinTarget.new("127.0.0.1", hosted[PaxKeys.PORT], hosted[PaxKeys.FINGERPRINT], "", name)
 	lobby.set_hosting(hosted)
 	_hello(null)
 
@@ -163,7 +180,7 @@ func _host(players: int, name: String) -> void:
 ## Joins a game elsewhere (M4-9) over TLS, pinned to the fingerprint the host shared.
 func _join_game(host: String, port: int, fingerprint: String, password: String, name: String) -> void:
 	_begin(true)
-	_join = {"host": host, "port": port, "fingerprint": fingerprint, "password": password, "name": name}
+	_join = JoinTarget.new(host, port, fingerprint, password, name)
 	var error := _connect_join()
 	if error != "":
 		return _back_to_start(error)
@@ -172,20 +189,19 @@ func _join_game(host: String, port: int, fingerprint: String, password: String, 
 
 ## Connects with the saved join details, ready for a hello or a resume.
 func _connect_join() -> String:
-	var error := client.connect_secure(_join["host"], _join["port"], _join["fingerprint"])
+	var error := client.connect_secure(_join.host, _join.port, _join.fingerprint)
 	if error != "":
 		return error
 	# The map comes from this client's own copy of the scenario (D12).
 	client.set_scenario_dir(_scenario_dir())
-	if _join["password"] != "":
-		client.set_password(_join["password"])
+	if _join.password != "":
+		client.set_password(_join.password)
 	return ""
 
 
 func _hello(nation: Variant) -> void:
-	var name: String = _join.get("name", "")
-	if name != "":
-		client.set_name(name)
+	if _join != null and _join.name != "":
+		client.set_name(_join.name)
 	var error := client.hello(nation)
 	if error != "":
 		_connection_lost(error)
@@ -199,9 +215,8 @@ func _rejoin() -> void:
 	var error := _connect_join()
 	if error != "":
 		return _connection_lost(error)
-	var name: String = _join.get("name", "")
-	if name != "":
-		client.set_name(name)
+	if _join.name != "":
+		client.set_name(_join.name)
 	error = client.resume(token)
 	if error != "":
 		_connection_lost(error)

@@ -5,7 +5,7 @@
 ## The run: select province 0, switch to the Price map, set a policy, save at day
 ## SAVE_DAY, list the saves, load the save, run on, then check that the reloaded
 ## game still has the subscribed views and the policy, and print SMOKE OK.
-extends RefCounted
+extends "res://smoke_script.gd"
 
 const PaxKeys := preload("res://pax_keys.gd")
 const Format := preload("res://ui/format.gd")

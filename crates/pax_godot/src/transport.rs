@@ -27,10 +27,12 @@ pub fn fingerprint(certificate: &[u8]) -> String {
     ring::digest::digest(&ring::digest::SHA256, certificate).as_ref().iter().map(|b| format!("{b:02x}")).collect()
 }
 
-/// A fingerprint as a player may type it (any case, with `:` or spaces), or `None`
-/// if it isn't 32 bytes of hex.
+/// A fingerprint as a player may type or paste it (any case, with `:`, spaces or line
+/// breaks), or as the server writes it to its file (with a trailing line break), or
+/// `None` if it isn't 32 bytes of hex.
 pub fn normalise(fingerprint: &str) -> Option<String> {
-    let hex: String = fingerprint.chars().filter(|c| !matches!(c, ':' | ' ')).collect::<String>().to_lowercase();
+    let hex: String =
+        fingerprint.chars().filter(|&c| c != ':' && !c.is_whitespace()).collect::<String>().to_lowercase();
     (hex.len() == 64 && hex.bytes().all(|b| b.is_ascii_hexdigit())).then_some(hex)
 }
 
@@ -183,7 +185,9 @@ mod tests {
             .collect::<Vec<_>>()
             .join(":");
         assert_eq!(normalise(&typed), Some(hex.clone()));
-        assert_eq!(normalise(&format!(" {hex} ")), Some(hex));
+        assert_eq!(normalise(&format!(" {hex} ")), Some(hex.clone()));
+        assert_eq!(normalise(&format!("{hex}\n")), Some(hex.clone()), "as the server's file holds it");
+        assert_eq!(normalise(&format!("{}\r\n{}", &hex[..32], &hex[32..])), Some(hex), "pasted across lines");
         assert_eq!(normalise("abcd"), None);
         assert_eq!(normalise(&"zz".repeat(32)), None);
     }

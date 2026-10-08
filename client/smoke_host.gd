@@ -5,10 +5,11 @@
 ## The run: host for two (the server makes a certificate, and the client pins it),
 ## claim nation 0 and get ready, start alone (the second seat stays free), set the
 ## speed, play a few days, and print SMOKE OK.
-extends RefCounted
+extends "res://smoke_script.gd"
 
 const PaxKeys := preload("res://pax_keys.gd")
 const Format := preload("res://ui/format.gd")
+const LobbyScreen := preload("res://ui/lobby_screen.gd")
 
 enum Stage { JOINING, READYING, STARTING, PLAYING }
 
@@ -45,14 +46,13 @@ func on_event(event: Dictionary) -> void:
 				_stage = Stage.PLAYING
 				client.set_speed(PaxKeys.SPEED_FASTEST)
 				return
-			var t: Dictionary = event[PaxKeys.LOBBY_PLAYERS]
-			var row := (t[PaxKeys.PLAYER] as PackedInt64Array).find(_app.welcome[PaxKeys.PLAYER])
-			if row < 0:
+			var me := LobbyScreen.me(event, _app.welcome[PaxKeys.PLAYER])
+			if me.is_empty():
 				return
-			if _stage == Stage.READYING and t[PaxKeys.NATION][row] == 0 and not t[PaxKeys.READY][row]:
+			if _stage == Stage.READYING and me[PaxKeys.NATION] == 0 and not me[PaxKeys.READY]:
 				client.set_ready(true)
-			elif _stage == Stage.READYING and t[PaxKeys.READY][row]:
-				if not t[PaxKeys.HOST][row]:
+			elif _stage == Stage.READYING and me[PaxKeys.READY]:
+				if not me[PaxKeys.HOST]:
 					return _fail("the hosting player isn't the host")
 				_stage = Stage.STARTING
 				client.start_game()

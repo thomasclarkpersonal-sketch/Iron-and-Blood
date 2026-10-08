@@ -128,7 +128,8 @@ impl PaxClient {
             Ok(local) => local,
             Err(e) => return rejected(e),
         };
-        let (addr, fingerprint) = (local.addr, local.fingerprint.clone().unwrap_or_default());
+        let addr = local.addr;
+        let fingerprint = local.fingerprint.clone().expect("LocalServer::host reads the fingerprint or fails");
         self.server = Some(local);
         // The host reaches its own server over TLS too, pinned like everyone else.
         match Connection::connect_tls(addr, Duration::from_secs(5), &fingerprint) {
@@ -158,8 +159,8 @@ impl PaxClient {
     #[func]
     fn set_name(&mut self, name: GString) -> GString {
         let name = name.to_string();
-        if name.is_empty() || name.len() > 32 {
-            return rejected("a name is 1 to 32 bytes".to_owned());
+        if name.is_empty() {
+            return rejected("a name can't be empty".to_owned());
         }
         self.with_connection(|c| c.set_name(name))
     }
