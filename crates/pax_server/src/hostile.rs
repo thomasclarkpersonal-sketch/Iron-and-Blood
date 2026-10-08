@@ -145,11 +145,16 @@ fn the_request_decoder_survives_noise_flipped_bytes_and_truncation() {
     assert!(decoded > 1_000, "flipped bytes often still verify, so the decoder sees odd values ({decoded})");
 }
 
-/// A well-formed request with hostile values.
+/// How many kinds [`hostile_request`] draws from: one per arm of its `match`, so a
+/// new request needs a new arm and this count to match, or the test below fails.
+const REQUEST_KINDS: u64 = 14;
+
+/// A well-formed request with hostile values. Every kind of request has its own arm;
+/// the draws give each its share (the SubmitCommand arm takes three).
 fn hostile_request(n: &mut Noise) -> Request {
     let nation = |n: &mut Noise| n.int(2) as u32;
     let opt = |n: &mut Noise, below: u64| (!n.chance(3)).then(|| n.int(below) as u32);
-    match n.below(13) {
+    match n.below(REQUEST_KINDS) {
         0 => Request::Hello {
             major: if n.chance(2) { PROTOCOL_MAJOR } else { n.next() as u16 },
             minor: n.next() as u16,
@@ -181,8 +186,24 @@ fn hostile_request(n: &mut Noise) -> Request {
         10 => Request::ClaimNation { nation: opt(n, 2) },
         11 => Request::SetReady { ready: n.chance(2) },
         12 => Request::StartGame,
-        _ => Request::ListSaves,
+        13 => Request::ListSaves,
+        _ => unreachable!("REQUEST_KINDS counts the arms"),
     }
+}
+
+/// The generator reaches every kind of request (a changed `match` must change
+/// `REQUEST_KINDS` with it). Ping is answered by the network task, never the sim.
+#[test]
+fn the_generator_reaches_every_request_kind() {
+    let mut noise = Noise::new(7);
+    let mut seen = Vec::new();
+    for _ in 0..10_000 {
+        let kind = std::mem::discriminant(&hostile_request(&mut noise));
+        if !seen.contains(&kind) {
+            seen.push(kind);
+        }
+    }
+    assert_eq!(seen.len(), 12, "every Request variant except Ping");
 }
 
 struct TempDir(PathBuf);

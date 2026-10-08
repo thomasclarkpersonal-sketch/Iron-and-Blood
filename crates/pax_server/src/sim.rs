@@ -33,9 +33,21 @@ use crate::game::Game;
 use crate::net::{Inbound, Outbound};
 use crate::queue::CommandQueue;
 use crate::request::{Request, WireCommand};
-use crate::session::{HostRule, Seat, Session, SessionTable, Vacated};
+use crate::session::{HostRule, Refusal, Seat, Session, SessionTable, Vacated};
 use crate::view::{self, CheckedSubscription, DayViews, Subscription};
 use crate::window::UpdateWindow;
+
+/// Where a server's game is (D24, M4-2).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Phase {
+    /// One player, no lobby: the game starts at once.
+    SinglePlayer,
+    /// Several players, before the host starts: claims and ready marks; no commands,
+    /// no clock.
+    Lobby,
+    /// Several players, after the start.
+    Playing,
+}
 
 pub(crate) struct Sim {
     game: Game,
@@ -53,11 +65,8 @@ pub(crate) struct Sim {
     /// Set when the server should stop; [`Sim::handle`] returns it. A flag rather
     /// than a return value, so no path that ends a seat can drop it.
     stop: bool,
-    /// A multiplayer server has a lobby (D24, M4-2), and sends `LobbyState`.
-    lobby: bool,
-    /// The game has started: commands and the clock work. Single player starts at
-    /// once; a multiplayer game when the host says so.
-    started: bool,
+    /// Where the game is: single player, or a multiplayer lobby or game (M4-2).
+    phase: Phase,
     /// The speed and the next tick. [`Sim::set_clock`] changes the speed and announces
     /// it; the one exception is a load, whose new `Welcome` carries the speed.
     clock: Clock,
@@ -77,8 +86,7 @@ impl Sim {
             sandbox: config.sandbox,
             exit_when_idle: config.exit_when_idle,
             stop: false,
-            lobby: config.max_players > 1,
-            started: config.max_players <= 1,
+            phase: if config.max_players > 1 { Phase::Lobby } else { Phase::SinglePlayer },
             clock: Clock::Paused,
             queue: CommandQueue::default(),
         }
@@ -116,7 +124,7 @@ impl Sim {
         // Without a nation: a sandbox seat if the server allows them, else, in the
         // lobby, a seat that claims a nation later (M4-2).
         let sandbox = requested_nation.is_none() && self.sandbox;
-        if requested_nation.is_none() && !sandbox && self.started {
+        if requested_nation.is_none() && !sandbox && self.phase != Phase::Lobby {
             return self.reject(session, "this server has no sandbox (it runs without --sandbox): ask for a nation");
         }
         if let Some(n) = requested_nation
@@ -129,7 +137,7 @@ impl Sim {
         // its requests, then Closed), so a session that sent Hello is always known.
         let seat = match self.sessions.sit(session, name.unwrap_or(""), requested_nation, sandbox, self.max_players) {
             Ok(seat) => seat,
-            Err(refusal) => return self.reject(session, &refusal.reason(self.max_players)),
+            Err(refusal) => return self.reject(session, &self.refusal(refusal)),
         };
         let host = self.sessions.is_host(session);
         info!(session, name, player = seat.player, ?requested_nation, host, "welcomed");
@@ -137,29 +145,47 @@ impl Sim {
         self.lobby_changed();
     }
 
+    /// What a client is told when the table refuses it, with the nation's key.
+    fn refusal(&self, refusal: Refusal) -> String {
+        let key = match refusal {
+            Refusal::NationTaken { nation, .. } => {
+                self.game.world().nations.key.get(nation as usize).map(String::as_str)
+            }
+            _ => None,
+        };
+        refusal.reason(self.max_players, key)
+    }
+
+    /// Commands and the clock work: single player, or a multiplayer game the host
+    /// started.
+    fn started(&self) -> bool {
+        self.phase != Phase::Lobby
+    }
+
     /// Tells every player the lobby as it now stands (M4-2). Only a multiplayer
     /// server has a lobby; it keeps sending the player list after the start.
     fn lobby_changed(&self) {
-        if self.lobby {
-            self.sessions.broadcast(&encode::lobby_state(&self.sessions.lobby(), self.started, None));
+        if self.phase != Phase::SinglePlayer {
+            self.sessions.broadcast(&encode::lobby_state(&self.sessions.lobby(), self.started(), None));
         }
     }
 
     /// Tells one player why their lobby request was refused, with the lobby as it is.
     fn lobby_notice(&self, session: u64, notice: &str) {
         debug!(session, notice, "lobby request refused");
-        self.send(session, Outbound::Frame(encode::lobby_state(&self.sessions.lobby(), self.started, Some(notice))));
+        self.send(session, Outbound::Frame(encode::lobby_state(&self.sessions.lobby(), self.started(), Some(notice))));
     }
 
     /// The lobby is over once the game starts (M4-2): claims and ready marks only
     /// count before it. Returns whether the request may go on.
     fn in_lobby(&self, session: u64) -> bool {
-        if !self.lobby || self.started {
-            let notice = if self.lobby { "the game has started" } else { "this server has no lobby" };
-            self.lobby_notice(session, notice);
-            return false;
-        }
-        true
+        let notice = match self.phase {
+            Phase::Lobby => return true,
+            Phase::Playing => "the game has started",
+            Phase::SinglePlayer => "this server has no lobby",
+        };
+        self.lobby_notice(session, notice);
+        false
     }
 
     fn claim_nation(&mut self, session: u64, nation: Option<u32>) {
@@ -172,7 +198,7 @@ impl Sim {
         }
         match self.sessions.claim(session, nation) {
             Ok(()) => self.lobby_changed(),
-            Err(refusal) => self.lobby_notice(session, &refusal.reason(self.max_players)),
+            Err(refusal) => self.lobby_notice(session, &self.refusal(refusal)),
         }
     }
 
@@ -182,7 +208,7 @@ impl Sim {
         }
         match self.sessions.set_ready(session, ready) {
             Ok(()) => self.lobby_changed(),
-            Err(notice) => self.lobby_notice(session, notice),
+            Err(refusal) => self.lobby_notice(session, &self.refusal(refusal)),
         }
     }
 
@@ -198,7 +224,7 @@ impl Sim {
         if !self.sessions.all_ready() {
             return self.lobby_notice(session, "not every player is ready");
         }
-        self.started = true;
+        self.phase = Phase::Playing;
         info!(session, players = self.sessions.players(), "the game starts");
         self.lobby_changed();
     }
@@ -236,7 +262,7 @@ impl Sim {
             Ok(c) => c,
             Err(e) => return self.command_result(session, client_seq, e),
         };
-        if !self.started {
+        if !self.started() {
             return self.command_result(session, client_seq, wire::CommandError::NotStarted);
         }
         if !seat.commands(commands::nation_of(&command)) {
@@ -258,7 +284,7 @@ impl Sim {
     fn set_speed(&mut self, session: u64, speed: wire::Speed) {
         let Some(seat) = self.sessions.seat(session) else { return };
         // The clock waits for the game to start (M4-2).
-        let permitted = speed == wire::Speed::Paused || (self.sessions.is_host(session) && self.started);
+        let permitted = speed == wire::Speed::Paused || (self.sessions.is_host(session) && self.started());
         match Clock::at(speed, Instant::now()).filter(|_| permitted) {
             Some(clock) => self.set_clock(clock, seat.player),
             None => {
@@ -464,7 +490,7 @@ impl Sim {
     /// Skips the lobby, for tests that exercise the game itself.
     #[cfg(test)]
     pub(crate) fn start_without_lobby(&mut self) {
-        self.started = true;
+        self.phase = Phase::Playing;
     }
 
     #[cfg(test)]
@@ -858,7 +884,7 @@ mod tests {
             sim.handle(Inbound::Request { session: id, request: Request::SetReady { ready: true } });
         }
         sim.handle(Inbound::Request { session: 1, request: Request::StartGame });
-        assert!(sim.started, "every player was ready");
+        assert_eq!(sim.phase, Phase::Playing, "every player was ready");
     }
 
     /// M4-1: players up to the limit, each with their own id and nation.
@@ -1056,7 +1082,7 @@ mod tests {
         // In single player, or once a game has started, a Hello without a nation is a
         // sandbox seat or nothing.
         let (mut sim, _saves) = multiplayer(2);
-        sim.started = true;
+        sim.start_without_lobby();
         assert_eq!(join(&mut sim, 1, None).1, [Sent::Rejected, Sent::Close]);
         assert_eq!(join(&mut sim, 2, Some(0)).1, [Sent::Welcome { player: 0 }]);
         // In a lobby it is a seat that claims a nation later (M4-2), not a sandbox.

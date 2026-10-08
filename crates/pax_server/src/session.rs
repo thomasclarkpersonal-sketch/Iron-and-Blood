@@ -45,15 +45,22 @@ pub(crate) enum Refusal {
     Full,
     /// Another player holds the nation (D24).
     NationTaken { nation: u32, player: u16 },
+    /// Only a player holding a nation (or a sandbox seat) can be ready (M4-2).
+    NoClaim,
 }
 
 impl Refusal {
-    /// The reason a client is told (`Rejected`, or a lobby notice).
-    pub(crate) fn reason(self, max_players: usize) -> String {
+    /// The reason a client is told (`Rejected`, or a lobby notice). `key` is the
+    /// taken nation's key, which the table doesn't know.
+    pub(crate) fn reason(self, max_players: usize, key: Option<&str>) -> String {
         match (self, max_players) {
             (Refusal::Full, 1) => "server full: a single-player server accepts one client".to_owned(),
             (Refusal::Full, n) => format!("server full: all {n} players are connected"),
-            (Refusal::NationTaken { nation, player }, _) => format!("nation {nation} is taken by player {player}"),
+            (Refusal::NationTaken { nation, player }, _) => match key {
+                Some(key) => format!("nation {nation} ({key}) is taken by player {player}"),
+                None => format!("nation {nation} is taken by player {player}"),
+            },
+            (Refusal::NoClaim, _) => "claim a nation before you are ready".to_owned(),
         }
     }
 }
@@ -242,11 +249,11 @@ impl SessionTable {
 
     /// In the lobby: marks the player ready, or not. Only a player who holds a
     /// nation, or a sandbox seat, can be ready.
-    pub(crate) fn set_ready(&mut self, id: u64, ready: bool) -> Result<(), &'static str> {
+    pub(crate) fn set_ready(&mut self, id: u64, ready: bool) -> Result<(), Refusal> {
         let row = self.rows.get_mut(&id).expect("only a seated session readies");
         let seat = row.seat.expect("only a seated session readies");
         if ready && seat.nation.is_none() && !seat.sandbox {
-            return Err("claim a nation before you are ready");
+            return Err(Refusal::NoClaim);
         }
         row.ready = ready;
         Ok(())
@@ -408,7 +415,7 @@ mod tests {
         let mut t = SessionTable::new(HostRule::FirstPlayer);
         seated(&mut t, 1, 0, None);
         seated(&mut t, 2, 1, None);
-        assert_eq!(t.set_ready(1, true), Err("claim a nation before you are ready"));
+        assert_eq!(t.set_ready(1, true), Err(Refusal::NoClaim));
         assert_eq!(t.claim(1, Some(0)), Ok(()));
         assert_eq!(t.claim(2, Some(0)), Err(Refusal::NationTaken { nation: 0, player: 0 }));
         assert_eq!(t.claim(1, Some(0)), Ok(()), "claiming your own nation again is fine");
