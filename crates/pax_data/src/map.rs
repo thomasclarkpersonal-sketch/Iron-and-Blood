@@ -150,8 +150,12 @@ pub(crate) fn load(dir: &Path, world: &World) -> Result<(MapData, MapFiles), Loa
             }
         }
     }
-    for (color, (x, y)) in stray.iter().take(5) {
+    const SHOWN: usize = 5;
+    for (color, (x, y)) in stray.iter().take(SHOWN) {
         errors.push(format!("map: colour {color:?} (first at pixel {x},{y}) is not a province or the background"));
+    }
+    if stray.len() > SHOWN {
+        errors.push(format!("map: ...and {} more stray colours", stray.len() - SHOWN));
     }
     for (p, &n) in painted.iter().enumerate() {
         if n == 0 {

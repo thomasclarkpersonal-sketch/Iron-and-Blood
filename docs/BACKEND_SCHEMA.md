@@ -37,6 +37,8 @@ The client (Godot, with a Rust GDExtension bridge, D12) depends on `pax_protocol
 
 There is no ECS framework (D8). Each table below is a set of equally long column `Vec`s, and an entity is a row index. Static definitions (`Defs`) are shared through `Arc` and excluded from the state hash.
 
+**Table rules.** Rows enter through the `push_*` methods, which assert each row's rules: ids exist, money and stocks are non-negative, rates and ratios are in [0, 1]. `World::check_tables` checks the same rules, from the same functions, over whole tables, and adds the length rules (per-good columns are exactly `rows × goods`). It reports the first broken rule instead of panicking. A world that didn't come through `push_*`, such as a restored snapshot (D10), must pass it before anything reads it. Debug builds also check it after every tick, so every test proves the systems keep the rules.
+
 ### `Geography` (static topology)
 | Column | Type | Notes |
 |---|---|---|

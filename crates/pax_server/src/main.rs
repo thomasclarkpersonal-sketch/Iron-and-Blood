@@ -1,4 +1,4 @@
-//! `pax_server --scenario DIR [--bind ADDR] [--port-file PATH] [--exit-when-idle]`
+//! `pax_server --scenario DIR [--bind ADDR] [--port-file PATH] [--saves DIR] [--exit-when-idle]`
 //!
 //! The authoritative game server (D10). In single player the client launches it with
 //! `--scenario <dir> --bind 127.0.0.1:0 --port-file <tmp> --exit-when-idle` and reads
@@ -10,7 +10,8 @@ use std::process::ExitCode;
 use pax_server::{Config, Server};
 use tracing::error;
 
-const USAGE: &str = "usage: pax_server --scenario DIR [--bind ADDR] [--port-file PATH] [--exit-when-idle]";
+const USAGE: &str =
+    "usage: pax_server --scenario DIR [--bind ADDR] [--port-file PATH] [--saves DIR] [--exit-when-idle]";
 
 /// Parses the arguments after the program name.
 fn parse_args(args: impl IntoIterator<Item = String>) -> Result<(Config, Option<PathBuf>), String> {
@@ -27,6 +28,7 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> Result<(Config, Option<
                 config.bind =
                     value.parse().map_err(|_| format!("--bind: '{value}' is not an address like 127.0.0.1:0"))?;
             }
+            "--saves" => config.saves_dir = PathBuf::from(it.next().ok_or("--saves needs a value")?),
             "--port-file" => port_file = Some(PathBuf::from(it.next().ok_or("--port-file needs a value")?)),
             _ => return Err(format!("unknown argument {flag}")),
         }

@@ -37,9 +37,12 @@ impl UpdateWindow {
     }
 
     /// An update for `day` is going out. Returns its `skipped`: the days that ran
-    /// since the last update, apart from `day` itself.
+    /// since the last update, apart from `day` itself. Only a day that ran is sent
+    /// through the window ([`Self::day_ran`] or [`Self::ack`] said so); a
+    /// `Subscribe` refresh bypasses it.
     pub(crate) fn sent(&mut self, day: u64) -> u32 {
-        let skipped = self.days_since_update.saturating_sub(1);
+        let skipped =
+            self.days_since_update.checked_sub(1).expect("an update through the window is for a day that ran");
         self.in_flight.push_back(day);
         self.days_since_update = 0;
         skipped

@@ -229,9 +229,9 @@ impl World {
     }
 
     pub fn push_pop(&mut self, province: u32, profession: ProfessionId, size: u32, cash: Fixed) -> usize {
-        assert!((province as usize) < self.geography.province_count(), "unknown province");
-        assert!(profession < self.defs.professions.len(), "unknown profession");
-        assert!(!cash.is_negative(), "negative cash");
+        if let Err(e) = self.pop_row(province, profession, cash, Fixed::ONE, Fixed::ZERO) {
+            panic!("{e}");
+        }
         let p = &mut self.pops;
         p.size.push(size);
         p.cash.push(cash);
@@ -269,9 +269,10 @@ impl World {
     }
 
     pub fn push_producer(&mut self, new: NewProducer) -> usize {
-        assert!((new.province as usize) < self.geography.province_count(), "unknown province");
+        if let Err(e) = self.producer_row(new.kind, new.province, new.cash, new.wage, new.output_stock) {
+            panic!("{e}");
+        }
         let def = &self.defs.producer_types[new.kind];
-        assert!(!new.cash.is_negative() && !new.wage.is_negative(), "negative cash or wage");
         // Seed the value-added average at the level that sustains the opening
         // wage bill, so wages do not collapse on day one.
         let value_added_avg = if def.labor_share.is_positive() {
@@ -394,31 +395,170 @@ impl World {
     /// With a message naming the broken invariant, rather than an
     /// index-out-of-bounds deep inside a system.
     pub fn check_market_nations(&self) {
+        if let Err(e) = self.market_nations() {
+            panic!("{e}");
+        }
+    }
+
+    fn market_nations(&self) -> Result<(), String> {
         let map = &self.geography.market_nation;
         if map.is_empty() {
-            return;
+            return Ok(());
         }
-        assert_eq!(
-            map.len(),
-            self.geography.market_count(),
-            "geography.market_nation must be empty or have one entry per market"
-        );
+        if map.len() != self.geography.market_count() {
+            return Err("geography.market_nation must be empty or have one entry per market".to_owned());
+        }
         for (m, n) in map.iter().enumerate() {
-            if let Some(n) = n {
-                assert!(
-                    (*n as usize) < self.nations.len(),
-                    "market {m} names nation {n}, but only {} exist",
-                    self.nations.len()
-                );
+            if let Some(n) = n
+                && (*n as usize) >= self.nations.len()
+            {
+                return Err(format!("market {m} names nation {n}, but only {} exist", self.nations.len()));
             }
         }
+        Ok(())
+    }
+
+    /// The rules for one POP row: shared by [`World::push_pop`] and
+    /// [`World::check_tables`], so they exist once.
+    fn pop_row(
+        &self,
+        province: u32,
+        profession: usize,
+        cash: Fixed,
+        life_needs: Fixed,
+        militancy: Fixed,
+    ) -> Result<(), String> {
+        if province as usize >= self.geography.province_count() {
+            return Err(format!("unknown province {province}"));
+        }
+        if profession >= self.defs.professions.len() {
+            return Err(format!("unknown profession {profession}"));
+        }
+        if cash.is_negative() {
+            return Err("negative cash".to_owned());
+        }
+        if !unit(life_needs) || !unit(militancy) {
+            return Err("life needs or militancy outside [0, 1]".to_owned());
+        }
+        Ok(())
+    }
+
+    /// The rules for one producer row (see [`World::pop_row`]).
+    fn producer_row(
+        &self,
+        kind: usize,
+        province: u32,
+        cash: Fixed,
+        wage: Fixed,
+        output_stock: Fixed,
+    ) -> Result<(), String> {
+        if province as usize >= self.geography.province_count() {
+            return Err(format!("unknown province {province}"));
+        }
+        if kind >= self.defs.producer_types.len() {
+            return Err(format!("unknown producer type {kind}"));
+        }
+        if cash.is_negative() || wage.is_negative() || output_stock.is_negative() {
+            return Err("negative cash, wage or stock".to_owned());
+        }
+        Ok(())
+    }
+
+    /// The rules for one nation row's scalars (see [`World::pop_row`]).
+    fn nation_row(treasury: Fixed, rates: [Fixed; 3]) -> Result<(), String> {
+        if treasury.is_negative() {
+            return Err("negative treasury".to_owned());
+        }
+        if !rates.into_iter().all(unit) {
+            return Err("nation rate outside [0, 1]".to_owned());
+        }
+        Ok(())
+    }
+
+    /// Checks every table invariant the `push_*` methods and the systems maintain,
+    /// reporting the first broken one instead of panicking. It is for state that
+    /// didn't come through `push_*`, such as a world restored from a snapshot
+    /// (D10): a world that passes can't make a system index out of bounds or start
+    /// from values the engine treats as impossible.
+    ///
+    /// Every table is destructured without `..`, so a new column is a compile error
+    /// here until its length rule is written down.
+    pub fn check_tables(&self) -> Result<(), String> {
+        let goods = self.defs.good_count();
+        let Geography { province_keys, province_market, market_keys, market_nation: _ } = &self.geography;
+        let (provinces, markets) = (province_keys.len(), market_keys.len());
+        same_len("geography (provinces)", &[provinces, province_market.len()])?;
+        if let Some(m) = province_market.iter().find(|&&m| m as usize >= markets) {
+            return Err(format!("a province is in market {m}, but only {markets} exist"));
+        }
+
+        let Pops { size, cash, profession, province, life_needs, militancy } = &self.pops;
+        same_len(
+            "pops",
+            &[size.len(), cash.len(), profession.len(), province.len(), life_needs.len(), militancy.len()],
+        )?;
+        for i in 0..size.len() {
+            self.pop_row(province[i], profession[i] as usize, cash[i], life_needs[i], militancy[i])
+                .map_err(|e| format!("POP row {i}: {e}"))?;
+        }
+
+        let Producers { kind, province, capacity, employed, cash, wage, value_added_avg, output_stock, input_stock } =
+            &self.producers;
+        let n = kind.len();
+        same_len(
+            "producers",
+            &[
+                n,
+                province.len(),
+                capacity.len(),
+                employed.len(),
+                cash.len(),
+                wage.len(),
+                value_added_avg.len(),
+                output_stock.len(),
+            ],
+        )?;
+        same_len("producers (input stock per good)", &[input_stock.len(), n * goods])?;
+        for i in 0..n {
+            self.producer_row(kind[i] as usize, province[i], cash[i], wage[i], output_stock[i])
+                .map_err(|e| format!("producer row {i}: {e}"))?;
+            if employed[i] > capacity[i] {
+                return Err(format!("producer row {i}: more employed than its capacity"));
+            }
+        }
+        if input_stock.iter().any(|s| s.is_negative()) {
+            return Err("a negative input stock".to_owned());
+        }
+
+        let Markets { price } = &self.markets;
+        same_len("markets (price per good)", &[price.len(), markets * goods])?;
+
+        let Nations { key, treasury, income_tax_rate, transfer_rate, consumption_rate, basket } = &self.nations;
+        let nations = key.len();
+        same_len(
+            "nations",
+            &[nations, treasury.len(), income_tax_rate.len(), transfer_rate.len(), consumption_rate.len()],
+        )?;
+        same_len("nations (basket per good)", &[basket.len(), nations * goods])?;
+        for i in 0..nations {
+            Self::nation_row(treasury[i], [income_tax_rate[i], transfer_rate[i], consumption_rate[i]])
+                .map_err(|e| format!("nation {i}: {e}"))?;
+            let row = &basket[i * goods..(i + 1) * goods];
+            let sum = row.iter().try_fold(Fixed::ZERO, |a, &w| (!w.is_negative()).then_some(a + w));
+            if sum != Some(Fixed::ONE) && sum != Some(Fixed::ZERO) {
+                return Err(format!("nation {i}: basket weights must be non-negative and sum to 1 or 0"));
+            }
+            if consumption_rate[i].is_positive() && sum != Some(Fixed::ONE) {
+                return Err(format!("nation {i}: a consuming nation needs a basket"));
+            }
+        }
+        self.market_nations()
     }
 
     /// Adds a nation. Assign it markets through `geography.market_nation`.
     pub fn push_nation(&mut self, new: NewNation) -> usize {
-        assert!(!new.treasury.is_negative(), "negative treasury");
-        for rate in [new.income_tax_rate, new.transfer_rate, new.consumption_rate] {
-            assert!(rate >= Fixed::ZERO && rate <= Fixed::ONE, "nation rate outside [0, 1]");
+        if let Err(e) = Self::nation_row(new.treasury, [new.income_tax_rate, new.transfer_rate, new.consumption_rate]) {
+            panic!("{e}");
         }
         let goods = self.defs.good_count();
         assert_eq!(new.basket.len(), goods, "basket must have one weight per good");
@@ -500,5 +640,18 @@ impl World {
             h.fixeds(&n.basket);
         }
         h.finish()
+    }
+}
+
+/// Whether `x` is in `[0, 1]`.
+fn unit(x: Fixed) -> bool {
+    x >= Fixed::ZERO && x <= Fixed::ONE
+}
+
+/// Fails unless every length in `lens` is the same.
+fn same_len(table: &str, lens: &[usize]) -> Result<(), String> {
+    match lens.iter().find(|&&l| l != lens[0]) {
+        Some(_) => Err(format!("{table}: columns have different lengths {lens:?}")),
+        None => Ok(()),
     }
 }

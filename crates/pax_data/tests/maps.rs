@@ -52,6 +52,19 @@ fn a_valid_map_loads_with_colours_in_scenario_order() {
 }
 
 #[test]
+fn many_stray_colours_are_summarised() {
+    let row: Vec<[u8; 3]> = (1..=8).map(|c| [c, c, c]).collect();
+    let s = scenario_with_map(
+        "many-stray",
+        &[&[RIVERLANDS, COAST, DALE, PEAKS, SEA, SEA, SEA, SEA], &row],
+        &standard_toml(),
+    );
+    let e = errors(&s);
+    assert_eq!(e.matches("is not a province").count(), 5, "only the first five are listed: {e}");
+    assert!(e.contains("...and 3 more stray colours"), "{e}");
+}
+
+#[test]
 fn a_stray_colour_is_refused() {
     let s =
         scenario_with_map("stray", &[&[RIVERLANDS, COAST, DALE, PEAKS], &[SEA, [1, 2, 3], SEA, SEA]], &standard_toml());
