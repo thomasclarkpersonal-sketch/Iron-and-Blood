@@ -1,6 +1,8 @@
 //! A blocking test client for `pax_server`: real TCP, real frames.
 #![allow(dead_code)]
 
+pub mod noise;
+
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream};
 use std::path::PathBuf;

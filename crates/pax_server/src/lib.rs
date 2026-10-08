@@ -28,12 +28,13 @@ mod sim;
 mod view;
 mod window;
 
-/// The request decoder, for the cargo-fuzz target only (`fuzz/`, M3-10): it fuzzes
-/// exactly what a connection task runs on every frame.
+/// A connection task's input side, for the cargo-fuzz target only (`fuzz/`, M3-10):
+/// it fuzzes exactly what a connection runs on its socket's bytes.
 #[cfg(feature = "fuzzing")]
 #[doc(hidden)]
 pub mod fuzzing {
-    pub use crate::request::{Request, RequestError, decode};
+    pub use crate::net::RequestReader;
+    pub use crate::request::Request;
 }
 
 use std::net::SocketAddr;
