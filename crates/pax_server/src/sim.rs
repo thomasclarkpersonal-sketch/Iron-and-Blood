@@ -50,7 +50,7 @@ struct HelloFields<'a> {
     name: Option<&'a str>,
     requested_nation: Option<u32>,
     resume_token: u64,
-    password: Option<&'a str>,
+    password: Option<&'a crate::Secret>,
 }
 
 /// Where a server's game is (D24, M4-2).
@@ -80,13 +80,11 @@ pub(crate) struct Sim {
     sandbox: bool,
     /// How remote sessions are throttled (D24, M4-7).
     bandwidth: crate::Bandwidth,
-    /// The server password (`Config::password`, D24, M4-6).
-    password: Option<String>,
-    /// The admin's name and password (`Config::admin`); the table's
-    /// `HostRule::Admin` holds the same name.
-    admin: Option<crate::Admin>,
+    /// The server password (`Config::password`, D24, M4-6). The admin's is in the
+    /// table's `HostRule::Admin`.
+    password: Option<crate::Secret>,
     /// D24's command rate limit (`Config::commands_per_second`).
-    pub(crate) commands_per_second: u32,
+    commands_per_second: u32,
     /// Stop when the last player leaves (the client launched this server).
     exit_when_idle: bool,
     /// Set when the server should stop; [`Sim::handle`] returns it. A flag rather
@@ -118,14 +116,11 @@ impl Sim {
             scenario_dir: config.scenario.clone(),
             saves_dir: config.saves_dir.clone(),
             // D24: the first player is host, or the admin on a dedicated server.
-            sessions: SessionTable::new(
-                config.admin.as_ref().map_or(HostRule::FirstPlayer, |a| HostRule::Admin(a.name.clone())),
-            ),
+            sessions: SessionTable::new(config.admin.clone().map_or(HostRule::FirstPlayer, HostRule::Admin)),
             max_players: usize::from(config.max_players),
             sandbox: config.sandbox,
             bandwidth: config.bandwidth,
             password: config.password.clone(),
-            admin: config.admin.clone(),
             commands_per_second: config.commands_per_second,
             exit_when_idle: config.exit_when_idle,
             stop: false,
@@ -170,14 +165,13 @@ impl Sim {
         }
         // The admin proves it with the admin password; it, or the server password,
         // admits a player to a server that has one (D24, M4-6).
-        let matches = |expected: Option<&String>| match (expected, password) {
-            (Some(expected), Some(given)) => constant_time_eq(expected.as_bytes(), given.as_bytes()),
-            _ => false,
-        };
-        let admin_proved = matches(self.admin.as_ref().map(|a| &a.password));
+        // `Secret`'s equality is constant-time.
+        let matches = |expected: Option<&crate::Secret>| expected.is_some_and(|e| password == Some(e));
+        let admin = self.sessions.admin();
+        let admin_proved = matches(admin.map(|a| &a.password));
         // The admin's name without its password is an ordinary player: say so, or a
         // mistyped password shows only as `NotPermitted` later (NETWORK_PROTOCOL §6).
-        if !admin_proved && self.admin.as_ref().is_some_and(|a| name == Some(a.name.as_str())) {
+        if !admin_proved && admin.is_some_and(|a| name == Some(a.name.as_str())) {
             info!(session, "the admin's name without the admin password: not the host");
         }
         if self.password.is_some() && !admin_proved && !matches(self.password.as_ref()) {
@@ -517,6 +511,13 @@ impl Sim {
         }
     }
 
+    /// Changes the command rate limit mid-run: the hostile-input test fuzzes the
+    /// refusal path with it. A running server's limit is fixed (`Config`).
+    #[cfg(test)]
+    pub(crate) fn set_commands_per_second(&mut self, limit: u32) {
+        self.commands_per_second = limit;
+    }
+
     /// When the next update a throttle held may go out (D24, M4-7); `None` if none
     /// is owed.
     pub(crate) fn next_flush(&self) -> Option<Instant> {
@@ -742,7 +743,7 @@ impl Sim {
                 session,
                 request: Request::Hello { major, minor, name, requested_nation, resume_token, password },
             } => {
-                let password = password.as_deref();
+                let password = password.as_ref();
                 let name = name.as_deref();
                 self.hello(session, HelloFields { major, minor, name, requested_nation, resume_token, password });
             }
@@ -789,12 +790,6 @@ impl Sim {
         self.tell_lobby_if_changed();
         !self.stop
     }
-}
-
-/// Compares two secrets in time that depends only on their lengths, so a client
-/// can't find a password byte by byte from how fast it is refused (D24, M4-6).
-fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
-    a.len() == b.len() && a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
 }
 
 /// What a non-host is told when it asks to save or load (D24).
@@ -1287,8 +1282,8 @@ mod tests {
     fn an_admin_name_makes_that_player_the_host() {
         let (mut sim, _saves) = multiplayer(2);
         // As `Sim::new` sets it for `--admin ada --admin-password-file …`.
-        sim.sessions = SessionTable::new(HostRule::Admin("ada".into()));
-        sim.admin = Some(crate::Admin { name: "ada".into(), password: "s3cret".into() });
+        let admin = crate::Admin { name: "ada".into(), password: crate::Secret::new("s3cret") };
+        sim.sessions = SessionTable::new(HostRule::Admin(admin));
         let (_a, _) = join(&mut sim, 1, Some(0));
         assert_eq!(sim.sessions.host(), None, "the first player isn't host on a dedicated server");
         let ada = |sim: &mut Sim, id: u64, password: Option<&str>| {
@@ -1300,7 +1295,7 @@ mod tests {
                 name: Some("ada".into()),
                 requested_nation: Some(1),
                 resume_token: 0,
-                password: password.map(str::to_owned),
+                password: password.map(crate::Secret::new),
             };
             sim.handle(Inbound::Request { session: id, request: hello });
             drain(&mut rx)
@@ -1689,7 +1684,7 @@ mod tests {
     #[test]
     fn a_password_admits_and_a_wrong_one_is_refused() {
         let (mut sim, _saves) = multiplayer(3);
-        sim.password = Some("open sesame".into());
+        sim.password = Some(crate::Secret::new("open sesame"));
         let hello = |sim: &mut Sim, id: u64, password: Option<&str>| {
             let (conn, mut rx) = ConnHandle::for_test();
             sim.handle(Inbound::Connected { session: id, conn });
@@ -1699,7 +1694,7 @@ mod tests {
                 name: None,
                 requested_nation: None,
                 resume_token: 0,
-                password: password.map(str::to_owned),
+                password: password.map(crate::Secret::new),
             };
             sim.handle(Inbound::Request { session: id, request });
             drain(&mut rx)

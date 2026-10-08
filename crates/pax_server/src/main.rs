@@ -20,7 +20,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::Duration;
 
-use pax_server::{Config, Server};
+use pax_server::{Config, Secret, Server};
 use tracing::error;
 
 const USAGE: &str = "usage: pax_server --scenario DIR [--bind ADDR] [--port-file PATH] [--saves DIR] [--players N] [--sandbox] [--admin NAME --admin-password-file PATH] [--password-file PATH] [--commands-per-second N] [--pause-after S] [--drop-after S] [--updates-per-second N] [--map-every N] [--exit-when-idle]";
@@ -31,14 +31,14 @@ const MAX_PLAYERS: u16 = 64;
 
 /// A password from the file at `path` (D24, M4-6): read from a file, so it never
 /// shows in the process list, with a trailing line break removed.
-fn secret(flag: &str, path: Option<String>) -> Result<String, String> {
+fn secret(flag: &str, path: Option<String>) -> Result<Secret, String> {
     let path = path.ok_or(format!("{flag} needs a value"))?;
     let text = std::fs::read_to_string(&path).map_err(|e| format!("{flag}: cannot read {path}: {e}"))?;
     let password = text.trim_end_matches(['\n', '\r']).to_owned();
     if password.is_empty() {
         return Err(format!("{flag}: {path} is empty"));
     }
-    Ok(password)
+    Ok(Secret::new(password))
 }
 
 /// Parses the arguments after the program name.
@@ -234,11 +234,11 @@ mod tests {
         let line = format!("--scenario s --admin ada --admin-password-file {}", file.display());
         let (config, _) = parse_args(args(&line)).unwrap();
         let admin = config.admin.expect("an admin");
-        assert_eq!((admin.name.as_str(), admin.password.as_str()), ("ada", "s3cret"));
+        assert_eq!((admin.name.as_str(), &admin.password), ("ada", &Secret::new("s3cret")));
         assert!(!format!("{admin:?}").contains("s3cret"), "Debug never prints the password");
         assert!(parse_args(args(&format!("--scenario s --admin-password-file {}", file.display()))).is_err());
         let line = format!("--scenario s --password-file {}", file.display());
-        assert_eq!(parse_args(args(&line)).unwrap().0.password.as_deref(), Some("s3cret"), "line break trimmed");
+        assert_eq!(parse_args(args(&line)).unwrap().0.password, Some(Secret::new("s3cret")), "line break trimmed");
         std::fs::write(&file, "\n").unwrap();
         assert!(parse_args(args(&line)).unwrap_err().contains("is empty"));
         std::fs::remove_file(&file).unwrap();

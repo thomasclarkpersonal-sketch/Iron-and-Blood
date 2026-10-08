@@ -169,7 +169,7 @@ fn hostile_request(n: &mut Noise, tokens: &[u64]) -> Request {
                 _ => 0,
             },
             // Mostly none; sometimes a guess.
-            password: n.chance(4).then(|| "guess".to_owned()),
+            password: n.chance(4).then(|| crate::Secret::new("guess")),
         },
         1..=3 => {
             let rate_raw = (!n.chance(6)).then(|| n.rate());
@@ -280,7 +280,7 @@ fn the_sim_thread_survives_hostile_requests() {
         // The last rounds run at a limit the noise exceeds, so the refusal path is
         // fuzzed with the rest (D24).
         if round == 5_000 {
-            sim.commands_per_second = 2;
+            sim.set_commands_per_second(2);
         }
         // The first half plays in the lobby, where hostile claims and starts rarely
         // line everyone up; the second half plays the game itself.

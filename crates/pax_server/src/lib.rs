@@ -27,9 +27,11 @@ mod net;
 mod noise;
 mod queue;
 mod request;
+mod secret;
 mod session;
 mod sim;
 mod throttle;
+pub use secret::Secret;
 pub use throttle::Bandwidth;
 mod view;
 mod window;
@@ -70,17 +72,10 @@ pub const COMMANDS_PER_SECOND: u32 = 20;
 /// password that proves it. One value, so a name can't exist without its proof: a
 /// name alone proves nothing. The password also admits the admin to a server with
 /// a server password.
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Admin {
     pub name: String,
-    pub password: String,
-}
-
-impl std::fmt::Debug for Admin {
-    /// Never prints the password (a `Config` may be logged).
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Admin").field("name", &self.name).field("password", &"…").finish()
-    }
+    pub password: Secret,
 }
 
 /// How to run a server.
@@ -114,7 +109,7 @@ pub struct Config {
     pub admin: Option<Admin>,
     /// Players must present this in `Hello` (`--password-file`, D24). `None`: no
     /// password.
-    pub password: Option<String>,
+    pub password: Option<Secret>,
     /// At most this many commands per second per session; more get `RateLimited`
     /// (`--commands-per-second`, D24's default 20).
     pub commands_per_second: u32,

@@ -27,7 +27,7 @@ pub enum Request {
         requested_nation: Option<u32>,
         resume_token: u64,
         /// The server's or the admin's password (D24); `None` if absent.
-        password: Option<String>,
+        password: Option<crate::Secret>,
     },
     /// `command` is `None` when the union member is missing or unknown to this version.
     SubmitCommand {
@@ -125,7 +125,7 @@ pub fn decode(frame: &[u8]) -> Result<Request, RequestError> {
             name: owned(h.client_name()),
             requested_nation: h.requested_nation(),
             resume_token: h.resume_token(),
-            password: owned(h.password()),
+            password: owned(h.password()).map(crate::Secret::new),
         }),
         P::SubmitCommand => msg
             .payload_as_submit_command()

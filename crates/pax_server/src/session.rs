@@ -64,14 +64,15 @@ pub(crate) enum Refusal {
 }
 
 /// Who is host (D24). The table applies the whole rule, electing and succeeding.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug)]
 pub(crate) enum HostRule {
     /// A player-hosted server: the first player is host, and when the host's seat
     /// ends, the remaining player with the lowest id.
     FirstPlayer,
     /// A dedicated server (`--admin NAME`): the client of that name, proving it with
     /// the admin password (M4-6), is host whenever it plays, and nobody else ever is.
-    Admin(String),
+    /// The one copy of the admin: the sim checks the password against it.
+    Admin(crate::Admin),
 }
 
 /// What ending a seat changed. The caller must act on it (D23: when the last player
@@ -190,6 +191,14 @@ impl Session {
 }
 
 impl SessionTable {
+    /// The dedicated server's admin, if it has one (`HostRule::Admin`).
+    pub(crate) fn admin(&self) -> Option<&crate::Admin> {
+        match &self.host_rule {
+            HostRule::Admin(admin) => Some(admin),
+            HostRule::FirstPlayer => None,
+        }
+    }
+
     /// An empty table whose host follows `host_rule`.
     pub(crate) fn new(host_rule: HostRule) -> Self {
         SessionTable { rows: BTreeMap::new(), reserved: BTreeMap::new(), host: None, host_rule }
@@ -342,7 +351,7 @@ impl SessionTable {
     fn elect(&mut self, id: u64, admin_proved: bool) {
         let elected = match &self.host_rule {
             HostRule::FirstPlayer => true,
-            HostRule::Admin(admin) => admin_proved && self.rows.get(&id).is_some_and(|s| &s.name == admin),
+            HostRule::Admin(admin) => admin_proved && self.rows.get(&id).is_some_and(|s| s.name == admin.name),
         };
         if elected && self.host.is_none() {
             self.host = Some(id);
@@ -354,7 +363,7 @@ impl SessionTable {
         let mut new_host = None;
         if self.host == Some(id) {
             self.host = None;
-            if self.host_rule == HostRule::FirstPlayer {
+            if matches!(self.host_rule, HostRule::FirstPlayer) {
                 new_host = self.lowest_player();
                 self.host = new_host;
             }
@@ -604,7 +613,10 @@ mod tests {
 
     #[test]
     fn an_admin_is_host_by_name_and_the_role_never_passes() {
-        let mut t = SessionTable::new(HostRule::Admin("ada".into()));
+        let mut t = SessionTable::new(HostRule::Admin(crate::Admin {
+            name: "ada".into(),
+            password: crate::Secret::new("s3cret"),
+        }));
         seated(&mut t, 1, 0, None);
         assert_eq!(t.host(), None, "the first player isn't host on a dedicated server");
         let (conn, _rx) = ConnHandle::for_test();
