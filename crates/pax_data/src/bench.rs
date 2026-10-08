@@ -15,7 +15,10 @@ use pax_engine::world::{Geography, NewProducer};
 
 /// How many days a world with `scale > 1` can run before its first month end, when
 /// compaction merges the repeated rows (D7). A benchmark that runs longer measures a
-/// different, smaller world, or overflows, so `pax_cli bench` refuses it.
+/// different, smaller world from that day on, and at large scales the merged sizes
+/// overflow `u32`. Nothing guards against it: `pax_cli bench` uses this as its
+/// default run length with `--scale` and only warns when asked for more, so a caller
+/// that needs the whole run to measure the scaled world must stay within it.
 pub fn days_before_compaction(base: &World) -> u64 {
     // The day ticks before the month-end one; that day itself compacts.
     pax_engine::systems::demographics::days_until_month_end(base)

@@ -175,13 +175,13 @@ mod tests {
     fn server_day_budget() {
         use crate::view::{self, Subscription};
         use pax_protocol::wire;
+        // Timed days; with the warm-up day they must end before the first month end.
         const DAYS: u32 = 10;
         let pool = rayon::ThreadPoolBuilder::new().num_threads(8).build().unwrap();
         pool.install(|| {
             let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two_states");
             let mut scenario = pax_data::load_scenario(&dir).unwrap();
             let regions = 1_500;
-            // Ten days: well before the first month end (`pax_data::bench`).
             let scale = pax_data::bench::scale_for_rows(&scenario.world, 1_000_000, regions);
             // The warm-up day plus DAYS must end before the first month end, when
             // compaction merges the `scale` copies (D7) and the world shrinks.
