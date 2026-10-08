@@ -1,0 +1,74 @@
+// Types shared by both directions of the pax wire protocol (D22).
+// Rules for every change: docs/NETWORK_PROTOCOL.md, "Schema evolution".
+// In short: add fields only at the end of a table, deprecate instead of
+// deleting, add union members only at the end, never renumber an enum.
+
+namespace pax.net;
+
+/// A `pax_engine::Fixed` value: `raw` is the value × 10^6 (D3).
+/// It is never a float on the wire; clients convert to float for display only.
+struct Fixed {
+  raw: long;
+}
+
+/// Game speed (D23). A server control, not an engine command, so it's never in the
+/// command log or the state hash.
+enum Speed : ubyte {
+  Paused = 0,
+  Slowest = 1, // 0.5 days per second
+  Slow = 2,    // 1
+  Normal = 3,  // 2
+  Fast = 4,    // 5
+  Fastest = 5, // as fast as the tick allows (about 10 at the D13 budget)
+}
+
+/// Why a command was not accepted. `None` means accepted.
+/// The first values mirror `pax_engine::CommandError` (D21).
+enum CommandError : ubyte {
+  None = 0,
+  UnknownNation = 1,
+  RateOutOfRange = 2,
+  NoBasket = 3,
+  /// The command is not valid FlatBuffers data, or a required field is missing.
+  Malformed = 4,
+  /// The session may not command this nation (D24; M3 sandbox mode never sends it).
+  NotPermitted = 5,
+  /// The session sent commands faster than the server's rate limit (D24).
+  RateLimited = 6,
+}
+
+// ------------------------------------------------------------------ commands
+// One table per `pax_engine::Command` variant, with the same fields.
+// `nation` is an index into `StaticData.nations`.
+
+table SetIncomeTax {
+  nation: uint;
+  rate: Fixed;
+}
+
+table SetTransferRate {
+  nation: uint;
+  rate: Fixed;
+}
+
+table SetConsumptionRate {
+  nation: uint;
+  rate: Fixed;
+}
+
+union Command {
+  SetIncomeTax,
+  SetTransferRate,
+  SetConsumptionRate,
+}
+
+/// What the map shows (D22). Each mode except Nation is one value per province.
+enum MapMode : ubyte {
+  None = 0,
+  Nation = 1,       // drawn by the client from StaticData; the server sends no values
+  Population = 2,   // people
+  Unemployment = 3, // unemployed / workforce, in [0, 1]
+  LifeNeeds = 4,    // population-weighted life-needs coverage, in [0, 1]
+  Militancy = 5,    // population-weighted militancy, in [0, 1]
+  Price = 6,        // price of `map_good` in the province's market
+}

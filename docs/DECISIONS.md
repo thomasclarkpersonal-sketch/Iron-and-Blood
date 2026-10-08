@@ -6,6 +6,7 @@ Each entry has a status:
 - **Accepted**: implemented or binding now.
 - **Accepted (principle)**: the rules are binding, and the details are scheduled for a later milestone.
 - **Deferred**: deliberately undecided, with a deadline and the criteria for deciding.
+- **Proposed**: drafted for review; not binding until the team accepts it, which changes the status.
 
 To change a decision, edit its entry in the same pull request as the code. Say what changed and why, and update every document that cites it.
 
@@ -20,9 +21,9 @@ To change a decision, edit its entry in the same pull request as the code. Say w
 | [D7](#d7-pop-accounting) | POP accounting | Accepted |
 | [D8](#d8-ecs-hand-rolled-struct-of-arrays) | ECS framework | Accepted |
 | [D9](#d9-data-format-toml) | Data format | Accepted |
-| [D10](#d10-network-model-server-authoritative-deterministic-core) | Network/multiplayer | Accepted (principle) |
+| [D10](#d10-network-model-server-authoritative-deterministic-core) | Network model | Accepted |
 | [D11](#d11-determinism-harness-and-golden-files) | Determinism harness | Accepted |
-| [D12](#d12-frontend-headless-first-client-chosen-before-m3) | Frontend | Deferred (before M3) |
+| [D12](#d12-frontend-godot-with-a-rust-gdextension-bridge) | Frontend | Accepted (M3) |
 | [D13](#d13-performance-budget) | Performance budget | Accepted |
 | [D14](#d14-market-hierarchy-and-inter-market-trade) | Market hierarchy | Accepted (principle), M2 |
 | [D15](#d15-nations-treasuries-income-tax-and-transfers) | Nations and fiscal policy | Accepted (M2-1) |
@@ -31,6 +32,9 @@ To change a decision, edit its entry in the same pull request as the code. Say w
 | [D19](#d19-militancy) | Militancy | Accepted (M2-5) |
 | [D20](#d20-migration-within-a-market) | Migration within a market | Accepted (M2-6) |
 | [D21](#d21-commands-and-command-logs) | Commands and command logs | Accepted |
+| [D22](#d22-wire-protocol-and-client-sessions) | Wire protocol and sessions | Accepted (M3) |
+| [D23](#d23-server-loop-pacing-flow-control-and-saves) | Server loop, pacing, saves | Accepted (M3) |
+| [D24](#d24-multiplayer-authority) | Multiplayer authority | Proposed (M4) |
 
 ---
 
@@ -192,9 +196,25 @@ All parsing lives in `pax_data`, so the format can change without touching the e
 **Problem.** AGENTS.md assumed lockstep multiplayer, while BACKEND_SCHEMA described a server pushing state to clients.
 
 **Decision.**
-- The simulation runs in **one authoritative process** (`pax_server`, M3). Clients send commands and receive aggregated state snapshots plus on-demand detail (e.g. one province's POPs). Commands are applied at the start of the next tick, in order of `(tick, player id, sequence)`. The engine side is implemented (D21).
-- Determinism (D3) is kept anyway. It makes save files tiny (initial state + command log), makes desyncs debuggable, and keeps lockstep possible later without a rewrite.
-- The protocol is binary (no JSON on the hot path). **FlatBuffers vs Cap'n Proto is deferred to the start of M3.** Criteria: Godot/web client library support (D12), schema evolution, zero-copy reads.
+- The simulation runs in **one authoritative process** (`pax_server`). Clients never simulate. They send commands and receive **views** of the state: a daily summary, plus detail on request such as one market or one province's POPs. They never receive the full state (D22).
+- Commands are applied at the start of the next tick in `(day, player, sequence)` order. The server assigns all three, never the client (D22). The engine side is implemented (D21).
+- **Single player is the same server**, launched by the client on localhost (M3). Multiplayer adds sessions and authority to it (M4, D24): one code path for both.
+- Determinism (D3) is kept anyway:
+  - saves are the scenario plus a command log (D23);
+  - any session, and any bug report carrying a `state_hash`, can be replayed exactly;
+  - lockstep stays possible later without a rewrite.
+- **No desync detection.** A thin client has no state of its own that could drift. The `state_hash` in each update identifies the state for logs and replays; it is not a check the client runs.
+- **Protocol: FlatBuffers over TCP** (D22), chosen at the start of M3 over Cap'n Proto:
+  - official, maintained FlatBuffers libraries exist for both serious client-language options (Rust for a GDExtension, and C#, D12);
+  - schema evolution is append-only and simple to review;
+  - reads are zero-copy.
+
+  GDScript has no maintained FlatBuffers library, and that is one input to the client-language decision (D12).
+- **FlatBuffers stays even though the client bridge is Rust (D12).** With Rust at both ends, library support no longer separates FlatBuffers from Cap'n Proto, so the choice was reviewed again:
+  - Cap'n Proto's distinctive feature, RPC with promise pipelining, doesn't fit a one-way stream of messages in each direction. Its built-in framing replaces only our 4-byte length prefix.
+  - FlatBuffers has an official, mature C# library, which keeps D12's C# fallback cheap if the GDExtension route fails.
+  - The FlatBuffers schema was already written, compiled and measured.
+- The binary *save* format is still open. Saves are replayed command logs until M3-6 measures load time (D23).
 
 ## D11. Determinism harness and golden files
 
@@ -204,17 +224,29 @@ All parsing lives in `pax_data`, so the format can change without touching the e
 - Tests also check: same input gives same hashes; results are identical at 1/2/3/8 threads; resuming from a snapshot matches a continuous run.
 - **Any change that alters simulation results must re-record the golden file in the same PR**, and say so in the description. Unexpected golden diffs are bugs.
 
-## D12. Frontend: headless-first, client chosen before M3
+## D12. Frontend: Godot with a Rust GDExtension bridge
 
-**Deferred.** M1–M2 need no client: `pax_cli` prints market reports.
+**Accepted (M3).** M1–M2 needed no client: `pax_cli` prints market reports.
 
-Decide Godot or Web (React + Three.js / WebGL) before M3, based on:
-1. desktop vs browser distribution;
-2. map rendering needs (thousands of provinces);
-3. the team's skills;
-4. protocol library support (D10).
+**Decision.**
+- **Godot 4**, chosen against the criteria this entry set before M3:
+  1. **Distribution:** desktop first. A browser build is not a goal for M3–M4.
+  2. **Map rendering:** thousands of provinces render as one province-ID texture plus a per-province colour lookup texture (a shader). Changing map mode rewrites one small texture, not geometry.
+  3. **Team skills:** the team writes Rust (engine, data, CLI, server). Godot's own GDScript is used for the UI, so no third language is needed.
+  4. **Protocol library support:** the bridge below reuses the server's Rust protocol code.
+- **Client structure:**
+  - **The UI** (map, panels, menus) is in GDScript.
+  - **A Rust GDExtension bridge** (`pax_godot`, using godot-rust/gdext) owns the connection. It reads and writes frames, verifies messages, checks the protocol version, converts `Fixed` for display, and turns map values into shader arrays.
+  - The bridge depends on `pax_protocol` only, **never on `pax_engine`**, so the client cannot simulate (D10).
+- **Fallback: C# (Godot .NET)** with the official FlatBuffers C# library, if the M3-0 spike shows gdext can't do the job. gdext is pre-1.0 (0.5.x), so the spike is the risk gate.
 
-The engine does not care, by construction.
+**Why GDExtension over C#.** The options considered:
+
+| Option | For | Against |
+|---|---|---|
+| **Rust GDExtension bridge + GDScript UI** (chosen) | The protocol logic (framing, limits, verification, handshake, flow control, `Fixed` conversion) is written and tested once, shared with the server. One code-generation target. Rust tests and fuzzing cover the client's network layer headlessly | gdext is pre-1.0, so expect breaking changes. A native library is built per platform (CI already runs on all three). Working on the bridge means rebuilding Rust |
+| C# (Godot .NET) | Mature official FlatBuffers library; large Godot C# community | Every piece of protocol logic is written a second time and kept in step with the Rust version; a second code-generation target with its own version pin; separate tests |
+| GDScript only | No native build | No maintained FlatBuffers library; a hand-written decoder must track every schema change |
 
 ## D13. Performance budget
 
@@ -324,5 +356,62 @@ The state → national → sphere → global roll-up in the old ECONOMY_SYSTEM w
   - A scenario may name a `commands` file (`[[command]]` entries with `day`, `type`, `nation`, `rate`; see DATA_FORMAT.md).
   - `pax_data::run_logged` replays it, and `pax_cli` applies it in `run`, `report`, `record` and `verify`. Golden hashes therefore pin the commands too.
   - `two_states` replays a two-command policy timeline.
-- **Save files** become "scenario + command log + day". Writing them is a later step; no binary format has been chosen (D10).
+- **Save files** become "scenario + command log + day". D23 defines the save file and how it loads. A binary save format is still open (D10).
+
+## D22. Wire protocol and client sessions
+
+**Accepted (M3).** The full protocol is in [NETWORK_PROTOCOL.md](NETWORK_PROTOCOL.md); the schemas in `schemas/` are its source of truth.
+
+- **Framing:** TCP; each message is a size-prefixed FlatBuffer with file identifier `PAXC` (client→server) or `PAXS` (server→client). Client messages are at most 64 KiB and server messages at most 16 MiB.
+  - Every inbound buffer is verified before it is read.
+  - Any protocol error closes the session with `Goodbye`.
+- **Generated code:** produced by flatc **24.3.25**, matching the `flatbuffers` crate, in the engine-free `pax_protocol` crate. It is checked in, and CI fails if regenerating it gives a different result.
+- **Versioning:** `Hello` and `Welcome` carry `protocol_major`/`protocol_minor`. A major mismatch is refused.
+  - Compatible changes only append fields, deprecate instead of deleting, and add union members and enum values at the end.
+  - Receivers ignore unknown union members and enum values.
+- **Ids:** every id is an index into the `StaticData` tables sent in `Welcome`, fixed for the session. POPs are identified by `(province, profession)`, never by row index, because compaction reorders rows (D7).
+- **Views, not state:** a `DayUpdate` carries `WorldSummary` and `NationTable` always, plus the subscribed `MapView`, `MarketDetail` and `ProvinceDetail`. The full POP and producer tables are never sent.
+  - Budget at the D13 long-term scale: ≤ 16 KB summary-only and ≤ 128 KB with every view subscribed.
+  - Measured on the schema: 8.3 KB and 91 KB.
+- **Values:** simulation values travel as `Fixed { raw: long }` (D3), in both directions. Clients use floats for display only.
+- **Commands:** `SubmitCommand { client_seq, command }` mirrors `pax_engine::Command`.
+  - The server checks, in order: well-formedness, permission (D24), then `World::validate` (D21).
+  - It then stamps `(day, player, sequence)`, queues the command, and replies with one `CommandResult`.
+  - Commands that apply successfully are appended to the session's command log.
+
+## D23. Server loop: pacing, flow control and saves
+
+**Accepted (M3).**
+
+- **Threads:** one sim thread owns the `World` exclusively and runs ticks (rayon inside). Network tasks (tokio) exchange messages with it over channels. There are no locks around world state.
+- **Speed:** paused, or speeds 1–5 at 0.5, 1, 2 and 5 days per second, and as fast as the tick allows (about 10 days/s at the D13 budget). Speed and pause are **server controls, not engine commands**: they change no results, so they appear in neither the command log nor the state hash.
+- **Flow control:** each client may have at most 3 unacknowledged `DayUpdate`s.
+  - While its window is full, the server keeps simulating but sends that client nothing.
+  - When the client acknowledges, the server sends only the latest day, with `skipped` counting the days skipped.
+  - In single player the simulation never waits for the client. Multiplayer fairness rules are in D24.
+- **Saves:** `saves/<name>.toml` contains:
+  - the scenario path and content hash;
+  - the current day;
+  - the command log, in the DATA_FORMAT command format (D21), plus the player per command (M4);
+  - `state_hash` checkpoints every 30 days.
+
+  Loading replays the log from the scenario and verifies each checkpoint. A mismatch is an error, never accepted silently.
+- **Load time** therefore equals replay time. M3-6 measures it at the D13 long-term scale. If a 20-year game takes more than 30 s to load, binary state checkpoints (D10's open save format) become an M3 task.
+
+## D24. Multiplayer authority
+
+**Proposed (M4).** Full design: [MILESTONE_4.md](MILESTONE_4.md).
+
+- **Permissions:** each session commands at most one nation, claimed in the lobby. The server checks a command's nation against the session's before `World::validate`; a mismatch gets `NotPermitted`. Permission (here) and rule validity (D21) are separate checks, in that order. Sandbox sessions exist only with `--sandbox`.
+- **Host:** only the host changes speed, unpauses, saves, loads and kicks. Any player may pause.
+- **Order:** commands apply in `(day, player, sequence)` order, all server-stamped. Any future command that can conflict with another player's must define its own conflict rule in its decision. Player order is only a deterministic tie-break, and would otherwise always favour lower ids.
+- **Lag, in wall-clock time:**
+  - updates coalesce per client (D23);
+  - 5 s of silence from a client pauses the game ("waiting for player");
+  - 30 s drops the session, and its nation keeps its current policies;
+  - a resume token reclaims the nation.
+- **Transport:**
+  - TLS whenever the server is not bound to localhost;
+  - an optional server password;
+  - a per-session command rate limit (default 20 per second).
 

@@ -1,0 +1,40 @@
+# REMINDER: draft only; this file does NOT build yet. Kept out of the repository root
+# so tools ignore it. It is set up in Milestone 4,
+# task M4-8 (docs/MILESTONE_4.md, "Docker (M4-8)"). Known problems:
+#   - schemas/protocol.fbs no longer exists (split into common/client/server.fbs);
+#   - Debian bookworm's flatc is 2.0.8, but the flatbuffers crate is pinned to 24.3.25;
+#     use pax_protocol's checked-in generated code instead of running flatc here;
+#   - no .dockerignore (COPY . . sends target/ into the build), no dependency caching,
+#     runs as root, no saves volume, no configuration arguments.
+# Single player (M3) doesn't use Docker: the client launches pax_server directly.
+
+# Stage 1: Build pax_server
+FROM rust:1.99-bookworm as builder
+
+WORKDIR /usr/src/app
+
+# Install flatc for compiling schema
+RUN apt-get update && apt-get install -y flatbuffers-compiler
+
+# Copy the workspace
+COPY . .
+
+# Compile the flatbuffers (in a real build, we'd use a build.rs script for this, but this is a stub for M3)
+RUN mkdir -p crates/pax_server/src/generated
+RUN flatc --rust -o crates/pax_server/src/generated schemas/protocol.fbs
+
+# Build the release binary
+RUN cargo build --release --bin pax_server
+
+# Stage 2: Minimal runner
+FROM debian:bookworm-slim
+
+WORKDIR /app
+COPY --from=builder /usr/src/app/target/release/pax_server /usr/local/bin/pax_server
+
+# Copy data and scenarios for the server to load
+COPY data /app/data
+COPY scenarios /app/scenarios
+
+EXPOSE 8080
+CMD ["pax_server"]

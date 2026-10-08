@@ -1,0 +1,17 @@
+[package]
+name = "pax_server"
+description = "Authoritative game server: wraps the engine behind the FlatBuffers TCP protocol (D10, D22)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# Only what the stub uses. The engine, data loader, protocol and tokio arrive with
+# M3-2, when the server does something with them.
+[dependencies]
+tracing = "0.1"
+tracing-subscriber = "0.3"
+
+[lints]
+workspace = true
