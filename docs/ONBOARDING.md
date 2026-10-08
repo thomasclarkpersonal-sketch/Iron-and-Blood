@@ -19,7 +19,7 @@ cargo run --release -p pax_cli -- verify scenarios/two_states                  #
 - life-needs coverage and the share of people deprived;
 - militancy.
 
-### Play it (M3)
+### Play it (M3, M4)
 
 You need Godot 4.7 or later (the standard build). See [client/README.md](../client/README.md).
 
@@ -37,6 +37,7 @@ cargo run --release -p pax_cli -- replay saves/<name>.toml   # replay a save; pr
 
 - **In the client:** the map's buttons switch map modes, a click selects a province, the Nation tab's sliders set policy, and **Saves** saves and loads.
 - **F3** shows the day's `state_hash`, which a bug report should quote (D23).
+- **With other people (M4):** the start screen hosts or joins a game, over TLS; a dedicated server runs with `docker compose up`. See [HOSTING.md](HOSTING.md).
 
 ## 2. Map of the code
 

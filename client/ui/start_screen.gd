@@ -43,8 +43,9 @@ func _init() -> void:
 	host_label.text = "Players"
 	host_row.add_child(host_label)
 	_players = SpinBox.new()
-	_players.min_value = 2
-	_players.max_value = 8
+	# The bridge owns the rule (PaxClient.host_game checks it).
+	_players.min_value = PaxClient.hosted_players_min()
+	_players.max_value = PaxClient.hosted_players_max()
 	_players.value = 2
 	host_row.add_child(_players)
 	var host := Button.new()

@@ -225,6 +225,34 @@ jobs:
         # (client/smoke_host.gd, --smoke-host).
         run: timeout 180 "$RUNNER_TEMP/godot" --headless --path client -- --smoke-host | tee smoke-host.log && grep -q "SMOKE OK (host)" smoke-host.log
 
+  docker:
+    # M4-8: the dedicated server's image builds, starts, prints its TLS fingerprint and
+    # reports healthy (its TCP probe). Not a required check.
+    name: Docker image (dedicated server)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: The image's toolchain is the pinned one
+        run: |
+          pinned=$(sed -n 's/^channel = "\(.*\)"/\1/p' rust-toolchain.toml)
+          grep -qx "ARG RUST_VERSION=$pinned" Dockerfile \
+            || { echo "Dockerfile's RUST_VERSION is not rust-toolchain.toml's $pinned"; exit 1; }
+      - name: Build the image
+        run: docker build -t pax-server .
+      - name: Start it and wait until it is healthy
+        run: |
+          docker run -d --name pax -p 7777:7777 pax-server
+          status=starting
+          for _ in $(seq 60); do
+            status=$(docker inspect -f '{{.State.Health.Status}}' pax)
+            [ "$status" = healthy ] && break
+            sleep 3
+          done
+          docker logs pax
+          [ "$status" = healthy ]
+          docker logs pax 2>&1 | grep -q "TLS certificate SHA-256"
+
   fuzz:
     # M3-10: coverage-guided fuzzing of the client frame reader, for a fixed budget.
     # Needs nightly, so it lives outside the workspace (fuzz/). Not a required check:

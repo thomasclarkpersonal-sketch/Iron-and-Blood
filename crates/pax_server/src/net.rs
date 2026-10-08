@@ -193,6 +193,35 @@ impl std::fmt::Display for ReadError {
 /// that never finishes one can't hold a task forever.
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// How many sessions' connection tasks are running (a TLS connection counts once
+/// its handshake succeeded). When the server stops, the sim queues a `Goodbye` and
+/// `Close` for every session; `Server::wait` stops accepting, then waits (at most
+/// 1 s) for this to reach zero, so those tasks write it before the runtime is
+/// dropped, which would otherwise cancel them with the `Goodbye` unsent.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct OpenConnections(Arc<std::sync::atomic::AtomicUsize>);
+
+impl OpenConnections {
+    pub(crate) fn count(&self) -> usize {
+        self.0.load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    /// Counts one connection until the returned guard is dropped (its task ends,
+    /// or is cancelled).
+    fn open(&self) -> OpenGuard {
+        self.0.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+        OpenGuard(self.0.clone())
+    }
+}
+
+struct OpenGuard(Arc<std::sync::atomic::AtomicUsize>);
+
+impl Drop for OpenGuard {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, std::sync::atomic::Ordering::AcqRel);
+    }
+}
+
 /// Accepts connections. With `tls`, each one does the TLS handshake first, and a
 /// failed or slow handshake is dropped before it becomes a session (D24, M4-6).
 pub(crate) async fn accept_loop(
@@ -200,6 +229,7 @@ pub(crate) async fn accept_loop(
     sim: flume::Sender<Inbound>,
     timing: Timing,
     tls: Option<TlsAcceptor>,
+    open: OpenConnections,
 ) {
     let mut next_session = 1u64;
     loop {
@@ -207,22 +237,38 @@ pub(crate) async fn accept_loop(
             Ok((stream, peer)) => {
                 let session = next_session;
                 next_session += 1;
-                info!(session, %peer, "connection");
                 // Small, latency-sensitive messages: don't wait to coalesce them.
                 let _ = stream.set_nodelay(true);
                 // `to_canonical`: on a dual-stack socket, a local IPv4 client is ::ffff:127.0.0.1.
                 let remote = !peer.ip().to_canonical().is_loopback();
                 let sim = sim.clone();
+                // Counted once it is a session, which a Goodbye can reach: a pending
+                // or failed TLS handshake never holds up a shutdown.
                 match tls.clone() {
                     None => {
-                        tokio::spawn(connection(stream, session, sim, timing, remote));
+                        info!(session, %peer, "connection");
+                        let guard = open.open();
+                        tokio::spawn(async move {
+                            let _guard = guard;
+                            connection(stream, session, sim, timing, remote).await
+                        });
                     }
                     Some(acceptor) => {
+                        let open = open.clone();
                         tokio::spawn(async move {
                             match tokio::time::timeout(HANDSHAKE_TIMEOUT, acceptor.accept(stream)).await {
-                                Ok(Ok(stream)) => connection(stream, session, sim, timing, remote).await,
-                                Ok(Err(e)) => info!(session, error = %e, "TLS handshake failed"),
-                                Err(_) => info!(session, "TLS handshake timed out"),
+                                Ok(Ok(stream)) => {
+                                    info!(session, %peer, "connection");
+                                    let _guard = open.open();
+                                    connection(stream, session, sim, timing, remote).await
+                                }
+                                // A port probe, such as the Docker health check (M4-8),
+                                // closes without a word: not worth a line every 30 s.
+                                Ok(Err(e)) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
+                                    debug!(session, %peer, "closed before the TLS handshake")
+                                }
+                                Ok(Err(e)) => info!(session, %peer, error = %e, "TLS handshake failed"),
+                                Err(_) => info!(session, %peer, "TLS handshake timed out"),
                             }
                         });
                     }

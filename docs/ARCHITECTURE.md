@@ -136,4 +136,4 @@ Developers iterate on economic mechanics without a client.
   - the determinism gate, on Linux at 1 and 4 threads, and on Windows and macOS;
   - the session replay through `pax_cli replay`, on all three platforms;
   - on PRs: the benchmark regression gate, the headless client smoke test (Godot), and 60 s of fuzzing.
-- **Docker** is for dedicated multiplayer servers in M4 (task M4-8). Single player (M3) runs `pax_server` directly, launched by the client, and the headless tools don't need a container.
+- **Docker** is for dedicated multiplayer servers (M4-8): `docker compose up` runs `pax_server` with saves and its TLS certificate on volumes (`Dockerfile`, `docker/entrypoint.sh`). Single player (M3) runs `pax_server` directly, launched by the client, and the headless tools don't need a container.
