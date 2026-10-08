@@ -20,9 +20,8 @@ use crate::decode::WelcomeView;
 /// Godot once ([`load`] returns them separately) and aren't kept.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MapImage {
-    pub width: u32,
-    pub height: u32,
-    /// Each pixel's `pax_map` id: what [`MapImage::province_at`] reads.
+    /// Each pixel's `pax_map` id (and the map's size): what [`MapImage::province_at`]
+    /// reads.
     pub ids: ProvinceIds,
     /// Each province's label anchor, `[x, y]` in pixels.
     pub labels: Vec<[u32; 2]>,
@@ -52,7 +51,7 @@ pub fn load(scenario_dir: &Path, welcome: &WelcomeView) -> Result<Option<(MapIma
         ));
     }
     let texels = texels(&ids);
-    Ok(Some((MapImage { width: map.width, height: map.height, ids, labels: map.labels }, texels)))
+    Ok(Some((MapImage { ids, labels: map.labels }, texels)))
 }
 
 /// The RGB8 ID texture of `ids`. The reader bounds the provinces at
@@ -111,15 +110,16 @@ mod tests {
     #[test]
     fn the_id_texture_encodes_each_pixels_province_plus_one() {
         let (map, texels) = load(&two_states(), &welcome(Some("map"), Some(true_hash()))).unwrap().expect("a map");
-        assert_eq!(texels.len(), (map.width * map.height * 3) as usize);
+        let (width, height) = (map.ids.width(), map.ids.height());
+        assert_eq!(texels.len(), (width * height * 3) as usize);
         for (p, &[x, y]) in map.labels.iter().enumerate() {
-            let at = ((y * map.width + x) * 3) as usize;
+            let at = ((y * width + x) * 3) as usize;
             assert_eq!(texels[at] as usize + 256 * texels[at + 1] as usize, p + 1, "the label pixel is its province's");
             assert_eq!(map.province_at(i64::from(x), i64::from(y)), Some(p as u32));
         }
         assert!(texels.chunks(3).any(|t| t == [0, 0, 0]), "two_states has sea");
         assert_eq!(map.province_at(-1, 0), None);
-        assert_eq!(map.province_at(i64::from(map.width), 0), None);
+        assert_eq!(map.province_at(i64::from(width), 0), None);
     }
 
     #[test]

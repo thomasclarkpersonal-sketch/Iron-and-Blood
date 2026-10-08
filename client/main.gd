@@ -142,7 +142,10 @@ func _load_map() -> void:
 	if map[PaxKeys.ERROR] != "":
 		map_view.show_message("The map can't be shown:\n" + map[PaxKeys.ERROR])
 	elif not map.has(PaxKeys.IDS):
-		map_view.show_message("This scenario has no map.")
+		# A protocol 1.0 server sends a map hash but not where the map is.
+		var old_server: bool = welcome[PaxKeys.MAP_HASH] != null and welcome[PaxKeys.MAP_DIR] == null
+		map_view.show_message("The server is too old to say where its map is (protocol 1.0)." if old_server
+			else "This scenario has no map.")
 	else:
 		map_view.set_map(map, welcome[PaxKeys.PROVINCES])
 		map_view.set_colors(MapColors.nations(welcome))

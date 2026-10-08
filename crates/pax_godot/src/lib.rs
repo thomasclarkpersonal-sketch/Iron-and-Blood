@@ -278,8 +278,8 @@ impl PaxClient {
         match map::load(scenario_dir, welcome) {
             Ok(Some((m, texels))) => {
                 d.set(keys::ERROR, &GString::new());
-                d.set(keys::WIDTH, i64::from(m.width));
-                d.set(keys::HEIGHT, i64::from(m.height));
+                d.set(keys::WIDTH, i64::from(m.ids.width()));
+                d.set(keys::HEIGHT, i64::from(m.ids.height()));
                 d.set(keys::IDS, &PackedByteArray::from(texels.as_slice()));
                 let mut labels: Array<Vector2i> = Array::new();
                 for &[x, y] in &m.labels {
