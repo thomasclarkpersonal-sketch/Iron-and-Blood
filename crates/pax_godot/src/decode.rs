@@ -447,17 +447,22 @@ fn day_update(u: wire::DayUpdate<'_>, t: Tables) -> Result<DayUpdateView, Stream
 }
 
 /// Where the session is. The `Welcome` tables are fixed for a session (D22), so the
-/// only way to replace them is a reload the client asked for.
+/// only way to replace them is a load the client asked for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Phase {
     /// Before the first `Welcome`: only `Welcome`, `Rejected` or `Goodbye` may arrive.
     AwaitingWelcome,
     /// After `Welcome`: every message is checked against its tables.
     Session(Tables),
-    /// The client sent `LoadGame` ([`ServerStream::begin_reload`]): a new `Welcome`
-    /// may replace the tables (NETWORK_PROTOCOL §3). A failed load answers with a
-    /// `SaveResult` instead, and the session goes on with the old tables.
-    Reloading(Tables),
+}
+
+/// A save request the server hasn't answered yet. It answers them in the order they
+/// were sent: `SaveGame` with a `SaveResult`, and `LoadGame` with a new `Welcome`
+/// (loaded) or a `SaveResult` (failed). So each answer pairs with the oldest one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SaveRequest {
+    Save,
+    Load,
 }
 
 /// The server's side of one connection, as seen by the client. Feed it bytes in any
@@ -467,6 +472,8 @@ enum Phase {
 pub struct ServerStream {
     frames: FrameDecoder,
     phase: Phase,
+    /// Save requests sent and not yet answered, oldest first.
+    outstanding: std::collections::VecDeque<SaveRequest>,
     failed: Option<StreamError>,
 }
 
@@ -475,6 +482,7 @@ impl Default for ServerStream {
         ServerStream {
             frames: FrameDecoder::new(Direction::ServerToClient),
             phase: Phase::AwaitingWelcome,
+            outstanding: std::collections::VecDeque::new(),
             failed: None,
         }
     }
@@ -510,12 +518,10 @@ impl ServerStream {
         self.failed.as_ref()
     }
 
-    /// Call when sending `LoadGame`: the server answers with a new `Welcome` whose
-    /// tables replace the current ones. Without this, a second `Welcome` is fatal.
-    pub fn begin_reload(&mut self) {
-        if let Phase::Session(t) = self.phase {
-            self.phase = Phase::Reloading(t);
-        }
+    /// Call when sending `SaveGame` or `LoadGame`, so their answers can be told apart
+    /// (see [`SaveRequest`]). Only an outstanding `LoadGame` admits a new `Welcome`.
+    pub fn expect(&mut self, request: SaveRequest) {
+        self.outstanding.push_back(request);
     }
 
     fn decode(&mut self, frame: &[u8]) -> Result<ServerEvent, StreamError> {
@@ -523,18 +529,25 @@ impl ServerStream {
         let msg = read_server_message(frame)?;
         let kind = msg.payload_type();
         let tables = match (self.phase, kind) {
-            // A Welcome opens a session, or replaces it after a requested reload.
-            (Phase::AwaitingWelcome | Phase::Reloading(_), P::Welcome) => {
-                let view = welcome(required(msg.payload_as_welcome(), "Welcome body")?)?;
-                self.phase = Phase::Session(Tables::of(&view));
-                return Ok(ServerEvent::Welcome(Box::new(view)));
-            }
-            (Phase::Session(_), P::Welcome) => return Err(invalid("a second Welcome without a LoadGame".to_owned())),
+            // A Welcome opens a session, or replaces it as the answer to a LoadGame.
+            (Phase::AwaitingWelcome, P::Welcome) => None,
+            (Phase::Session(_), P::Welcome) => match self.outstanding.pop_front() {
+                Some(SaveRequest::Load) => None,
+                Some(SaveRequest::Save) => {
+                    return Err(invalid("a Welcome where the answer to a SaveGame was due".to_owned()));
+                }
+                None => return Err(invalid("a second Welcome without a LoadGame".to_owned())),
+            },
             // Before the first Welcome, only a refusal can explain why there will be none.
             (Phase::AwaitingWelcome, P::Rejected | P::Goodbye) => None,
             (Phase::AwaitingWelcome, _) => return Err(invalid(format!("{} before Welcome", payload_tag(kind)))),
-            (Phase::Session(t) | Phase::Reloading(t), _) => Some(t),
+            (Phase::Session(t), _) => Some(t),
         };
+        if kind == P::Welcome {
+            let view = welcome(required(msg.payload_as_welcome(), "Welcome body")?)?;
+            self.phase = Phase::Session(Tables::of(&view));
+            return Ok(ServerEvent::Welcome(Box::new(view)));
+        }
         Ok(match kind {
             P::Rejected => {
                 let r = required(msg.payload_as_rejected(), "Rejected body")?;
@@ -563,13 +576,15 @@ impl ServerStream {
             P::Pong => ServerEvent::Pong { nonce: required(msg.payload_as_pong(), "Pong body")?.nonce() },
             P::SaveResult => {
                 let r = required(msg.payload_as_save_result(), "SaveResult body")?;
-                if let Phase::Reloading(t) = self.phase {
-                    // The load failed (a successful one answers with Welcome).
-                    self.phase = Phase::Session(t);
+                // The answer to the oldest save request: a save, or a load that failed
+                // (the session keeps its tables).
+                if self.outstanding.pop_front().is_none() {
+                    return Err(invalid("a SaveResult without a SaveGame or LoadGame".to_owned()));
                 }
                 ServerEvent::SaveResult {
-                    name: r.name().unwrap_or_default().to_owned(),
-                    error: r.error().unwrap_or_default().to_owned(),
+                    name: required(r.name(), "SaveResult name")?.to_owned(),
+                    // The server always sends it: empty means success.
+                    error: required(r.error(), "SaveResult error")?.to_owned(),
                 }
             }
             P::SaveList => {
@@ -768,30 +783,63 @@ mod tests {
         assert_eq!(s.push(&bytes).len(), 1);
         assert!(matches!(s.error(), Some(StreamError::Invalid(e)) if e.contains("second Welcome")));
 
-        // After begin_reload, the new Welcome's tables replace the old ones.
+        // After a LoadGame, the new Welcome's tables replace the old ones.
         let mut s = ServerStream::default();
         assert_eq!(s.push(&welcome_frame(PROTOCOL_MAJOR, 2, 2, true)).len(), 1);
-        s.begin_reload();
+        s.expect(SaveRequest::Load);
         assert_eq!(s.push(&welcome_frame(PROTOCOL_MAJOR, 5, 5, true)).len(), 1);
         assert_eq!(s.push(&day_update_frame(2, 5)).len(), 1, "5 map values: matches the new tables");
         assert_eq!(s.error(), None);
+    }
+
+    fn save_result_frame(name: &str, error: &str) -> Vec<u8> {
+        let mut b = FlatBufferBuilder::new();
+        let (name, error) = (b.create_string(name), b.create_string(error));
+        let r = wire::SaveResult::create(&mut b, &wire::SaveResultArgs { name: Some(name), error: Some(error) });
+        server_frame(&mut b, wire::ServerPayload::SaveResult, r.as_union_value())
     }
 
     #[test]
     fn a_failed_load_keeps_the_old_tables() {
         let mut s = ServerStream::default();
         s.push(&welcome_frame(PROTOCOL_MAJOR, 2, 2, true));
-        s.begin_reload();
-        let mut b = FlatBufferBuilder::new();
-        let error = b.create_string("there is no save");
-        let r = wire::SaveResult::create(&mut b, &wire::SaveResultArgs { name: None, error: Some(error) });
-        let failed = server_frame(&mut b, wire::ServerPayload::SaveResult, r.as_union_value());
+        s.expect(SaveRequest::Load);
+        let failed = save_result_frame("x", "there is no save");
         assert!(
             matches!(s.push(&failed).as_slice(), [ServerEvent::SaveResult { error, .. }] if error.contains("no save"))
         );
         // A Welcome now is no longer expected.
         assert!(s.push(&welcome_frame(PROTOCOL_MAJOR, 2, 2, true)).is_empty());
         assert!(matches!(s.error(), Some(StreamError::Invalid(e)) if e.contains("second Welcome")));
+    }
+
+    /// Save then load before either is answered: the save's SaveResult answers the
+    /// save, and the Welcome that follows answers the load (critic #44).
+    #[test]
+    fn answers_pair_with_requests_in_order() {
+        let mut s = ServerStream::default();
+        s.push(&welcome_frame(PROTOCOL_MAJOR, 2, 2, true));
+        s.expect(SaveRequest::Save);
+        s.expect(SaveRequest::Load);
+        let mut bytes = save_result_frame("a", "");
+        bytes.extend(welcome_frame(PROTOCOL_MAJOR, 3, 3, true));
+        let events = s.push(&bytes);
+        assert!(
+            matches!(events.as_slice(), [ServerEvent::SaveResult { .. }, ServerEvent::Welcome(w)] if w.provinces.len() == 3)
+        );
+        assert_eq!(s.error(), None);
+        // Nothing is outstanding now, so another SaveResult is a protocol error.
+        assert!(s.push(&save_result_frame("a", "")).is_empty());
+        assert!(matches!(s.error(), Some(StreamError::Invalid(e)) if e.contains("without a SaveGame")));
+    }
+
+    #[test]
+    fn a_welcome_cannot_answer_a_save() {
+        let mut s = ServerStream::default();
+        s.push(&welcome_frame(PROTOCOL_MAJOR, 2, 2, true));
+        s.expect(SaveRequest::Save);
+        assert!(s.push(&welcome_frame(PROTOCOL_MAJOR, 2, 2, true)).is_empty());
+        assert!(matches!(s.error(), Some(StreamError::Invalid(e)) if e.contains("answer to a SaveGame")));
     }
 
     #[test]

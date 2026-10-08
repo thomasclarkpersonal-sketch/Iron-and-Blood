@@ -56,7 +56,7 @@ sequenceDiagram
    - `content_hash` covers every file the scenario loader reads, maps included, each keyed by its role rather than its path. It identifies the game content in logs and saves (D23).
 3. **Subscribe** replaces the whole subscription. The server immediately answers with a `DayUpdate` for the current day, even while paused, so a newly opened panel fills at once.
 4. **Daily updates** follow the flow-control rule in §5.
-5. **Keep-alive:** the client sends `Ping` at least every 2 seconds. A session silent for 10 seconds (M3) is closed. M4's lag rules are in D24.
+5. **Keep-alive:** a session silent for `pax_protocol::IDLE_TIMEOUT` (10 seconds in M3) is closed, so the client sends `Ping` at least every fifth of that (2 seconds). Both sides take the value from that one constant. M4's lag rules are in D24.
 6. **LoadGame** ends with a new `Welcome`, because the scenario and its tables may differ. The client must drop everything it holds from the old session.
 
 ## 4. Messages
@@ -124,7 +124,7 @@ sequenceDiagram
 
 - The client launches `pax_server` as a child process: `pax_server --scenario <dir> --bind 127.0.0.1:0 --port-file <tmp> --exit-when-idle`. The server binds a free port and writes it to the port file (atomically, so a polling client never reads half a number). The client then connects.
 - When the client exits, it closes the connection, and `--exit-when-idle` makes the server shut down once its player has gone.
-- The client's bridge (`pax_godot::connection`) does this, and also what every client owes the server: it acknowledges each `DayUpdate` on the poll after the one that delivered it (§5), and sends a `Ping` after 2 s without sending anything, well inside the server's idle timeout.
+- The client's bridge (`pax_godot::connection`) does this, and also what every client owes the server: it acknowledges each `DayUpdate` on the poll after the one that delivered it (§5), and sends a `Ping` after a fifth of `IDLE_TIMEOUT` (2 s) without sending anything. It also pairs each `SaveResult` and load `Welcome` with the request it answers, oldest first, because the server answers save requests in order.
 - There is no Docker and no separate install: the server binary ships next to the client.
 
 ## 7. Conversions and units

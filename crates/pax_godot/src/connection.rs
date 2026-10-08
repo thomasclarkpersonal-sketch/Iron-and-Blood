@@ -19,12 +19,12 @@ use std::time::{Duration, Instant};
 
 use pax_protocol::wire;
 
-use crate::decode::{ServerEvent, ServerStream};
+use crate::decode::{SaveRequest, ServerEvent, ServerStream};
 use crate::encode;
 
-/// Send a `Ping` after this long without sending anything. Well inside the server's
-/// 10-second idle timeout.
-pub const KEEP_ALIVE: Duration = Duration::from_secs(2);
+/// Send a `Ping` after this long without sending anything: a fifth of the server's
+/// idle timeout (`pax_protocol::IDLE_TIMEOUT`), so a paused game is never dropped.
+pub const KEEP_ALIVE: Duration = Duration::from_secs(pax_protocol::IDLE_TIMEOUT.as_secs() / 5);
 
 /// What one poll found.
 #[derive(Debug, Default, PartialEq)]
@@ -181,13 +181,14 @@ impl Connection {
     }
 
     pub fn save_game(&mut self, name: &str) {
+        self.reader.expect(SaveRequest::Save);
         self.send(encode::save_game(name));
     }
 
     /// Asks to load a save. The answer is a new `Welcome` (the decoder accepts it
     /// only now) or a `SaveResult` with the error.
     pub fn load_game(&mut self, name: &str) {
-        self.reader.begin_reload();
+        self.reader.expect(SaveRequest::Load);
         self.send(encode::load_game(name));
     }
 

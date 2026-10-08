@@ -67,7 +67,7 @@ impl Config {
         Config {
             scenario: scenario.into(),
             bind: SocketAddr::from(([127, 0, 0, 1], 0)),
-            idle_timeout: Duration::from_secs(10),
+            idle_timeout: pax_protocol::IDLE_TIMEOUT,
             exit_when_idle: false,
             saves_dir: PathBuf::from("saves"),
         }

@@ -86,6 +86,10 @@ impl PaxClient {
     /// Returns an error message, or `""` on success.
     #[func]
     fn launch(&mut self, server_path: GString, scenario_dir: GString, saves_dir: GString) -> GString {
+        // A previous session ends first: its connection, then its server, so that
+        // server can exit by itself (`--exit-when-idle`).
+        self.connection = None;
+        self.server = None;
         let (server, scenario, saves) = (server_path.to_string(), scenario_dir.to_string(), saves_dir.to_string());
         match LocalServer::launch(Path::new(&server), Path::new(&scenario), Path::new(&saves)) {
             Ok(local) => {
@@ -93,17 +97,17 @@ impl PaxClient {
                 self.server = Some(local);
                 self.connect_addr(addr)
             }
-            Err(e) => GString::from(&e),
+            Err(e) => rejected(e),
         }
     }
 
     /// Connects to a running server. Returns an error message, or `""`.
     #[func]
     fn connect_to(&mut self, host: GString, port: i64) -> GString {
-        let Ok(port) = u16::try_from(port) else { return GString::from("port out of range") };
+        let Ok(port) = u16::try_from(port) else { return rejected(format!("port {port} out of range")) };
         match format!("{host}:{port}").parse() {
             Ok(addr) => self.connect_addr(addr),
-            Err(e) => GString::from(&format!("bad address: {e}")),
+            Err(e) => rejected(format!("bad address: {e}")),
         }
     }
 
@@ -124,7 +128,7 @@ impl PaxClient {
                 self.connection = Some(c);
                 GString::new()
             }
-            Err(e) => GString::from(&format!("cannot connect to {addr}: {e}")),
+            Err(e) => rejected(format!("cannot connect to {addr}: {e}")),
         }
     }
 
