@@ -137,7 +137,7 @@ func _check_scripted_runs(day: int) -> void:
 ## Loads this scenario's province map, checked against the server's (`map_hash`).
 func _load_map() -> void:
 	map_modes.set_goods(welcome[PaxKeys.GOODS])
-	var map: Dictionary = PaxClient.load_map(_scenario_dir(), welcome[PaxKeys.PROVINCES], welcome[PaxKeys.MAP_HASH])
+	var map: Dictionary = client.load_map(_scenario_dir(), welcome[PaxKeys.PROVINCES], welcome[PaxKeys.MAP_HASH])
 	if map[PaxKeys.ERROR] != "":
 		map_view.show_message("The map can't be shown:\n" + map[PaxKeys.ERROR])
 	elif not map.has(PaxKeys.IDS):
@@ -255,6 +255,8 @@ func _build_ui() -> void:
 	map_view = MapView.new()
 	map_view.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	map_view.province_clicked.connect(_select_province)
+	# The bridge decodes the province-ID texels (pax_map's encoding), not GDScript.
+	map_view.province_lookup = func(x: int, y: int) -> Variant: return client.province_at(x, y)
 	map_column.add_child(map_view)
 	province_info = Label.new()
 	map_column.add_child(province_info)

@@ -72,6 +72,14 @@ jobs:
             echo "::error::pax_content must have no dependencies."
             exit 1
           fi
+          # The bridge links pax_protocol and D12's side-neutral crates, and no other
+          # workspace crate: an allowlist, so the exception can't grow unnoticed.
+          extra=$(cargo tree -p pax_godot -e normal --depth 1 --prefix none | tail -n +2 \
+            | grep '^pax_' | grep -vE '^(pax_protocol|pax_map|pax_content) ' || true)
+          if [ -n "$extra" ]; then
+            echo "::error::pax_godot links $extra; D12 allows pax_protocol, pax_map and pax_content only."
+            exit 1
+          fi
           # The shared map reader is linked by both sides, so it carries neither side's types.
           if deps pax_map | grep -qE '^(pax_engine|pax_protocol|flatbuffers) '; then
             echo "::error::pax_map must not depend on the engine or the wire types."

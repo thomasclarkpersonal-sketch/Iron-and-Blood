@@ -46,6 +46,6 @@ pub(crate) fn load(dir: &Path, world: &World) -> Result<(MapData, MapFiles), Loa
     let png = std::fs::read(&png_path).map_err(|e| LoadError::single(format!("{}: {e}", png_path.display())))?;
     let map =
         ProvinceMap::read(&toml, &png, &world.geography.province_keys).map_err(|messages| LoadError { messages })?;
-    let ProvinceMap { width, height, colors, labels, background, pixels: _, map_hash } = map;
+    let ProvinceMap { width, height, colors, labels, background, ids: _, map_hash } = map;
     Ok((MapData { width, height, colors, labels, background, map_hash }, MapFiles { toml, png }))
 }

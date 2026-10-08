@@ -16,6 +16,9 @@
 //!
 //! The map's two files hash to [`ProvinceMap::map_hash`], `StaticData.map_hash` on the
 //! wire (D22): the client compares it with its own copy before drawing.
+//!
+//! Each pixel's province is kept as a compact `u32` id ([`BACKGROUND_ID`] for sea,
+//! index + 1 otherwise), the same encoding as the client's ID texture.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -57,10 +60,32 @@ pub struct ProvinceMap {
     /// Each province's label anchor, `[x, y]` in pixels.
     pub labels: Vec<[u32; 2]>,
     pub background: Option<[u8; 3]>,
-    /// The province each pixel belongs to, row by row; `None` for background.
-    pub pixels: Vec<Option<u32>>,
+    /// Each pixel's province id, row by row ([`province_of`] reads it).
+    pub ids: Vec<u32>,
     /// `pax_content::map_hash` of the two files: `StaticData.map_hash` (D22).
     pub map_hash: u64,
+}
+
+/// The id stored for a background pixel (sea). A province's id is its index + 1:
+/// the one definition of the encoding, which the client's ID texture also uses
+/// (`pax_godot::map`, and its shader, which documents that it mirrors this).
+pub const BACKGROUND_ID: u32 = 0;
+
+/// The province index an id stores, or `None` for background.
+pub fn province_of(id: u32) -> Option<u32> {
+    id.checked_sub(1)
+}
+
+/// The id stored for province index `p`.
+fn id_of(p: usize) -> u32 {
+    u32::try_from(p + 1).expect("fewer provinces than u32::MAX")
+}
+
+/// Where a scenario's map lives: its `map` setting, relative to the scenario
+/// directory. The one resolution rule: `pax_data` (from its parsed `scenario.toml`)
+/// and [`scenario_map_dir`] (for the client) both call it.
+pub fn resolve_map_dir(scenario_dir: &Path, map: &str) -> PathBuf {
+    scenario_dir.join(map)
 }
 
 /// RGB pixels of an 8-bit RGB or RGBA PNG.
@@ -138,7 +163,7 @@ impl ProvinceMap {
         // Every pixel must belong to a province or the background; every province needs pixels.
         let mut painted = vec![0u64; keys.len()];
         let mut stray: BTreeMap<[u8; 3], (u32, u32)> = BTreeMap::new();
-        let mut pixels = Vec::with_capacity(image.len());
+        let mut ids = Vec::with_capacity(image.len());
         for (i, px) in image.iter().enumerate() {
             let p = owner.get(px).copied();
             match p {
@@ -148,7 +173,7 @@ impl ProvinceMap {
                     stray.entry(*px).or_insert((i as u32 % width, i as u32 / width));
                 }
             }
-            pixels.push(p.map(|p| p as u32));
+            ids.push(p.map_or(BACKGROUND_ID, id_of));
         }
         const SHOWN: usize = 5;
         for (color, (x, y)) in stray.iter().take(SHOWN) {
@@ -163,7 +188,7 @@ impl ProvinceMap {
             }
         }
         for (p, &[x, y]) in labels.iter().enumerate() {
-            let on_own_pixel = x < width && y < height && pixels[(y * width + x) as usize] == Some(p as u32);
+            let on_own_pixel = x < width && y < height && ids[(y * width + x) as usize] == id_of(p);
             if !on_own_pixel {
                 errors.push(format!("map: province '{}' has its label at {x},{y}, outside its own pixels", keys[p]));
             }
@@ -178,7 +203,7 @@ impl ProvinceMap {
             colors: colors.into_iter().map(|c| c.expect("checked above")).collect(),
             labels,
             background: file.background,
-            pixels,
+            ids,
             map_hash: pax_content::map_hash(toml.as_bytes(), png),
         })
     }
@@ -193,7 +218,7 @@ pub fn scenario_map_dir(scenario_dir: &Path) -> Result<Option<PathBuf>, String> 
     let value: toml::Table = toml::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))?;
     match value.get("map") {
         None => Ok(None),
-        Some(toml::Value::String(dir)) => Ok(Some(scenario_dir.join(dir))),
+        Some(toml::Value::String(dir)) => Ok(Some(resolve_map_dir(scenario_dir, dir))),
         Some(_) => Err(format!("{}: `map` must be a directory name", path.display())),
     }
 }
@@ -211,9 +236,13 @@ mod tests {
         let keys: Vec<String> = ["riverlands", "coast", "dale", "peaks"].map(String::from).to_vec();
         let dir = scenario_map_dir(&two_states()).unwrap().expect("two_states has a map");
         let map = ProvinceMap::load(&dir, &keys).unwrap();
-        assert_eq!(map.pixels.len(), (map.width * map.height) as usize);
+        assert_eq!(map.ids.len(), (map.width * map.height) as usize);
         for (p, &[x, y]) in map.labels.iter().enumerate() {
-            assert_eq!(map.pixels[(y * map.width + x) as usize], Some(p as u32), "a label sits on its province");
+            assert_eq!(
+                province_of(map.ids[(y * map.width + x) as usize]),
+                Some(p as u32),
+                "a label sits on its province"
+            );
         }
         let toml = std::fs::read(dir.join(TOML_FILE)).unwrap();
         let png = std::fs::read(dir.join(PNG_FILE)).unwrap();

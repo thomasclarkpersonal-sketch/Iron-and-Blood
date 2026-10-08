@@ -3,10 +3,12 @@
 //! session's `StaticData.map_hash`, and turned into the province-ID texture the map
 //! shader draws.
 //!
-//! **ID texture:** RGB8, one texel per map pixel. `r + 256·g` is the province index
-//! plus one, and 0 is background (sea). So a map can have at most [`MAX_PROVINCES`]
-//! provinces. A map-mode change then rewrites only the small per-province colour
-//! table, never this image.
+//! **ID texture:** RGB8, one texel per map pixel, holding `pax_map`'s id for it
+//! (`r + 256·g`: the province index + 1, and [`pax_map::BACKGROUND_ID`] for sea), so a
+//! map can have at most [`MAX_PROVINCES`] provinces. A map-mode change then rewrites
+//! only the small per-province colour table, never this image. `client/ui/map.gdshader`
+//! decodes the same texels (it says it mirrors this); picking goes through
+//! [`MapImage::province_at`], so GDScript never decodes them.
 
 use std::path::Path;
 
@@ -21,9 +23,22 @@ pub struct MapImage {
     pub width: u32,
     pub height: u32,
     /// RGB8 province-ID texels, row by row (see the module docs).
-    pub ids: Vec<u8>,
+    pub texels: Vec<u8>,
+    /// Each pixel's `pax_map` id, row by row: what [`MapImage::province_at`] reads.
+    pub ids: Vec<u32>,
     /// Each province's label anchor, `[x, y]` in pixels.
     pub labels: Vec<[u32; 2]>,
+}
+
+impl MapImage {
+    /// The province at pixel `(x, y)`, or `None` for sea or off the map.
+    pub fn province_at(&self, x: i64, y: i64) -> Option<u32> {
+        let (x, y) = (u32::try_from(x).ok()?, u32::try_from(y).ok()?);
+        if x >= self.width || y >= self.height {
+            return None;
+        }
+        pax_map::province_of(self.ids[(y * self.width + x) as usize])
+    }
 }
 
 /// Loads the map of the scenario in `scenario_dir` for a session whose provinces are
@@ -53,13 +68,12 @@ pub fn image(map: &ProvinceMap) -> Result<MapImage, String> {
     if map.colors.len() > MAX_PROVINCES {
         return Err(format!("the map has {} provinces; the client draws at most {MAX_PROVINCES}", map.colors.len()));
     }
-    let mut ids = Vec::with_capacity(map.pixels.len() * 3);
-    for p in &map.pixels {
-        // Index + 1, so 0 is background; fits in 16 bits (checked above).
-        let id = p.map_or(0, |p| p + 1);
-        ids.extend_from_slice(&[(id & 0xff) as u8, (id >> 8) as u8, 0]);
+    let mut texels = Vec::with_capacity(map.ids.len() * 3);
+    for &id in &map.ids {
+        // Fits in 16 bits (checked above).
+        texels.extend_from_slice(&[(id & 0xff) as u8, (id >> 8) as u8, 0]);
     }
-    Ok(MapImage { width: map.width, height: map.height, ids, labels: map.labels.clone() })
+    Ok(MapImage { width: map.width, height: map.height, texels, ids: map.ids.clone(), labels: map.labels.clone() })
 }
 
 #[cfg(test)]
@@ -82,13 +96,16 @@ mod tests {
     #[test]
     fn the_id_image_encodes_each_pixels_province_plus_one() {
         let map = load(&two_states(), &keys(), Some(true_hash())).unwrap().expect("two_states has a map");
-        assert_eq!(map.ids.len(), (map.width * map.height * 3) as usize);
+        assert_eq!(map.texels.len(), (map.width * map.height * 3) as usize);
         for (p, &[x, y]) in map.labels.iter().enumerate() {
             let at = ((y * map.width + x) * 3) as usize;
-            let id = map.ids[at] as usize + 256 * map.ids[at + 1] as usize;
+            let id = map.texels[at] as usize + 256 * map.texels[at + 1] as usize;
             assert_eq!(id, p + 1, "the label pixel belongs to its province");
+            assert_eq!(map.province_at(i64::from(x), i64::from(y)), Some(p as u32));
         }
-        assert!(map.ids.chunks(3).any(|t| t == [0, 0, 0]), "two_states has sea");
+        assert!(map.texels.chunks(3).any(|t| t == [0, 0, 0]), "two_states has sea");
+        assert_eq!(map.province_at(-1, 0), None);
+        assert_eq!(map.province_at(i64::from(map.width), 0), None);
     }
 
     #[test]

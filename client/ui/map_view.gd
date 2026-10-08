@@ -19,6 +19,8 @@ var _ids: Image
 var _lut: ImageTexture
 var _message := Label.new()
 var _dragging := false
+## `(x, y) -> province or null` for a map pixel: the bridge's `province_at`.
+var province_lookup: Callable
 
 
 func _init() -> void:
@@ -100,8 +102,9 @@ func _gui_input(event: InputEvent) -> void:
 			MOUSE_BUTTON_WHEEL_DOWN:
 				_zoom_at(event.position, 0.8)
 			MOUSE_BUTTON_LEFT:
-				var province := _province_at(event.position)
-				if province >= 0:
+				var p := Vector2i(((event.position - _canvas.position) / _canvas.scale.x).floor())
+				var province = province_lookup.call(p.x, p.y)
+				if province != null:
 					province_clicked.emit(province)
 	if event is InputEventMouseButton and event.button_index in [MOUSE_BUTTON_RIGHT, MOUSE_BUTTON_MIDDLE]:
 		_dragging = event.pressed
@@ -122,12 +125,3 @@ func _zoom_at(at: Vector2, factor: float) -> void:
 func _keep_labels_readable() -> void:
 	for l: Label in _labels.get_children():
 		l.scale = Vector2.ONE / _canvas.scale.x
-
-
-## The province under a point of this control, or -1 for sea or off the map.
-func _province_at(at: Vector2) -> int:
-	var p := Vector2i(((at - _canvas.position) / _canvas.scale.x).floor())
-	if p.x < 0 or p.y < 0 or p.x >= _ids.get_width() or p.y >= _ids.get_height():
-		return -1
-	var c := _ids.get_pixelv(p)
-	return roundi(c.r * 255.0) + 256 * roundi(c.g * 255.0) - 1

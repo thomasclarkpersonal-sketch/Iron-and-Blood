@@ -54,6 +54,8 @@ mod entry {
 #[derive(GodotClass)]
 #[class(base = RefCounted, init)]
 pub struct PaxClient {
+    /// The scenario's map, once `load_map` succeeded: picking reads it.
+    map: Option<map::MapImage>,
     connection: Option<Connection>,
     /// Declared after `connection`, so the connection closes first and the server
     /// can exit by itself (`--exit-when-idle`).
@@ -236,37 +238,56 @@ impl PaxClient {
         self.with_connection(|c| c.load_game(&name.to_string()))
     }
 
-    /// The scenario's province map, ready to draw (see `map.rs`): checked against
-    /// this session's `provinces` and `map_hash` (from `Welcome`). Returns a
-    /// Dictionary with `PaxKeys.ERROR` (empty when it loaded) and, on success,
-    /// `WIDTH`, `HEIGHT`, `IDS` (the RGB8 province-ID texels) and `LABELS` (one
-    /// `Vector2i` anchor per province). A scenario without a map gives an empty
-    /// Dictionary apart from `ERROR`.
+    /// Loads the scenario's province map, ready to draw (see `map.rs`): checked
+    /// against this session's `provinces` and `map_hash` (from `Welcome`). Returns a
+    /// Dictionary with `PaxKeys.ERROR` (empty when it loaded) and, on success, `WIDTH`,
+    /// `HEIGHT`, `IDS` (the RGB8 province-ID texels) and `LABELS` (one `Vector2i`
+    /// anchor per province). A scenario without a map gives an empty Dictionary
+    /// apart from `ERROR`. `province_at` then answers for this map.
     #[func]
-    fn load_map(scenario_dir: GString, provinces: PackedStringArray, map_hash: Variant) -> VarDictionary {
+    fn load_map(&mut self, scenario_dir: GString, provinces: PackedStringArray, map_hash: Variant) -> VarDictionary {
         let mut d = VarDictionary::new();
+        self.map = None;
         let provinces: Vec<String> = provinces.as_slice().iter().map(GString::to_string).collect();
         // The hash is an identifier carried bit-for-bit in Godot's signed int.
-        let expected = if map_hash.is_nil() { None } else { map_hash.try_to::<i64>().ok().map(|h| h as u64) };
+        let expected = if map_hash.is_nil() {
+            None
+        } else {
+            match map_hash.try_to::<i64>() {
+                Ok(h) => Some(h as u64),
+                Err(_) => {
+                    d.set(keys::ERROR, &rejected(format!("map_hash must be an int or null, not {map_hash}")));
+                    return d;
+                }
+            }
+        };
         match map::load(Path::new(&scenario_dir.to_string()), &provinces, expected) {
             Ok(Some(m)) => {
                 d.set(keys::ERROR, &GString::new());
                 d.set(keys::WIDTH, i64::from(m.width));
                 d.set(keys::HEIGHT, i64::from(m.height));
-                d.set(keys::IDS, &PackedByteArray::from(m.ids.as_slice()));
+                d.set(keys::IDS, &PackedByteArray::from(m.texels.as_slice()));
                 let mut labels: Array<Vector2i> = Array::new();
                 for &[x, y] in &m.labels {
-                    labels.push(Vector2i::new(
-                        i32::try_from(x).unwrap_or(i32::MAX),
-                        i32::try_from(y).unwrap_or(i32::MAX),
-                    ));
+                    let coordinate = |v: u32| {
+                        i32::try_from(v).expect("label inside the map, whose sides are at most pax_map::MAX_SIDE")
+                    };
+                    labels.push(Vector2i::new(coordinate(x), coordinate(y)));
                 }
                 d.set(keys::LABELS, &labels);
+                self.map = Some(m);
             }
             Ok(None) => d.set(keys::ERROR, &GString::new()),
             Err(e) => d.set(keys::ERROR, &GString::from(&e)),
         }
         d
+    }
+
+    /// The province at map pixel `(x, y)` of the loaded map, or `null` for sea, off
+    /// the map, or no map.
+    #[func]
+    fn province_at(&self, x: i64, y: i64) -> Variant {
+        optional(self.map.as_ref().and_then(|m| m.province_at(x, y)).map(i64::from))
     }
 
     /// Asks for the saves; a `SaveList` answers. Returns an error message, or `""`.

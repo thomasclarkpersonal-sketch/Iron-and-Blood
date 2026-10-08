@@ -1,6 +1,8 @@
 // Province map (D12, M3-8b). TEXTURE is the province-ID image from the bridge: each
-// texel's r + 256·g is its province index + 1, and 0 is background (sea). `lut` holds
-// one colour per province, so a map-mode change rewrites only `lut`.
+// texel's r + 256·g is its province index + 1, and 0 is background (sea). This mirrors
+// pax_map's id encoding (BACKGROUND_ID, province_of) and pax_godot::map's texels: the
+// one copy outside Rust; keep it in step. `lut` holds one colour per province, so a
+// map-mode change rewrites only `lut`.
 shader_type canvas_item;
 
 uniform sampler2D lut : filter_nearest;
