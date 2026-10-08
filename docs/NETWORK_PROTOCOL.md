@@ -104,6 +104,7 @@ sequenceDiagram
    - permission (D24; M3 sandbox allows every nation);
    - `World::validate`, the single validity rule (D21).
 3. If valid, the server stamps it `(day = next tick, player, sequence)`, queues it, and replies `CommandResult { error: None, applies_on_day }`. Otherwise it replies with the error, and nothing is queued.
+   - **Keeping the wire and the engine in step:** the conversions between `pax_engine::Command`/`CommandError` and their wire forms (in `pax_server`) use exhaustive `match`es with no `_` arm, in both directions. A new engine command or error then fails to compile until the schema gains its wire form, under the rules in §8.
 4. At the start of the tick, the queue is applied in stamp order through `tick::step_with`. Commands that applied successfully are appended to the session's command log (D23). `step_with` re-validates; if a command fails at that point, a second `CommandResult` reports the error and the command is not logged. No current command can fail this way.
 
 **Flow control** (D23):

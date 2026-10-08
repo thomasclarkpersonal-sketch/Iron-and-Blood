@@ -21,12 +21,15 @@ crates/
 │       ├── tick.rs        step(): fixed system order + money conservation assert
 │       └── systems/       labor, production, market, firms, demographics
 ├── pax_data/              TOML schema (schema.rs), validation, World builder, golden files
-└── pax_cli/               run | record | verify | bench
+├── pax_cli/               run | record | verify | bench
+├── pax_server/            authoritative game server (M3: stub until M3-2; D10, D22, D23)
+└── pax_protocol/          planned (M3-1): generated FlatBuffers code + framing, no engine dependency (D22)
 data/                      base definitions
 scenarios/<name>/          scenario.toml + golden.hashes
+schemas/                   FlatBuffers wire schemas (D22)
 ```
 
-`pax_server` will be added in M3 (D10).
+The client (Godot, with a Rust GDExtension bridge, D12) depends on `pax_protocol` only, never on `pax_engine`.
 
 ## 🧩 State Schema
 

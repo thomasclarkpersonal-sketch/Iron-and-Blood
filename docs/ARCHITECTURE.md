@@ -93,4 +93,4 @@ Developers iterate on economic mechanics without a client.
 
 - **Development** happens in WSL/Linux with the toolchain pinned in `rust-toolchain.toml`.
 - **CI** (`.github/workflows/ci.yml`) runs format, clippy, tests and the determinism gate. The gate runs on Linux at 1 and 4 threads, and on Windows and macOS to confirm cross-platform determinism.
-- **Docker** is reserved for deploying `pax_server` from M3 (service isolation, identical server builds). The headless tools of M1/M2 don't need it.
+- **Docker** is for dedicated multiplayer servers in M4 (task M4-8). Single player (M3) runs `pax_server` directly, launched by the client, and the headless tools don't need a container.

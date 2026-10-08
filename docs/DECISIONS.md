@@ -356,7 +356,7 @@ The state → national → sphere → global roll-up in the old ECONOMY_SYSTEM w
   - A scenario may name a `commands` file (`[[command]]` entries with `day`, `type`, `nation`, `rate`; see DATA_FORMAT.md).
   - `pax_data::run_logged` replays it, and `pax_cli` applies it in `run`, `report`, `record` and `verify`. Golden hashes therefore pin the commands too.
   - `two_states` replays a two-command policy timeline.
-- **Save files** become "scenario + command log + day". Writing them is a later step; no binary format has been chosen (D10).
+- **Save files** become "scenario + command log + day". D23 defines the save file and how it loads. A binary save format is still open (D10).
 
 ## D22. Wire protocol and client sessions
 

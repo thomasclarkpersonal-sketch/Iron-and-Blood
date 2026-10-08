@@ -7,11 +7,11 @@ M4 builds on [Milestone 3](MILESTONE_3.md) without replacing it: the same server
 **Prerequisite:** M3's definition of done, in particular the session replay test and the measured `DayUpdate` sizes.
 
 > [!IMPORTANT]
-> **Reminder: set up the Dockerfile in M4.** The repository's `Dockerfile` is an early draft and **does not build**:
+> **Reminder: set up the Dockerfile in M4.** The early draft is kept at [`docs/drafts/Dockerfile.m4-draft`](drafts/Dockerfile.m4-draft), out of the repository root so tools don't pick it up. It **does not build**:
 > - it compiles `schemas/protocol.fbs`, which has been split into `common.fbs`, `client.fbs` and `server.fbs`;
 > - it installs Debian's flatc 2.0.8, which doesn't match the pinned 24.3.25 runtime crate.
 >
-> Don't use it, and don't wire it into CI or releases, until task **M4-8** fixes it (see "Docker (M4-8)" below).
+> Don't use it, and don't wire it into CI or releases. Task **M4-8** turns it into a working root `Dockerfile` (see "Docker (M4-8)" below).
 
 ## What changes from M3
 
