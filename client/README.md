@@ -21,6 +21,6 @@ godot --path client --rendering-driver opengl3 -- --screenshot=/tmp/map.png   # 
 | Path | What |
 |---|---|
 | `pax_godot.gdextension` | Where Godot finds the bridge library for each platform (`target/{debug,release}`) |
-| `spike/` | The M3-0 spike: decodes demo frames and draws a province map with the province-ID shader. Replaced by the real client in M3-8 |
+| `spike/` | The M3-0 spike: decodes demo frames and draws a province map with the province-ID shader. Needs `cargo build -p pax_godot --features demo`. Replaced by the real client in M3-8 |
 
 Anything about the protocol (framing, decoding, conversions) belongs in `crates/pax_godot`, with Rust tests, not in GDScript.

@@ -1,5 +1,6 @@
 //! Demo data for the M3-0 spike, until `pax_server` sends real frames (M3-2, M3-3):
 //! a `Welcome` and a `DayUpdate` built with the real schema, and a province-ID image.
+//! Compiled only with the `demo` feature (and in tests), never into a release client.
 //!
 //! Deterministic integer maths only, so the demo looks the same on every machine.
 
@@ -12,6 +13,11 @@ pub fn frames(provinces: usize) -> Vec<u8> {
     let mut out = welcome(provinces);
     out.extend(day_update(provinces));
     out
+}
+
+/// Length of the `Welcome` frame at the start of [`frames`] (tests split the stream).
+pub fn welcome_len(provinces: usize) -> usize {
+    welcome(provinces).len()
 }
 
 fn welcome(provinces: usize) -> Vec<u8> {
@@ -34,15 +40,20 @@ fn welcome(provinces: usize) -> Vec<u8> {
     let nations = b.create_vector(&nations);
     let goods = ["grain", "coal", "cloth"].map(|s| b.create_string(s));
     let goods = b.create_vector(&goods);
+    let professions = ["farmer", "miner"].map(|s| b.create_string(s));
+    let professions = b.create_vector(&professions);
+    let producer_types = ["farm", "mine"].map(|s| b.create_string(s));
+    let producer_types = b.create_vector(&producer_types);
     let defs = StaticData::create(
         &mut b,
         &StaticDataArgs {
             goods: Some(goods),
+            professions: Some(professions),
+            producer_types: Some(producer_types),
             provinces: Some(names),
             province_market: Some(province_market),
             markets: Some(markets),
             nations: Some(nations),
-            ..Default::default()
         },
     );
     let scenario = b.create_string("m3_spike_demo");
@@ -98,7 +109,9 @@ fn hash(x: u64) -> u64 {
 /// cells around jittered grid points, a stand-in until M3-7's real map files.
 /// Each pixel searches only the neighbouring grid cells, so this is O(pixels).
 pub fn province_id_image(width: usize, height: usize, provinces: usize) -> Vec<u8> {
-    let cols = (provinces as f64 * width as f64 / height as f64).sqrt().ceil().max(1.0) as usize;
+    // Grid columns ≈ √(provinces · aspect ratio), rounded up, in integers.
+    let target = (provinces * width / height).max(1);
+    let cols = target.isqrt() + usize::from(target.isqrt().pow(2) < target);
     let rows = provinces.div_ceil(cols);
     let (cw, ch) = (width.div_ceil(cols), height.div_ceil(rows));
     // One seed per cell, jittered inside it; cells past `provinces` have no seed.

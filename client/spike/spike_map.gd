@@ -1,6 +1,7 @@
 ## M3-0 spike (D12): decode a real Welcome and DayUpdate through the Rust bridge,
 ## then draw a province map coloured by the DayUpdate's map values with the
-## province-ID shader. Run with `-- --screenshot=<path>` to save an image and quit.
+## province-ID shader. Needs the bridge built with `--features demo` (PaxDemo).
+## Run with `-- --screenshot=<path>` to save an image and quit.
 extends Node2D
 
 const PROVINCES := 300
@@ -10,8 +11,8 @@ const MAP_SIZE := Vector2i(960, 500)
 func _ready() -> void:
 	var reader := PaxServerReader.new()
 	var messages: Array = reader.push(PaxDemo.frames(PROVINCES))
-	if reader.last_error() != "" or messages.size() != 2:
-		_fail("decode failed: %s (%d messages)" % [reader.last_error(), messages.size()])
+	if reader.failed() or messages.size() != 2:
+		_fail("decode failed: %s (%d messages)" % [reader.error(), messages.size()])
 		return
 	var welcome: Dictionary = messages[0]
 	var update: Dictionary = messages[1]

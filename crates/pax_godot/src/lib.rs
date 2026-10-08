@@ -1,26 +1,24 @@
 //! `pax_godot`: the client's side of the wire protocol, as a Godot GDExtension (D12).
 //!
 //! GDScript owns the UI. This library owns everything about the protocol: framing,
-//! size limits, verification, and decoding into Godot values. That code is shared with
-//! the server through `pax_protocol` and tested in Rust (`decode.rs`), not written a
-//! second time in another language.
+//! size limits, verification, session rules, and decoding into Godot values. That
+//! logic lives in `decode.rs` as plain Rust, unit-tested without Godot and shared with
+//! the server through `pax_protocol`. This file only converts its results into Godot
+//! types.
 //!
 //! It depends on `pax_protocol` only, never on `pax_engine`, so the client can't
-//! simulate (D10).
+//! simulate (D10). Float arithmetic is linted everywhere except `decode::display`:
+//! code that builds commands (simulation input) must use integers (D3).
 //!
-//! **M3-0 spike state:** decoding of `Welcome` and `DayUpdate`, plus demo data
-//! (`demo.rs`) until the server sends real frames. The TCP connection and the rest of
-//! the messages arrive with M3-8.
-
-// Presentation code: Fixed becomes float for display only (D3), as in pax_cli.
-#![allow(clippy::float_arithmetic)]
+//! **M3-0 state:** decoding `Welcome` and `DayUpdate`, plus demo data behind the
+//! `demo` feature. The TCP connection and the remaining messages arrive with M3-8.
 
 pub mod decode;
+#[cfg(any(test, feature = "demo"))]
 pub mod demo;
 
-use decode::ServerEvent;
+use decode::{ServerEvent, ServerStream};
 use godot::prelude::*;
-use pax_protocol::{Direction, FrameDecoder};
 
 /// The extension's entry point. godot-rust requires it to be an `unsafe impl`; this
 /// module is the crate's only `unsafe` (see Cargo.toml).
@@ -37,52 +35,39 @@ mod entry {
 /// Turns bytes from the server into decoded messages for GDScript.
 ///
 /// Feed it whatever the socket delivered, in any chunking, with `push`. It returns
-/// every complete message as a `Dictionary` with a `"type"` key. A protocol error is
-/// fatal: `push` returns what decoded before the error and sets `last_error`, and the
-/// caller must disconnect (D22).
+/// every complete message as a `Dictionary`, whose `"type"` is the message's
+/// `snake_case` tag: `"welcome"`, `"day_update"`, `"pong"` and so on.
+///
+/// The first protocol error ends the stream for good: `push` returns what decoded
+/// before it, `failed()` turns true, and later input is ignored. The caller must
+/// disconnect (D22). The bridge enforces this, not GDScript.
 #[derive(GodotClass)]
-#[class(base = RefCounted)]
+#[class(base = RefCounted, init)]
 pub struct PaxServerReader {
-    decoder: FrameDecoder,
-    last_error: GString,
-}
-
-#[godot_api]
-impl IRefCounted for PaxServerReader {
-    fn init(_base: Base<RefCounted>) -> Self {
-        PaxServerReader { decoder: FrameDecoder::new(Direction::ServerToClient), last_error: GString::new() }
-    }
+    stream: ServerStream,
 }
 
 #[godot_api]
 impl PaxServerReader {
     #[func]
     fn push(&mut self, bytes: PackedByteArray) -> Array<VarDictionary> {
-        self.decoder.push(bytes.as_slice());
         let mut out = Array::new();
-        loop {
-            match self.decoder.next_frame() {
-                Ok(Some(frame)) => match decode::decode_server_frame(&frame) {
-                    Ok(event) => out.push(&to_dictionary(event)),
-                    Err(e) => {
-                        self.last_error = GString::from(&e.to_string());
-                        break;
-                    }
-                },
-                Ok(None) => break,
-                Err(e) => {
-                    self.last_error = GString::from(&e.to_string());
-                    break;
-                }
-            }
+        for event in self.stream.push(bytes.as_slice()) {
+            out.push(&to_dictionary(event));
         }
         out
     }
 
-    /// Empty while the stream is healthy.
+    /// True once the stream has failed. It never resets.
     #[func]
-    fn last_error(&self) -> GString {
-        self.last_error.clone()
+    fn failed(&self) -> bool {
+        self.stream.error().is_some()
+    }
+
+    /// Why the stream failed, for the connection-lost screen; empty while healthy.
+    #[func]
+    fn error(&self) -> GString {
+        self.stream.error().map(|e| GString::from(&e.to_string())).unwrap_or_default()
     }
 }
 
@@ -92,39 +77,41 @@ fn strings(v: &[String]) -> PackedStringArray {
 
 fn to_dictionary(event: ServerEvent) -> VarDictionary {
     let mut d = VarDictionary::new();
+    d.set("type", event.tag());
     match event {
         ServerEvent::Welcome(w) => {
-            d.set("type", "welcome");
+            d.set("protocol_minor", i64::from(w.protocol_minor));
+            d.set("nation", w.nation.map_or(-1, i64::from)); // GDScript has no Option: -1 means sandbox
             d.set("day", w.day as i64);
             d.set("scenario", &GString::from(&w.scenario));
             // Godot ints are signed 64-bit; the hash is an identifier, so its bits are kept as-is.
             d.set("content_hash", w.content_hash as i64);
             d.set("goods", &strings(&w.goods));
+            d.set("professions", &strings(&w.professions));
             d.set("provinces", &strings(&w.provinces));
             d.set("province_market", &w.province_market.iter().map(|&m| m as i32).collect::<PackedInt32Array>());
             d.set("markets", &strings(&w.markets));
             d.set("nations", &strings(&w.nations));
         }
         ServerEvent::DayUpdate(u) => {
-            d.set("type", "day_update");
             d.set("day", u.day as i64);
-            d.set("skipped", u.skipped as i64);
+            d.set("skipped", i64::from(u.skipped));
             d.set("state_hash", u.state_hash as i64);
             d.set("map_mode", u.map_mode.map_or(0, |m| i64::from(m.0)));
             d.set("map_values", &u.map_values.into_iter().collect::<PackedFloat32Array>());
         }
-        ServerEvent::Other(name) => {
-            d.set("type", name);
-        }
+        ServerEvent::Other(_) => {}
     }
     d
 }
 
-/// Demo data for the M3-0 spike (see `demo.rs`), until the server exists.
+/// Demo data for the M3-0 spike (see `demo.rs`), only with the `demo` feature.
+#[cfg(feature = "demo")]
 #[derive(GodotClass)]
 #[class(base = RefCounted, init)]
 pub struct PaxDemo;
 
+#[cfg(feature = "demo")]
 #[godot_api]
 impl PaxDemo {
     /// A `Welcome` then a `DayUpdate` for `provinces` provinces, as raw server bytes.
