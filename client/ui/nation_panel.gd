@@ -94,7 +94,7 @@ func show_update(update: Dictionary) -> void:
 	var t: Dictionary = update[PaxKeys.NATION_TABLE]
 	_figures.text = "Population %s · treasury %s" % [
 		Format.count(t[PaxKeys.POPULATION][_nation]), Format.money(t[PaxKeys.TREASURY][_nation])]
-	if t[PaxKeys.MILITANCY] != null: # null from a protocol 1.0 server
+	if t[PaxKeys.MILITANCY] != null: # null from a server that predates the field
 		_figures.text += " · militancy %s" % Format.percent(t[PaxKeys.MILITANCY][_nation])
 	for i in POLICIES.size():
 		var slider := _sliders[i]

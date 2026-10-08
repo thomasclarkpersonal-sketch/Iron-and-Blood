@@ -134,8 +134,9 @@ pub struct NationTableView {
     pub transfer_rate_raw: Vec<i64>,
     pub consumption_rate_raw: Vec<i64>,
     pub population: Vec<u64>,
-    /// Mean militancy per nation, from protocol 1.1. `None` from a 1.0 server, which
-    /// doesn't send it (an absent addition means no data, NETWORK_PROTOCOL §8).
+    /// Mean militancy per nation (added in protocol 1.1). `None` from a server that
+    /// predates the field, including early 1.1 builds: an absent addition means no
+    /// data (NETWORK_PROTOCOL §8), so check for it, never for `protocol_minor`.
     pub militancy: Option<Vec<f64>>,
 }
 
@@ -689,7 +690,7 @@ mod tests {
     }
 
     /// A DayUpdate for one nation with a population map of `map_values` values, as a
-    /// protocol 1.0 server sends it: no militancy column.
+    /// server from before `NationTable.militancy` sends it: no militancy column.
     fn day_update_frame(day: u64, map_values: usize) -> Vec<u8> {
         day_update_frame_with(day, map_values, None)
     }
@@ -765,7 +766,7 @@ mod tests {
         let map = u.map.as_ref().unwrap();
         assert_eq!((map.mode, map.values.len(), map.values[0]), (wire::MapMode::Population, 12, 5.0));
         assert_eq!((u.world.population, u.nations.income_tax_rate_raw[0]), (10, 1));
-        assert_eq!(u.nations.militancy, None, "a 1.0 server sends no militancy; that is no data, not an error");
+        assert_eq!(u.nations.militancy, None, "an older server sends no militancy; that is no data, not an error");
     }
 
     /// Protocol 1.1's militancy column, when sent, is checked like any other column.
