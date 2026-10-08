@@ -238,14 +238,21 @@ impl PaxClient {
         self.with_connection(|c| c.load_game(&name.to_string()))
     }
 
-    /// Loads the scenario's province map, ready to draw (see `map.rs`): checked
-    /// against this session's `provinces` and `map_hash` (from `Welcome`). Returns a
+    /// Loads the scenario's province map, ready to draw (see `map.rs`), from where the
+    /// session's `Welcome` said it is (`map_dir`, relative to `scenario_dir`), checked
+    /// against its `provinces` and `map_hash`. Returns a
     /// Dictionary with `PaxKeys.ERROR` (empty when it loaded) and, on success, `WIDTH`,
     /// `HEIGHT`, `IDS` (the RGB8 province-ID texels) and `LABELS` (one `Vector2i`
     /// anchor per province). A scenario without a map gives an empty Dictionary
     /// apart from `ERROR`. `province_at` then answers for this map.
     #[func]
-    fn load_map(&mut self, scenario_dir: GString, provinces: PackedStringArray, map_hash: Variant) -> VarDictionary {
+    fn load_map(
+        &mut self,
+        scenario_dir: GString,
+        map_dir: Variant,
+        provinces: PackedStringArray,
+        map_hash: Variant,
+    ) -> VarDictionary {
         let mut d = VarDictionary::new();
         self.map = None;
         let provinces: Vec<String> = provinces.as_slice().iter().map(GString::to_string).collect();
@@ -261,7 +268,18 @@ impl PaxClient {
                 }
             }
         };
-        match map::load(Path::new(&scenario_dir.to_string()), &provinces, expected) {
+        let map_dir = if map_dir.is_nil() {
+            None
+        } else {
+            match map_dir.try_to::<GString>() {
+                Ok(dir) => Some(dir.to_string()),
+                Err(_) => {
+                    d.set(keys::ERROR, &rejected(format!("map_dir must be a String or null, not {map_dir}")));
+                    return d;
+                }
+            }
+        };
+        match map::load(Path::new(&scenario_dir.to_string()), map_dir.as_deref(), &provinces, expected) {
             Ok(Some(m)) => {
                 d.set(keys::ERROR, &GString::new());
                 d.set(keys::WIDTH, i64::from(m.width));
@@ -384,6 +402,7 @@ fn welcome(d: &mut VarDictionary, w: &WelcomeView) {
     // Identifiers: their bits are kept as-is in Godot's signed 64-bit int.
     d.set(keys::CONTENT_HASH, w.content_hash as i64);
     d.set(keys::MAP_HASH, &optional(w.map_hash.map(|h| h as i64)));
+    d.set(keys::MAP_DIR, &optional(w.map_dir.as_deref().map(GString::from)));
     d.set(keys::GOODS, &strings(&w.goods));
     d.set(keys::PROFESSIONS, &strings(&w.professions));
     d.set(keys::PRODUCER_TYPES, &strings(&w.producer_types));

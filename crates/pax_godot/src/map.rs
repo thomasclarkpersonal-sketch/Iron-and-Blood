@@ -41,23 +41,24 @@ impl MapImage {
     }
 }
 
-/// Loads the map of the scenario in `scenario_dir` for a session whose provinces are
-/// `provinces` (Welcome order) and whose server's map hashes to `expected_hash`.
-/// `Ok(None)` when the scenario has no map.
-pub fn load(scenario_dir: &Path, provinces: &[String], expected_hash: Option<u64>) -> Result<Option<MapImage>, String> {
-    let Some(dir) = pax_map::scenario_map_dir(scenario_dir)? else {
-        return match expected_hash {
-            None => Ok(None),
-            Some(_) => Err("the server has a map for this scenario, but this copy of it has none".to_owned()),
-        };
-    };
-    let map = ProvinceMap::load(&dir, provinces).map_err(|errors| errors.join("\n"))?;
-    if expected_hash != Some(map.map_hash) {
+/// Loads the map of the scenario in `scenario_dir` for a session whose `Welcome`
+/// said where its map is (`map_dir`, relative to the scenario) and what its files
+/// hash to (`expected_hash`), with `provinces` in Welcome order. `Ok(None)` when the
+/// session has no map. Only the server reads `scenario.toml` (D9).
+pub fn load(
+    scenario_dir: &Path,
+    map_dir: Option<&str>,
+    provinces: &[String],
+    expected_hash: Option<u64>,
+) -> Result<Option<MapImage>, String> {
+    let (Some(map_dir), Some(expected)) = (map_dir, expected_hash) else { return Ok(None) };
+    let dir = pax_map::resolve_map_dir(scenario_dir, map_dir);
+    let map = ProvinceMap::load(&dir, provinces, true).map_err(|errors| errors.join("\n"))?;
+    if map.map_hash != expected {
         return Err(format!(
-            "this copy of the map ({}) differs from the server's: map hash {:#018x}, the server's is {}",
+            "this copy of the map ({}) differs from the server's: map hash {:#018x}, the server's is {expected:#018x}",
             dir.display(),
             map.map_hash,
-            expected_hash.map_or("none".to_owned(), |h| format!("{h:#018x}"))
         ));
     }
     image(&map).map(Some)
@@ -89,13 +90,12 @@ mod tests {
     }
 
     fn true_hash() -> u64 {
-        let dir = pax_map::scenario_map_dir(&two_states()).unwrap().unwrap();
-        ProvinceMap::load(&dir, &keys()).unwrap().map_hash
+        ProvinceMap::load(&pax_map::resolve_map_dir(&two_states(), "map"), &keys(), false).unwrap().map_hash
     }
 
     #[test]
     fn the_id_image_encodes_each_pixels_province_plus_one() {
-        let map = load(&two_states(), &keys(), Some(true_hash())).unwrap().expect("two_states has a map");
+        let map = load(&two_states(), Some("map"), &keys(), Some(true_hash())).unwrap().expect("two_states has a map");
         assert_eq!(map.texels.len(), (map.width * map.height * 3) as usize);
         for (p, &[x, y]) in map.labels.iter().enumerate() {
             let at = ((y * map.width + x) * 3) as usize;
@@ -110,9 +110,8 @@ mod tests {
 
     #[test]
     fn a_map_that_differs_from_the_servers_is_refused() {
-        let error = load(&two_states(), &keys(), Some(true_hash() ^ 1)).unwrap_err();
+        let error = load(&two_states(), Some("map"), &keys(), Some(true_hash() ^ 1)).unwrap_err();
         assert!(error.contains("differs from the server's"), "{error}");
-        let error = load(&two_states(), &keys(), None).unwrap_err();
-        assert!(error.contains("differs from the server's"), "{error}");
+        assert_eq!(load(&two_states(), None, &keys(), None), Ok(None), "no map in the session: nothing to draw");
     }
 }

@@ -159,7 +159,7 @@ Load errors:
 - a province with no pixels, or a label outside its own pixels;
 - an image that isn't 8-bit RGB or RGBA PNG.
 
-The two files are part of the scenario's content hash, and together they are `StaticData.map_hash` (D22). One reader, `pax_map`, validates them for the server and loads them for the client, which refuses a copy whose hash differs from the server's. `scripts/draw_two_states_map.py` regenerates the `two_states` map.
+The two files are part of the scenario's content hash, and together they are `StaticData.map_hash` (D22). One reader, `pax_map`, validates them for the server and loads them for the client (D9's one exception). The client finds its copy where the server says (`StaticData.map_dir`) and refuses one whose hash differs from the server's. `scripts/draw_two_states_map.py` regenerates the `two_states` map.
 
 ## Save files (`saves/<name>.toml`, D23)
 

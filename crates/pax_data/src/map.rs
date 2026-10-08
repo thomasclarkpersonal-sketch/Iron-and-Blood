@@ -14,6 +14,9 @@ use crate::{LoadError, read};
 /// A validated province map.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MapData {
+    /// The map's directory, relative to the scenario's (`scenario.toml`'s `map`): sent
+    /// to the client as `StaticData.map_dir`.
+    pub dir: String,
     pub width: u32,
     pub height: u32,
     /// Each province's colour, in scenario order (index = province id).
@@ -39,13 +42,17 @@ impl MapFiles {
     }
 }
 
-/// Loads and validates the map in `dir` against `world`'s provinces.
-pub(crate) fn load(dir: &Path, world: &World) -> Result<(MapData, MapFiles), LoadError> {
-    let toml = read(&dir.join(TOML_FILE))?;
-    let png_path = dir.join(PNG_FILE);
+/// Loads and validates the map in `dir` (the scenario's `map` setting, relative to
+/// `scenario_dir`) against `world`'s provinces.
+pub(crate) fn load(scenario_dir: &Path, dir: &str, world: &World) -> Result<(MapData, MapFiles), LoadError> {
+    let path = pax_map::resolve_map_dir(scenario_dir, dir);
+    let toml = read(&path.join(TOML_FILE))?;
+    let png_path = path.join(PNG_FILE);
     let png = std::fs::read(&png_path).map_err(|e| LoadError::single(format!("{}: {e}", png_path.display())))?;
-    let map =
-        ProvinceMap::read(&toml, &png, &world.geography.province_keys).map_err(|messages| LoadError { messages })?;
+    // The server never draws, so it doesn't keep the per-pixel ids.
+    let map = ProvinceMap::read(&toml, &png, &world.geography.province_keys, false).map_err(|messages| LoadError {
+        messages: messages.into_iter().map(|m| format!("{}: {m}", path.display())).collect(),
+    })?;
     let ProvinceMap { width, height, colors, labels, background, ids: _, map_hash } = map;
-    Ok((MapData { width, height, colors, labels, background, map_hash }, MapFiles { toml, png }))
+    Ok((MapData { dir: dir.to_owned(), width, height, colors, labels, background, map_hash }, MapFiles { toml, png }))
 }

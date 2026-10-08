@@ -32,6 +32,11 @@ table StaticData {
   /// `map/provinces.png`); absent if it has no map (M3-7). The client hashes its
   /// own copies with the same function and refuses to draw on a mismatch.
   map_hash: ulong = null;
+  /// Where the map's files are, relative to the scenario's directory (its
+  /// `scenario.toml` `map` setting); present exactly when `map_hash` is. The client
+  /// finds its own copy there, so only the server reads `scenario.toml` (D9). Added
+  /// in protocol 1.1.
+  map_dir: string;
 }
 
 table Welcome {

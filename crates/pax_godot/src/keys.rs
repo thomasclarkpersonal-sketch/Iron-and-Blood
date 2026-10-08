@@ -47,6 +47,7 @@ keys! {
     SCENARIO = "scenario",
     CONTENT_HASH = "content_hash",
     MAP_HASH = "map_hash",
+    MAP_DIR = "map_dir",
     GOODS = "goods",
     PROFESSIONS = "professions",
     PRODUCER_TYPES = "producer_types",

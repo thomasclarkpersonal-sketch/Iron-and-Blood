@@ -191,6 +191,8 @@ Reasons:
 
 All parsing lives in `pax_data`, so the format can change without touching the engine. File formats are specified in [DATA_FORMAT.md](DATA_FORMAT.md).
 
+**Exception (M3-8b, approved by the owner on 2026-10-08):** the province-map files (`provinces.toml`, `provinces.png`) are parsed by the side-neutral `pax_map` (D12), which `pax_data` calls. So the server validates a map with exactly the code the client draws it with. `scenario.toml` and every other file stay in `pax_data`: the client learns where the map is from the server (`StaticData.map_dir`), never by reading `scenario.toml`.
+
 ## D10. Network model: server-authoritative, deterministic core
 
 **Problem.** AGENTS.md assumed lockstep multiplayer, while BACKEND_SCHEMA described a server pushing state to clients.
