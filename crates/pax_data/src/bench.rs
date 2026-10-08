@@ -1,9 +1,40 @@
 //! Benchmark worlds (D13): a scenario scaled up to target sizes, shared by
-//! `pax_cli bench` and the server's view benchmark (`view_building_budget`, an ignored
-//! test in `pax_server/src/view.rs`).
+//! `pax_cli bench` and the server's benchmarks (`view_building_budget` and
+//! `server_day_budget`, ignored tests in `pax_server`).
+//!
+//! Two ways to grow a world, with different limits:
+//! * `regions` copies the whole map, so every copy has its own provinces and
+//!   markets and runs for any number of days;
+//! * `scale` repeats POP rows **with the same identity** `(province, profession)`.
+//!   Month-end compaction merges such rows back into one (D7), so a scaled world is
+//!   only the world it claims to be until its first month end:
+//!   [`days_before_compaction`]. Past it, the merged sizes can overflow `u32`.
 
 use pax_engine::World;
 use pax_engine::world::{Geography, NewProducer};
+
+/// How many days a world with `scale > 1` can run before its first month end, when
+/// compaction merges the repeated rows (D7). A benchmark that runs longer measures a
+/// different, smaller world from that day on, and at large scales the merged sizes
+/// overflow `u32`. Nothing guards against it: `pax_cli bench` uses this as its
+/// default run length with `--scale` and only warns when asked for more, so a caller
+/// that needs the whole run to measure the scaled world must stay within it.
+///
+/// It relies on compaction running only at month end (`tick.rs`); if compaction ever
+/// gets its own schedule, this is the function to change.
+pub fn days_before_compaction(base: &World) -> u64 {
+    // The day ticks before the month-end one; that day itself compacts.
+    pax_engine::systems::demographics::days_until_month_end(base)
+}
+
+/// The `scale` that brings `base`, copied `regions` times, to about `rows` POP rows:
+/// `rows / (base rows × regions)`, the arithmetic behind D13's documented `--scale`
+/// values (`pax_cli bench` takes `--scale` itself). `server_day_budget` uses it, so
+/// its world matches those rows.
+pub fn scale_for_rows(base: &World, rows: u64, regions: u32) -> u32 {
+    let per_copy = base.pops.len() as u64 * u64::from(regions);
+    u32::try_from((rows / per_copy.max(1)).max(1)).expect("a scale that fits u32")
+}
 
 /// Builds a benchmark world: the scenario's whole map copied `regions` times
 /// (separate provinces and markets), with every POP row repeated `scale` times.
@@ -73,4 +104,27 @@ pub fn replicate_with_nations(base: &World, scale: u32, regions: u32, max_nation
         }
     }
     world
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The benchmark's limit is the engine's schedule: after `days_before_compaction`
+    /// days, the next day is a month end and compacts (D7).
+    #[test]
+    fn the_limit_ends_the_day_before_compaction() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two_states");
+        let mut world = replicate(&crate::load_scenario(&dir).unwrap().world, 3, 1);
+        let limit = days_before_compaction(&world);
+        let rows = world.pops.len();
+        for _ in 0..limit {
+            assert!(!pax_engine::systems::demographics::is_month_end(&world));
+            pax_engine::step(&mut world);
+        }
+        assert_eq!(world.pops.len(), rows, "the copies are all still there");
+        assert!(pax_engine::systems::demographics::is_month_end(&world));
+        assert!(pax_engine::step(&mut world).compacted > 0, "the next day merges them");
+        assert_eq!(days_before_compaction(&world), limit, "a month later, the same limit");
+    }
 }
