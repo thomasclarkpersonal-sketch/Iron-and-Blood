@@ -20,8 +20,6 @@ const SummaryPanel := preload("res://ui/summary_panel.gd")
 const DebugOverlay := preload("res://ui/debug_overlay.gd")
 const Format := preload("res://ui/format.gd")
 
-## `Speed` values (D23): 0 pauses, 5 is as fast as the server can.
-const FASTEST := 5
 const SMOKE_DAYS := 40
 const SCREENSHOT_DAYS := 30
 const SMOKE_TIMEOUT_MS := 60_000
@@ -72,7 +70,9 @@ func _start() -> void:
 		_connection_lost(error)
 		return
 	var nation := _arg("--nation=")
-	client.hello(int(nation) if nation.is_valid_int() else null)
+	error = client.hello(int(nation) if nation.is_valid_int() else null)
+	if error != "":
+		_connection_lost(error)
 
 
 func _handle(event: Dictionary) -> void:
@@ -81,9 +81,9 @@ func _handle(event: Dictionary) -> void:
 			welcome = event
 			top_bar.set_session(welcome)
 			summary.set_session(welcome)
-			client.subscribe(1, 0, null, null) # MapMode.Nation: the map arrives with M3-8b
+			client.subscribe(PaxKeys.MAP_MODE_NATION, 0, null, null) # the map arrives with M3-8b
 			if _flag("--smoke") or _arg("--screenshot=") != "":
-				client.set_speed(FASTEST)
+				client.set_speed(PaxKeys.SPEED_FASTEST)
 		PaxKeys.DAY_UPDATE:
 			last_update = event
 			top_bar.show_day(event)
@@ -104,7 +104,7 @@ func _check_scripted_runs(day: int) -> void:
 	var shot := _arg("--screenshot=")
 	if shot != "" and day >= SCREENSHOT_DAYS and not _finishing:
 		_finishing = true
-		client.set_speed(0)
+		client.set_speed(PaxKeys.SPEED_PAUSED)
 		await get_tree().create_timer(0.3).timeout
 		await RenderingServer.frame_post_draw
 		get_viewport().get_texture().get_image().save_png(shot)

@@ -366,7 +366,6 @@ dependencies = [
  "flatbuffers",
  "godot",
  "pax_protocol",
- "pax_server",
 ]
 
 [[package]]

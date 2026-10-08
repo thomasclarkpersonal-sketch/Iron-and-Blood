@@ -253,20 +253,6 @@ fn payload_tag(kind: wire::ServerPayload) -> &'static str {
     }
 }
 
-/// `snake_case` name of a `CommandError`, for messages and the UI.
-pub fn command_error_name(e: wire::CommandError) -> &'static str {
-    match e {
-        wire::CommandError::None => "none",
-        wire::CommandError::UnknownNation => "unknown_nation",
-        wire::CommandError::RateOutOfRange => "rate_out_of_range",
-        wire::CommandError::NoBasket => "no_basket",
-        wire::CommandError::Malformed => "malformed",
-        wire::CommandError::NotPermitted => "not_permitted",
-        wire::CommandError::RateLimited => "rate_limited",
-        _ => "unknown",
-    }
-}
-
 fn required<T>(value: Option<T>, what: &str) -> Result<T, StreamError> {
     value.ok_or_else(|| invalid(format!("missing {what}")))
 }
@@ -358,23 +344,24 @@ fn welcome(w: wire::Welcome<'_>) -> Result<WelcomeView, StreamError> {
     Ok(view)
 }
 
-fn world_summary(w: wire::WorldSummary<'_>) -> WorldSummaryView {
-    let money = |f: Option<&wire::Fixed>| f.map_or(0.0, |f| display(*f));
-    WorldSummaryView {
+fn world_summary(w: wire::WorldSummary<'_>) -> Result<WorldSummaryView, StreamError> {
+    // Every Fixed field is required, like every column elsewhere.
+    let fixed = |f: Option<&wire::Fixed>, what: &str| required(f, what).map(|f| display(*f));
+    Ok(WorldSummaryView {
         population: w.population(),
         workforce: w.workforce(),
         unemployed: w.unemployed(),
-        household_spending: money(w.household_spending()),
-        government_spending: money(w.government_spending()),
-        input_spending: money(w.input_spending()),
-        wages: money(w.wages()),
-        dividends: money(w.dividends()),
-        taxes: money(w.taxes()),
-        transfers: money(w.transfers()),
+        household_spending: fixed(w.household_spending(), "WorldSummary household_spending")?,
+        government_spending: fixed(w.government_spending(), "WorldSummary government_spending")?,
+        input_spending: fixed(w.input_spending(), "WorldSummary input_spending")?,
+        wages: fixed(w.wages(), "WorldSummary wages")?,
+        dividends: fixed(w.dividends(), "WorldSummary dividends")?,
+        taxes: fixed(w.taxes(), "WorldSummary taxes")?,
+        transfers: fixed(w.transfers(), "WorldSummary transfers")?,
         deprived: w.deprived(),
-        life_needs: money(w.life_needs()),
-        militancy: money(w.militancy()),
-    }
+        life_needs: fixed(w.life_needs(), "WorldSummary life_needs")?,
+        militancy: fixed(w.militancy(), "WorldSummary militancy")?,
+    })
 }
 
 fn nation_table(n: wire::NationTable<'_>, t: Tables) -> Result<NationTableView, StreamError> {
@@ -448,7 +435,7 @@ fn day_update(u: wire::DayUpdate<'_>, t: Tables) -> Result<DayUpdateView, Stream
         speed: u.speed(),
         skipped: u.skipped(),
         state_hash: u.state_hash(),
-        world: world_summary(required(u.world(), "DayUpdate WorldSummary")?),
+        world: world_summary(required(u.world(), "DayUpdate WorldSummary")?)?,
         nations: nation_table(required(u.nations(), "DayUpdate NationTable")?, t)?,
         map: u.map().map(|m| map_view(m, t)).transpose()?,
         market: u.market().map(|m| market_view(m, t)).transpose()?,
@@ -594,11 +581,11 @@ impl ServerStream {
 }
 
 #[cfg(test)]
-pub(crate) mod tests {
+mod tests {
     use super::*;
     use flatbuffers::FlatBufferBuilder;
 
-    pub(crate) fn server_frame(
+    fn server_frame(
         b: &mut FlatBufferBuilder<'_>,
         kind: wire::ServerPayload,
         payload: flatbuffers::WIPOffset<flatbuffers::UnionWIPOffset>,
@@ -617,7 +604,7 @@ pub(crate) mod tests {
 
     /// A Welcome with `provinces` provinces in one market, one nation, whose
     /// province_market has `markets_listed` entries.
-    pub(crate) fn welcome_frame(major: u16, provinces: usize, markets_listed: usize, with_defs: bool) -> Vec<u8> {
+    fn welcome_frame(major: u16, provinces: usize, markets_listed: usize, with_defs: bool) -> Vec<u8> {
         let mut b = FlatBufferBuilder::new();
         let names: Vec<_> = (0..provinces).map(|p| b.create_string(&format!("p{p}"))).collect();
         let names = b.create_vector(&names);
@@ -654,10 +641,26 @@ pub(crate) mod tests {
     }
 
     /// A DayUpdate for one nation with a population map of `map_values` values.
-    pub(crate) fn day_update_frame(day: u64, map_values: usize) -> Vec<u8> {
+    fn day_update_frame(day: u64, map_values: usize) -> Vec<u8> {
         let mut b = FlatBufferBuilder::new();
-        let world =
-            wire::WorldSummary::create(&mut b, &wire::WorldSummaryArgs { population: 10, ..Default::default() });
+        let zero = wire::Fixed::new(0);
+        let z = Some(&zero);
+        let world = wire::WorldSummary::create(
+            &mut b,
+            &wire::WorldSummaryArgs {
+                population: 10,
+                household_spending: z,
+                government_spending: z,
+                input_spending: z,
+                wages: z,
+                dividends: z,
+                taxes: z,
+                transfers: z,
+                life_needs: z,
+                militancy: z,
+                ..Default::default()
+            },
+        );
         let one = [wire::Fixed::new(1)];
         let (treasury, income, transfer, consumption) =
             (b.create_vector(&one), b.create_vector(&one), b.create_vector(&one), b.create_vector(&one));

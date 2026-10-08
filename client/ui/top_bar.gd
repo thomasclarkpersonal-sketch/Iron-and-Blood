@@ -3,12 +3,18 @@ extends PanelContainer
 
 const PaxKeys := preload("res://pax_keys.gd")
 
-## The player asked for `speed` (0 pauses, 1 to 5 from slowest to fastest).
+## The player asked for `speed` (a `PaxKeys.SPEED_*`).
 signal speed_requested(speed: int)
 
-const SPEED_LABELS := ["Pause", "0.5", "1", "2", "5", "Max"]
-const SPEED_TIPS := ["Paused", "0.5 days per second", "1 day per second", "2 days per second",
-	"5 days per second", "As fast as the server can"]
+## Each speed's button: value, label, tooltip (D23).
+const SPEEDS := [
+	[PaxKeys.SPEED_PAUSED, "Pause", "Paused"],
+	[PaxKeys.SPEED_SLOWEST, "0.5", "0.5 days per second"],
+	[PaxKeys.SPEED_SLOW, "1", "1 day per second"],
+	[PaxKeys.SPEED_NORMAL, "2", "2 days per second"],
+	[PaxKeys.SPEED_FAST, "5", "5 days per second"],
+	[PaxKeys.SPEED_FASTEST, "Max", "As fast as the server can"],
+]
 
 var _day: Label
 var _session: Label
@@ -23,12 +29,14 @@ func _init() -> void:
 	_day.custom_minimum_size.x = 120
 	row.add_child(_day)
 	var group := ButtonGroup.new()
-	for speed in SPEED_LABELS.size():
+	for entry in SPEEDS:
+		var speed: int = entry[0]
 		var b := Button.new()
-		b.text = SPEED_LABELS[speed]
-		b.tooltip_text = SPEED_TIPS[speed]
+		b.text = entry[1]
+		b.tooltip_text = entry[2]
 		b.toggle_mode = true
 		b.button_group = group
+		b.set_meta("speed", speed)
 		b.pressed.connect(func() -> void: speed_requested.emit(speed))
 		_buttons.append(b)
 		row.add_child(b)
@@ -53,5 +61,5 @@ func show_day(update: Dictionary) -> void:
 
 
 func show_speed(speed: int) -> void:
-	if speed >= 0 and speed < _buttons.size():
-		_buttons[speed].set_pressed_no_signal(true)
+	for b in _buttons:
+		b.set_pressed_no_signal(b.get_meta("speed") == speed)

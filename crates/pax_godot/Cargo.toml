@@ -20,11 +20,6 @@ flatbuffers.workspace = true
 # builds against Godot 4.7's API, and the extension then loads in Godot 4.7 and later.
 godot = { version = "=0.5.5", features = ["api-4-7"] }
 
-[dev-dependencies]
-# Tests talk to a real server (tests/client.rs). Dev-only: the bridge itself never
-# links the engine (CI's crate-boundary step checks normal dependencies).
-pax_server = { path = "../pax_server" }
-
 # The workspace lints, except one. godot-rust's entry point must be an
 # `unsafe impl ExtensionLibrary`, and the workspace's `forbid(unsafe_code)` can't be
 # relaxed for one item. This crate denies it and allows it on that item only (src/lib.rs).

@@ -1,12 +1,17 @@
-//! Every `Dictionary` key and event tag the bridge hands to GDScript, named once.
+//! Every `Dictionary` key and event tag the bridge hands to GDScript, and every value
+//! GDScript hands back (wire enums, policy names), named once.
 //!
 //! GDScript reads them through `client/pax_keys.gd` (`PaxKeys.DAY` rather than
 //! `"day"`, with `const PaxKeys := preload("res://pax_keys.gd")`), which is
 //! generated from [`ALL`]. A test fails when the checked-in file
-//! drifts from this list. Regenerate it with
+//! drifts from this list or from the schema. Regenerate it with
 //! `UPDATE_PAX_KEYS=1 cargo test -p pax_godot keys`.
 
 /// Declares each key as a `pub const` and lists them all, in order, in [`ALL`].
+///
+/// A key always holds one type of value. Inside a table Dictionary (`NATION_TABLE`,
+/// `POPS`, `LABOUR`, `PRODUCERS`, a market), a key names a column: an array with one
+/// entry per row.
 macro_rules! keys {
     ($($(#[$doc:meta])* $name:ident = $value:literal,)*) => {
         $($(#[$doc])* pub const $name: &str = $value;)*
@@ -48,6 +53,7 @@ keys! {
     PROVINCES = "provinces",
     PROVINCE_MARKET = "province_market",
     MARKETS = "markets",
+    /// The nation keys (Welcome).
     NATIONS = "nations",
     NATION_MARKETS = "nation_markets",
 
@@ -58,9 +64,17 @@ keys! {
     SKIPPED = "skipped",
     STATE_HASH = "state_hash",
     WORLD = "world",
+    /// The NationTable: one column per field, one entry per nation (DayUpdate).
+    NATION_TABLE = "nation_table",
     MAP = "map",
+    /// The market panel, a Dictionary, or `null` (DayUpdate).
     MARKET = "market",
+    /// The province panel, a Dictionary, or `null` (DayUpdate).
     PROVINCE = "province",
+    /// The market a panel shows (inside `MARKET`).
+    MARKET_ID = "market_id",
+    /// The province a panel shows (inside `PROVINCE`).
+    PROVINCE_ID = "province_id",
     // WorldSummary.
     POPULATION = "population",
     WORKFORCE = "workforce",
@@ -104,8 +118,11 @@ keys! {
 
     // CommandResult.
     CLIENT_SEQ = "client_seq",
-    ERROR = "error",
+    /// A `CommandError` value (`PaxKeys.COMMAND_ERROR_*`).
+    COMMAND_ERROR = "command_error",
     APPLIES_ON_DAY = "applies_on_day",
+    /// A message for the player; empty when there is none (SaveResult, load_map).
+    ERROR = "error",
     // ServerState.
     CHANGED_BY = "changed_by",
     // Pong.
@@ -115,7 +132,37 @@ keys! {
     NAMES = "names",
 }
 
-/// `client/pax_keys.gd`, as generated from [`ALL`].
+/// `LifeNeeds` → `LIFE_NEEDS`.
+fn upper_snake(name: &str) -> String {
+    let mut out = String::new();
+    for (i, c) in name.chars().enumerate() {
+        if c.is_uppercase() && i > 0 {
+            out.push('_');
+        }
+        out.push(c.to_ascii_uppercase());
+    }
+    out
+}
+
+/// Wire enum values GDScript passes back to the bridge or compares with, from the
+/// generated schema code itself (`ENUM_VALUES`, `variant_name`), so a schema change
+/// regenerates them and the client never hard-codes a protocol number.
+pub fn enum_values() -> Vec<(String, i64)> {
+    use pax_protocol::wire::{CommandError, MapMode, Speed};
+    let mut out = Vec::new();
+    for v in MapMode::ENUM_VALUES {
+        out.push((format!("MAP_MODE_{}", upper_snake(v.variant_name().expect("listed"))), i64::from(v.0)));
+    }
+    for v in Speed::ENUM_VALUES {
+        out.push((format!("SPEED_{}", upper_snake(v.variant_name().expect("listed"))), i64::from(v.0)));
+    }
+    for v in CommandError::ENUM_VALUES {
+        out.push((format!("COMMAND_ERROR_{}", upper_snake(v.variant_name().expect("listed"))), i64::from(v.0)));
+    }
+    out
+}
+
+/// `client/pax_keys.gd`, as generated from [`ALL`], [`enum_values`] and the policies.
 pub fn gdscript() -> String {
     let mut out = String::from(
         "## Every Dictionary key and event tag the Rust bridge (crates/pax_godot) hands to\n\
@@ -126,12 +173,32 @@ pub fn gdscript() -> String {
     for (name, value) in ALL {
         out.push_str(&format!("const {name} := \"{value}\"\n"));
     }
+    out.push_str("\n## Wire enum values (schemas/common.fbs).\n");
+    for (name, value) in enum_values() {
+        out.push_str(&format!("const {name} := {value}\n"));
+    }
+    let names: Vec<String> = pax_protocol::wire::CommandError::ENUM_VALUES
+        .iter()
+        .map(|v| format!("\"{}\"", v.variant_name().expect("listed")))
+        .collect();
+    out.push_str(&format!("## CommandError names, by value.\nconst COMMAND_ERROR_NAMES := [{}]\n", names.join(", ")));
+    out.push_str("\n## Policy names for PaxClient.submit_policy.\n");
+    for p in crate::encode::Policy::ALL {
+        out.push_str(&format!("const POLICY_{} := \"{}\"\n", p.name().to_uppercase(), p.name()));
+    }
     out
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `COMMAND_ERROR_NAMES` is indexed by value, so the values must be 0, 1, 2, ….
+    #[test]
+    fn command_error_values_are_contiguous() {
+        let values: Vec<u8> = pax_protocol::wire::CommandError::ENUM_VALUES.iter().map(|v| v.0).collect();
+        assert_eq!(values, (0..values.len() as u8).collect::<Vec<_>>());
+    }
 
     #[test]
     fn keys_are_unique() {

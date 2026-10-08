@@ -40,7 +40,7 @@ func show_update(update: Dictionary) -> void:
 			Format.money(w[PaxKeys.WAGES]), Format.money(w[PaxKeys.DIVIDENDS]), Format.money(w[PaxKeys.TAXES]), Format.money(w[PaxKeys.TRANSFERS])],
 	])
 
-	var n: Dictionary = update[PaxKeys.NATIONS]
+	var n: Dictionary = update[PaxKeys.NATION_TABLE]
 	for child in _nations.get_children():
 		child.queue_free()
 	for heading in ["Nation", "Population", "Treasury", "Income tax", "Transfers", "Consumption"]:

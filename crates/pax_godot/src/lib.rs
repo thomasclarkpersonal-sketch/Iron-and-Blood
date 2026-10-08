@@ -11,6 +11,7 @@
 //! simulate (D10). Float arithmetic is linted everywhere except `decode::display`:
 //! code that builds commands (simulation input) must use integers (D3).
 
+pub mod args;
 pub mod connection;
 pub mod decode;
 pub mod encode;
@@ -22,11 +23,8 @@ use std::time::Duration;
 use connection::{Connection, LocalServer};
 use decode::{
     DayUpdateView, MapViewData, MarketView, NationTableView, ProvinceView, ServerEvent, WelcomeView, WorldSummaryView,
-    command_error_name,
 };
-use encode::Policy;
 use godot::prelude::*;
-use pax_protocol::wire;
 
 /// The extension's entry point. godot-rust requires it to be an `unsafe impl`; this
 /// module is the crate's only `unsafe` (see Cargo.toml).
@@ -65,9 +63,20 @@ fn optional<T: ToGodot>(v: Option<T>) -> Variant {
     v.map_or(Variant::nil(), |v| v.to_variant())
 }
 
-/// An id argument from GDScript: `null` for none, otherwise a non-negative int.
-fn optional_id(v: &Variant) -> Option<u32> {
-    if v.is_nil() { None } else { v.try_to::<i64>().ok().and_then(|i| u32::try_from(i).ok()) }
+/// An id argument from GDScript: `null`, or an int checked by `args`.
+fn optional_id(v: &Variant, what: &str) -> Result<Option<u32>, String> {
+    let value = if v.is_nil() {
+        None
+    } else {
+        Some(v.try_to::<i64>().map_err(|_| format!("{what} must be an int or null, not {v}"))?)
+    };
+    args::optional_id(value, what)
+}
+
+/// Reports a rejected call: an error for the caller and in Godot's log.
+fn rejected(error: String) -> GString {
+    godot_error!("PaxClient: {error}");
+    GString::from(&error)
 }
 
 #[godot_api]
@@ -94,6 +103,17 @@ impl PaxClient {
         match format!("{host}:{port}").parse() {
             Ok(addr) => self.connect_addr(addr),
             Err(e) => GString::from(&format!("bad address: {e}")),
+        }
+    }
+
+    /// Runs `send` on an open connection; an error message otherwise.
+    fn with_connection(&mut self, send: impl FnOnce(&mut Connection)) -> GString {
+        match &mut self.connection {
+            Some(c) if c.is_open() => {
+                send(c);
+                GString::new()
+            }
+            _ => rejected("not connected".to_owned()),
         }
     }
 
@@ -139,49 +159,60 @@ impl PaxClient {
     }
 
     /// Opens the session. `nation`: a nation index, or `null` for sandbox (M3).
+    /// Returns an error message (the call sent nothing), or `""`.
     #[func]
-    fn hello(&mut self, nation: Variant) {
-        if let Some(c) = &mut self.connection {
-            c.hello(optional_id(&nation));
-        }
-    }
-
-    /// `map_mode`: a `MapMode` value. `market`, `province`: an index, or `null` for
-    /// no panel.
-    #[func]
-    fn subscribe(&mut self, map_mode: i64, map_good: i64, market: Variant, province: Variant) {
-        if let Some(c) = &mut self.connection {
-            let mode = wire::MapMode(u8::try_from(map_mode).unwrap_or(0));
-            let good = u16::try_from(map_good).unwrap_or(0);
-            c.subscribe(mode, good, optional_id(&market), optional_id(&province));
-        }
-    }
-
-    /// `speed`: 0 pauses, 1 to 5 run from slowest to fastest (D23).
-    #[func]
-    fn set_speed(&mut self, speed: i64) {
-        if let Some(c) = &mut self.connection {
-            c.set_speed(wire::Speed(u8::try_from(speed).unwrap_or(0)));
-        }
-    }
-
-    /// Sends a policy command and returns its `client_seq` (0 when not connected).
-    /// `policy` is `"income_tax"`, `"transfer"` or `"consumption"`. `rate_raw` is the
-    /// rate as a raw `Fixed` integer (0.15 is 150000): commands never carry floats (D3).
-    #[func]
-    fn submit_policy(&mut self, policy: GString, nation: i64, rate_raw: i64) -> i64 {
-        let policy = match policy.to_string().as_str() {
-            "income_tax" => Policy::IncomeTax,
-            "transfer" => Policy::Transfer,
-            "consumption" => Policy::Consumption,
-            other => {
-                godot_error!("unknown policy {other:?}");
-                return 0;
-            }
+    fn hello(&mut self, nation: Variant) -> GString {
+        let nation = match optional_id(&nation, "nation") {
+            Ok(n) => n,
+            Err(e) => return rejected(e),
         };
-        match (&mut self.connection, u32::try_from(nation)) {
-            (Some(c), Ok(nation)) => i64::from(c.submit(policy, nation, rate_raw)),
-            _ => 0,
+        self.with_connection(|c| c.hello(nation))
+    }
+
+    /// `map_mode`: a `PaxKeys.MAP_MODE_*`. `market`, `province`: an index, or `null`
+    /// for no panel. Returns an error message (the call sent nothing), or `""`.
+    #[func]
+    fn subscribe(&mut self, map_mode: i64, map_good: i64, market: Variant, province: Variant) -> GString {
+        let checked = (|| {
+            Ok::<_, String>((
+                args::map_mode(map_mode)?,
+                args::good(map_good)?,
+                optional_id(&market, "market")?,
+                optional_id(&province, "province")?,
+            ))
+        })();
+        match checked {
+            Ok((mode, good, market, province)) => self.with_connection(|c| c.subscribe(mode, good, market, province)),
+            Err(e) => rejected(e),
+        }
+    }
+
+    /// `speed`: a `PaxKeys.SPEED_*` (D23). Returns an error message, or `""`.
+    #[func]
+    fn set_speed(&mut self, speed: i64) -> GString {
+        match args::speed(speed) {
+            Ok(speed) => self.with_connection(|c| c.set_speed(speed)),
+            Err(e) => rejected(e),
+        }
+    }
+
+    /// Sends a policy command. Returns its `client_seq`, which its `CommandResult`
+    /// will carry, or `null` if nothing was sent (the error is logged). `policy` is a
+    /// `PaxKeys.POLICY_*`. `rate_raw` is the rate as a raw `Fixed` integer (0.15 is
+    /// 150000): commands never carry floats (D3).
+    #[func]
+    fn submit_policy(&mut self, policy: GString, nation: i64, rate_raw: i64) -> Variant {
+        let checked = args::policy(&policy.to_string()).and_then(|p| Ok((p, args::id(nation, "nation")?)));
+        match (checked, &mut self.connection) {
+            (Ok((policy, nation)), Some(c)) if c.is_open() => c.submit(policy, nation, rate_raw).to_variant(),
+            (Ok(_), _) => {
+                rejected("not connected".to_owned());
+                Variant::nil()
+            }
+            (Err(e), _) => {
+                rejected(e);
+                Variant::nil()
+            }
         }
     }
 
@@ -239,7 +270,7 @@ fn event_dictionary(event: ServerEvent) -> VarDictionary {
         ServerEvent::DayUpdate(u) => day_update(&mut d, &u),
         ServerEvent::CommandResult { client_seq, error, applies_on_day } => {
             d.set(keys::CLIENT_SEQ, i64::from(client_seq));
-            d.set(keys::ERROR, command_error_name(error));
+            d.set(keys::COMMAND_ERROR, i64::from(error.0));
             d.set(keys::APPLIES_ON_DAY, count(applies_on_day));
         }
         ServerEvent::ServerState { day, speed, changed_by } => {
@@ -289,7 +320,7 @@ fn day_update(d: &mut VarDictionary, u: &DayUpdateView) {
     d.set(keys::SKIPPED, i64::from(u.skipped));
     d.set(keys::STATE_HASH, u.state_hash as i64);
     d.set(keys::WORLD, &world_summary(&u.world));
-    d.set(keys::NATIONS, &nation_table(&u.nations));
+    d.set(keys::NATION_TABLE, &nation_table(&u.nations));
     d.set(keys::MAP, &optional(u.map.as_ref().map(map_view)));
     d.set(keys::MARKET, &optional(u.market.as_ref().map(market_view)));
     d.set(keys::PROVINCE, &optional(u.province.as_ref().map(province_view)));
@@ -333,7 +364,7 @@ fn map_view(m: &MapViewData) -> VarDictionary {
 
 fn market_view(m: &MarketView) -> VarDictionary {
     let mut d = VarDictionary::new();
-    d.set(keys::MARKET, i64::from(m.market));
+    d.set(keys::MARKET_ID, i64::from(m.market));
     d.set(keys::PRICE, &floats(&m.price));
     d.set(keys::SUPPLY, &floats(&m.supply));
     d.set(keys::DEMAND, &floats(&m.demand));
@@ -360,7 +391,7 @@ fn province_view(p: &ProvinceView) -> VarDictionary {
     producers.set(keys::WAGE, &floats(&p.producer_wage));
     producers.set(keys::CASH, &floats(&p.producer_cash));
     let mut d = VarDictionary::new();
-    d.set(keys::PROVINCE, i64::from(p.province));
+    d.set(keys::PROVINCE_ID, i64::from(p.province));
     d.set(keys::POPS, &pops);
     d.set(keys::LABOUR, &labour);
     d.set(keys::PRODUCERS, &producers);

@@ -1,7 +1,10 @@
-//! The bridge against a real `pax_server` (critic #36: no hand-made demo frames). The
-//! same `Connection` GDScript drives, here driven by a test. If `PAX_SERVER` names a
-//! `pax_server` binary (absolute, or relative to the workspace root), the launcher
-//! is tested too; CI sets it.
+//! The bridge against a real `pax_server` (critic #36: no hand-made demo frames): the
+//! same `Connection` and `LocalServer` GDScript drives, here driven by a test.
+//!
+//! The server runs as a child process, as it does for the client, so `pax_godot`
+//! never links the engine, even in tests (D12). Its binary is `PAX_SERVER` (absolute,
+//! or relative to the workspace root) or else the one built next to this test
+//! (`cargo test --all` builds it; otherwise run `cargo build -p pax_server` first).
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -89,13 +92,31 @@ fn play(c: &mut Connection) {
     wait_for(c, |e| matches!(e, ServerEvent::DayUpdate(_)));
 }
 
+/// The `pax_server` binary: `PAX_SERVER`, or the one in this test's target directory.
+fn server_binary() -> PathBuf {
+    if let Some(binary) = std::env::var_os("PAX_SERVER") {
+        return repo().join(binary);
+    }
+    let exe = std::env::current_exe().unwrap();
+    let dir = exe.parent().and_then(Path::parent).expect("target/<profile>/deps/<test>");
+    let binary = dir.join(format!("pax_server{}", std::env::consts::EXE_SUFFIX));
+    assert!(
+        binary.exists(),
+        "no pax_server at {}: run `cargo build -p pax_server` or set PAX_SERVER",
+        binary.display()
+    );
+    binary
+}
+
+fn launch(saves: &TempDir) -> LocalServer {
+    LocalServer::launch(&server_binary(), &repo().join("scenarios/two_states"), &saves.0).expect("the server starts")
+}
+
 #[test]
 fn a_whole_session_against_a_real_server() {
     let saves = TempDir::new("session");
-    let mut config = pax_server::Config::local(repo().join("scenarios/two_states"));
-    config.saves_dir = saves.0.clone();
-    let server = pax_server::Server::start(config).expect("server starts");
-    let mut c = Connection::connect(server.local_addr(), Duration::from_secs(5)).unwrap();
+    let server = launch(&saves);
+    let mut c = Connection::connect(server.addr, Duration::from_secs(5)).unwrap();
     play(&mut c);
 
     // Paused and silent for longer than the keep-alive: the session survives.
@@ -105,16 +126,18 @@ fn a_whole_session_against_a_real_server() {
         std::thread::sleep(Duration::from_millis(50));
     }
     c.disconnect();
-    server.shutdown().expect("clean shutdown");
+    // --exit-when-idle: dropping the handle finds the server already gone or ends it.
+    drop(server);
 }
 
 #[test]
 fn a_closed_server_is_reported_once() {
-    let server = pax_server::Server::start(pax_server::Config::local(repo().join("scenarios/two_states"))).unwrap();
-    let mut c = Connection::connect(server.local_addr(), Duration::from_secs(5)).unwrap();
+    let saves = TempDir::new("closed");
+    let mut server = launch(&saves);
+    let mut c = Connection::connect(server.addr, Duration::from_secs(5)).unwrap();
     c.hello(None);
     wait_for(&mut c, |e| matches!(e, ServerEvent::Welcome(_)));
-    server.shutdown().expect("clean shutdown");
+    server.kill();
     let deadline = Instant::now() + Duration::from_secs(10);
     let reason = loop {
         if let Some(reason) = c.poll().closed {
@@ -126,19 +149,4 @@ fn a_closed_server_is_reported_once() {
     assert!(!reason.is_empty());
     assert!(!c.is_open());
     assert_eq!(c.poll().closed, None, "reported once");
-}
-
-#[test]
-fn the_launcher_starts_a_local_server() {
-    let Some(binary) = std::env::var_os("PAX_SERVER") else {
-        eprintln!("PAX_SERVER is not set: skipping the launcher test");
-        return;
-    };
-    let saves = TempDir::new("launcher");
-    let server = LocalServer::launch(&repo().join(binary), &repo().join("scenarios/two_states"), &saves.0).unwrap();
-    let mut c = Connection::connect(server.addr, Duration::from_secs(5)).unwrap();
-    play(&mut c);
-    c.disconnect();
-    // --exit-when-idle: dropping the handle finds the server already gone or ends it.
-    drop(server);
 }

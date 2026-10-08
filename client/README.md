@@ -34,6 +34,7 @@ godot --headless --path client --import && godot --headless --path client -- --s
 - **F3** toggles the debug overlay: day, `state_hash` and skipped days. A bug report quotes the hash (D23).
 - **Saves** go to Godot's user data directory, under `saves/`.
 - **After changing Rust code:** rebuild the bridge, then reload the project.
+- **First import of a fresh checkout:** with no `.godot/` yet, Godot registers the extension mid-scan, and the editor aborts when it exits (Godot 4.7.2 with godot-rust 0.5.5). The project imports fine; only the exit crashes, and later runs are unaffected. To avoid it, list the extension first: `mkdir -p client/.godot && echo "res://pax_godot.gdextension" > client/.godot/extension_list.cfg` (CI does this).
 
 ## Layout
 
@@ -41,7 +42,7 @@ godot --headless --path client --import && godot --headless --path client -- --s
 |---|---|
 | `main.gd`, `main.tscn` | The app: start screen, session, routing events to the UI |
 | `ui/` | One script per UI part: `top_bar.gd`, `summary_panel.gd`, `debug_overlay.gd`, and `format.gd` for display formatting |
-| `pax_keys.gd` | Every Dictionary key and event tag the bridge uses. Generated from `crates/pax_godot/src/keys.rs`; don't edit it |
+| `pax_keys.gd` | Every Dictionary key and event tag the bridge uses, and every value GDScript passes back: wire enums (`MAP_MODE_*`, `SPEED_*`, `COMMAND_ERROR_*`, from the schema) and policy names. Generated from `crates/pax_godot/src/keys.rs`; don't edit it. The bridge rejects (and logs) any argument outside them, never coercing it |
 | `pax_godot.gdextension` | Where Godot finds the bridge library for each platform (`target/{debug,release}`) |
 
 Anything about the protocol (framing, decoding, conversions, session rules) belongs in `crates/pax_godot`, with Rust tests, not in GDScript.

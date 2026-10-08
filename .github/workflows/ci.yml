@@ -44,9 +44,10 @@ jobs:
       - name: Crate boundaries (D10, D12, AGENTS.md section 2)
         run: |
           deps() { cargo tree -p "$1" -e normal --prefix none | tail -n +2; }
-          # Clients must not be able to simulate.
+          # Clients must not be able to simulate, not even in their tests (D12): dev
+          # edges count too.
           for crate in pax_protocol pax_godot; do
-            if deps "$crate" | grep -q '^pax_engine '; then
+            if cargo tree -p "$crate" -e normal,dev --prefix none | tail -n +2 | grep -q '^pax_engine '; then
               echo "::error::$crate depends on pax_engine. Clients must not be able to simulate (D10, D12)."
               exit 1
             fi
@@ -196,8 +197,14 @@ jobs:
           echo "${GODOT_SHA256}  $RUNNER_TEMP/godot.zip" | sha256sum -c -
           unzip -q "$RUNNER_TEMP/godot.zip" -d "$RUNNER_TEMP"
           mv "$RUNNER_TEMP/Godot_v${GODOT_VERSION}-stable_linux.x86_64" "$RUNNER_TEMP/godot"
-      - name: Import the project (registers the extension)
-        run: timeout 300 "$RUNNER_TEMP/godot" --headless --path client --import
+      - name: Import the project
+        # The extension is listed before the first import, so Godot loads it at
+        # startup. Registered mid-scan instead (a fresh project), unloading it at the
+        # import's exit aborts (Godot 4.7.2 + godot-rust 0.5.5; client/README.md).
+        run: |
+          mkdir -p client/.godot
+          echo "res://pax_godot.gdextension" > client/.godot/extension_list.cfg
+          timeout 300 "$RUNNER_TEMP/godot" --headless --path client --import
       - name: Smoke test
         run: timeout 180 "$RUNNER_TEMP/godot" --headless --path client -- --smoke | tee smoke.log && grep -q "SMOKE OK" smoke.log
 

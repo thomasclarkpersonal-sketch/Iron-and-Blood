@@ -35,9 +35,12 @@ const REASON := "reason"
 const SKIPPED := "skipped"
 const STATE_HASH := "state_hash"
 const WORLD := "world"
+const NATION_TABLE := "nation_table"
 const MAP := "map"
 const MARKET := "market"
 const PROVINCE := "province"
+const MARKET_ID := "market_id"
+const PROVINCE_ID := "province_id"
 const POPULATION := "population"
 const WORKFORCE := "workforce"
 const UNEMPLOYED := "unemployed"
@@ -74,9 +77,39 @@ const PRODUCER_TYPE := "producer_type"
 const CAPACITY := "capacity"
 const WAGE := "wage"
 const CLIENT_SEQ := "client_seq"
-const ERROR := "error"
+const COMMAND_ERROR := "command_error"
 const APPLIES_ON_DAY := "applies_on_day"
+const ERROR := "error"
 const CHANGED_BY := "changed_by"
 const NONCE := "nonce"
 const NAME := "name"
 const NAMES := "names"
+
+## Wire enum values (schemas/common.fbs).
+const MAP_MODE_NONE := 0
+const MAP_MODE_NATION := 1
+const MAP_MODE_POPULATION := 2
+const MAP_MODE_UNEMPLOYMENT := 3
+const MAP_MODE_LIFE_NEEDS := 4
+const MAP_MODE_MILITANCY := 5
+const MAP_MODE_PRICE := 6
+const SPEED_PAUSED := 0
+const SPEED_SLOWEST := 1
+const SPEED_SLOW := 2
+const SPEED_NORMAL := 3
+const SPEED_FAST := 4
+const SPEED_FASTEST := 5
+const COMMAND_ERROR_NONE := 0
+const COMMAND_ERROR_UNKNOWN_NATION := 1
+const COMMAND_ERROR_RATE_OUT_OF_RANGE := 2
+const COMMAND_ERROR_NO_BASKET := 3
+const COMMAND_ERROR_MALFORMED := 4
+const COMMAND_ERROR_NOT_PERMITTED := 5
+const COMMAND_ERROR_RATE_LIMITED := 6
+## CommandError names, by value.
+const COMMAND_ERROR_NAMES := ["None", "UnknownNation", "RateOutOfRange", "NoBasket", "Malformed", "NotPermitted", "RateLimited"]
+
+## Policy names for PaxClient.submit_policy.
+const POLICY_INCOME_TAX := "income_tax"
+const POLICY_TRANSFER := "transfer"
+const POLICY_CONSUMPTION := "consumption"

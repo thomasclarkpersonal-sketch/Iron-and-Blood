@@ -38,6 +38,23 @@ pub enum Policy {
     Consumption,
 }
 
+impl Policy {
+    pub const ALL: [Policy; 3] = [Policy::IncomeTax, Policy::Transfer, Policy::Consumption];
+
+    /// The name GDScript passes (`PaxKeys.POLICY_*`, generated from this).
+    pub fn name(self) -> &'static str {
+        match self {
+            Policy::IncomeTax => "income_tax",
+            Policy::Transfer => "transfer",
+            Policy::Consumption => "consumption",
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<Policy> {
+        Policy::ALL.into_iter().find(|p| p.name() == name)
+    }
+}
+
 /// One policy command: `rate_raw` is the `Fixed` raw value (0.15 is 150 000).
 pub fn submit_command(client_seq: u32, policy: Policy, nation: u32, rate_raw: i64) -> Vec<u8> {
     let mut b = FlatBufferBuilder::new();

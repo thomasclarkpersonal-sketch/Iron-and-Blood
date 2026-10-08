@@ -243,6 +243,14 @@ impl LocalServer {
     }
 }
 
+impl LocalServer {
+    /// Kills the server at once, as a crash would.
+    pub fn kill(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
 impl Drop for LocalServer {
     fn drop(&mut self) {
         let deadline = Instant::now() + Duration::from_secs(2);
