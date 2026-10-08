@@ -6,9 +6,9 @@
 //! changes the world rebuilds [`Today`] in the same step, so a world change without
 //! fresh views can't be written (AGENTS.md §1, D7).
 
-use pax_data::Scenario;
+use pax_data::{DayStep, Outcomes, Scenario};
 use pax_engine::views::ProvinceStats;
-use pax_engine::{Command, CommandError, DayReport, World};
+use pax_engine::{Command, DayReport, World};
 
 use crate::view::DayViews;
 
@@ -52,12 +52,14 @@ impl Game {
         &self.scenario
     }
 
-    /// Runs one day with `commands` applied at its start (D21) and rebuilds
-    /// [`Today`] from the result in the same step. Returns each command's outcome.
-    pub(crate) fn step(&mut self, commands: &[Command]) -> Vec<Result<(), CommandError>> {
-        let (report, results) = pax_engine::tick::step_with(&mut self.scenario.world, commands);
+    /// Runs one day through the shared day step ([`pax_data::step_day`]): the
+    /// scenario's scripted commands, then `players`, already in stamp order. Rebuilds
+    /// [`Today`] from the result in the same step, which keeps the day's report.
+    pub(crate) fn step(&mut self, players: &[Command]) -> Outcomes {
+        let DayStep { report, outcomes } =
+            pax_data::step_day(&mut self.scenario.world, &self.scenario.commands, players);
         self.today = Today::of(&self.scenario.world, Some(report));
-        results
+        outcomes
     }
 
     /// The views of the current state, shared by every session.

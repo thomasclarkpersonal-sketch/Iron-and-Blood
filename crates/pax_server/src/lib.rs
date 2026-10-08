@@ -19,6 +19,7 @@ mod commands;
 mod encode;
 mod game;
 mod net;
+mod queue;
 mod request;
 mod sim;
 mod view;

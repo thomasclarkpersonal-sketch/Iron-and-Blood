@@ -24,6 +24,7 @@ use crate::commands;
 use crate::encode::{self, WelcomeInfo};
 use crate::game::Game;
 use crate::net::{ConnHandle, Inbound, Outbound};
+use crate::queue::CommandQueue;
 use crate::request::{Request, WireCommand};
 use crate::view::{self, CheckedSubscription, DayViews, Subscription};
 use crate::window::UpdateWindow;
@@ -114,18 +115,6 @@ struct Seat {
     nation: Option<u32>,
 }
 
-/// A command accepted on arrival, waiting for the start of the next tick.
-#[derive(Clone, Copy, Debug)]
-struct Pending {
-    session: u64,
-    /// The stamp, assigned by the server on arrival (D10, D22): commands apply in
-    /// `(player, sequence)` order within their day, never in raw arrival order.
-    player: u16,
-    sequence: u64,
-    client_seq: u32,
-    command: Command,
-}
-
 /// A command that applied: the game's history (D21). Saves are the scenario plus
 /// this log (D23).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -146,13 +135,8 @@ pub(crate) struct Sim {
     exit_when_idle: bool,
     /// The speed and the next tick. Only [`Sim::set_clock`] changes the speed.
     clock: Clock,
-    /// Commands accepted for the next tick, each stamped `(player, sequence)` on
-    /// arrival. `tick` applies them sorted by that stamp (D10's `(day, player,
-    /// sequence)`; all of them are for the same day).
-    pending: Vec<Pending>,
-    /// The next command's `sequence`: increases for the whole game, so it orders a
-    /// player's commands as the server received them.
-    next_sequence: u64,
+    /// Commands accepted for the next tick, stamped on arrival.
+    queue: CommandQueue,
     /// Every command that applied, in application order.
     log: Vec<Logged>,
 }
@@ -165,8 +149,7 @@ impl Sim {
             active: None,
             exit_when_idle,
             clock: Clock::Paused,
-            pending: Vec::new(),
-            next_sequence: 0,
+            queue: CommandQueue::default(),
             log: Vec::new(),
         }
     }
@@ -262,16 +245,8 @@ impl Sim {
         if let Err(e) = self.game.world().validate(command) {
             return self.command_result(session, client_seq, commands::error_to_wire(&e));
         }
-        self.stamp(session, seat.player, client_seq, command);
+        self.queue.stamp(session, seat.player, client_seq, command);
         self.command_result(session, client_seq, wire::CommandError::None);
-    }
-
-    /// Stamps an accepted command `(player, sequence)` on arrival (D10, D22) and
-    /// queues it for the next tick.
-    fn stamp(&mut self, session: u64, player: u16, client_seq: u32, command: Command) {
-        let sequence = self.next_sequence;
-        self.next_sequence += 1;
-        self.pending.push(Pending { session, player, sequence, client_seq, command });
     }
 
     /// A session asked for a new speed. An unknown speed is a protocol error.
@@ -306,31 +281,27 @@ impl Sim {
         }
     }
 
-    /// Runs one day. The scenario's scripted commands for the day apply first, then
-    /// the players' commands in stamp order (D10, D23). Everything that applies is
-    /// logged. `step_with` re-validates each command; one that fails there (none can
-    /// today) gets a late error `CommandResult` and is not logged.
+    /// Runs one day through the shared day step ([`pax_data::step_day`]): the
+    /// scenario's scripted commands for the day, then the players' commands in stamp
+    /// order (D10, D23). Everything that applies is logged. Each command is
+    /// re-validated as it applies; a player's that fails there (none can today) gets
+    /// a late error `CommandResult` and is not logged.
     pub(crate) fn tick(&mut self) {
         let day = self.game.world().day;
-        let scripted = self.game.scenario().commands.for_day(day).to_vec();
-        // Stamp order, by construction: arrival order between players is a network
-        // race, so it must never decide the order commands apply in.
-        self.pending.sort_by_key(|p| (p.player, p.sequence));
-        let mut commands = scripted.clone();
-        commands.extend(self.pending.iter().map(|p| p.command));
-        let results = self.game.step(&commands);
-        let (scripted_results, player_results) = results.split_at(scripted.len());
-        for (command, result) in scripted.iter().zip(scripted_results) {
+        let pending = self.queue.take();
+        let commands: Vec<Command> = pending.iter().map(|p| p.command).collect();
+        let outcomes = self.game.step(&commands);
+        for (command, result) in outcomes.scripted {
             match result {
-                Ok(()) => self.log.push(Logged { day, player: None, command: *command }),
-                // The loader validated the scenario's log against the initial world.
+                Ok(()) => self.log.push(Logged { day, player: None, command }),
+                // A running game can't stop for a scenario's mistake (`step_day`).
                 Err(e) => tracing::warn!(day, ?command, %e, "scripted command rejected"),
             }
         }
-        for (p, result) in std::mem::take(&mut self.pending).into_iter().zip(player_results) {
+        for (p, result) in pending.into_iter().zip(outcomes.players) {
             match result {
                 Ok(()) => self.log.push(Logged { day, player: Some(p.player), command: p.command }),
-                Err(e) => self.command_result(p.session, p.client_seq, commands::error_to_wire(e)),
+                Err(e) => self.command_result(p.session, p.client_seq, commands::error_to_wire(&e)),
             }
         }
     }
@@ -656,6 +627,22 @@ mod tests {
         assert_eq!(Clock::at(wire::Speed::Paused, start), Some(Clock::Paused));
     }
 
+    /// D11 pins the server's day to the harness's: with no players, `Sim::tick`
+    /// reproduces each scenario's `golden.hashes` (`pax_cli verify`) day by day.
+    #[test]
+    fn the_server_reproduces_the_golden_hashes() {
+        for name in ["mini_valley", "two_states"] {
+            let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios").join(name);
+            let golden = pax_data::golden::read(&dir.join("golden.hashes")).unwrap();
+            let mut sim = Sim::new(pax_data::load_scenario(&dir).unwrap(), false);
+            for (day, &expected) in golden.iter().enumerate() {
+                sim.tick();
+                assert_eq!(sim.game.views().state_hash, expected, "{name}: day {} differs from golden", day + 1);
+            }
+            assert!(sim.log().iter().all(|l| l.player.is_none()), "{name}: only scripted commands applied");
+        }
+    }
+
     /// D10: within a day, commands apply in `(player, sequence)` order, whatever
     /// order they arrived in (arrival order between players is a network race).
     #[test]
@@ -664,7 +651,7 @@ mod tests {
         let rate = |raw| Command::SetIncomeTax { nation: 0, rate: Fixed::from_raw(raw) };
         // Player 1's command arrives first; player 0's two follow.
         for (player, raw) in [(1, 100_000), (0, 110_000), (0, 120_000)] {
-            sim.stamp(SESSION, player, 0, rate(raw));
+            sim.queue.stamp(SESSION, player, 0, rate(raw));
         }
         sim.tick();
         let applied: Vec<_> = sim.log().iter().map(|l| (l.player, l.command)).collect();

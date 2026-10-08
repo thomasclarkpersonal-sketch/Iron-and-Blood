@@ -47,7 +47,7 @@ pub fn reassign_workers(world: &mut World, layout: &PopLayout, labour: &[LabourR
         let province = labour[start].province;
         let end = start + labour[start..].iter().take_while(|p| p.province == province).count();
         let pools: Vec<&LabourReport> =
-            labour[start..end].iter().filter(|p| is_worker[p.profession as usize]).collect();
+            labour[start..end].iter().filter(|p| is_worker.contains(p.profession as usize)).collect();
         start = end;
 
         let mut vacancies: Vec<(u16, u64)> =
@@ -158,7 +158,7 @@ pub fn migrate_within_markets(world: &mut World, layout: &PopLayout) -> u64 {
         if members.len() < 2 {
             continue;
         }
-        for c in (0..profs).filter(|&c| is_worker[c]) {
+        for c in (0..profs).filter(|&c| is_worker.contains(c)) {
             let key = |p: u32| p as usize * profs + c;
             let mut vacancies: Vec<(u32, u64)> = members
                 .iter()

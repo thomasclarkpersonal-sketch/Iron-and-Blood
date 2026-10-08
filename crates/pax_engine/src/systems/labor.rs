@@ -9,6 +9,7 @@
 //! the pool's POPs (wages are later distributed by size).
 
 use crate::alloc::allocate_raw;
+use crate::defs::WorkerProfessions;
 use crate::groups::Groups;
 use crate::layout::{pool_count, pool_key, pool_of_key};
 use crate::world::World;
@@ -94,6 +95,6 @@ pub fn unemployment(defs: &crate::defs::Defs, labour: &[LabourReport]) -> (u64, 
 /// One pool's `(unemployed, workforce)` under [`unemployment`]'s definition, given
 /// `worker` (`Defs::worker_professions`, computed once by the caller). It is the rule
 /// itself, so per-province views can apply it in a single pass over the pools.
-pub fn pool_unemployment(worker: &[bool], pool: &LabourReport) -> (u64, u64) {
-    if worker[pool.profession as usize] { (pool.unemployed(), pool.workforce) } else { (0, 0) }
+pub fn pool_unemployment(worker: &WorkerProfessions, pool: &LabourReport) -> (u64, u64) {
+    if worker.contains(pool.profession as usize) { (pool.unemployed(), pool.workforce) } else { (0, 0) }
 }

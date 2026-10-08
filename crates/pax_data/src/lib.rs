@@ -558,18 +558,54 @@ fn build_world(defs: Arc<Defs>, s: &ScenarioFile) -> Result<World, LoadError> {
     Ok(world)
 }
 
-/// Advances one day, applying `log`'s commands for that day: the single
-/// replay step used by `pax_cli` and by tests (D21).
+/// What one day of a scenario did: see [`step_day`].
+#[derive(Debug)]
+pub struct DayStep {
+    pub report: pax_engine::DayReport,
+    pub outcomes: Outcomes,
+}
+
+/// The outcome of every command a day applied.
+#[derive(Debug)]
+pub struct Outcomes {
+    /// The scenario's scripted commands for the day (`commands.toml`), in the order
+    /// they applied, each with its outcome.
+    pub scripted: Vec<(Command, Result<(), CommandError>)>,
+    /// The outcome of each of the players' commands, in the order given.
+    pub players: Vec<Result<(), CommandError>>,
+}
+
+/// Advances one day of a scenario: the single day step, shared by `pax_cli`, the
+/// tests and the server (D21, D23). Everything that decides what a day does with
+/// the scenario's command log lives here.
 ///
+/// At the start of the day it applies `log`'s scripted commands for that day, then
+/// `players`, which the caller has already put in stamp order `(player, sequence)`
+/// (D10). Every command is re-validated as it applies (D21).
+///
+/// Logs are validated when loaded, so a rejected scripted command means the log and
+/// the world disagree. The day runs either way, and each caller decides what a
+/// rejection means:
+/// * the determinism harness ([`run_logged`]) fails;
+/// * the interactive CLI and the server warn, because a running game can't stop for
+///   a scenario's mistake.
+pub fn step_day(world: &mut World, log: &CommandLog, players: &[Command]) -> DayStep {
+    let scripted = log.for_day(world.day);
+    let mut commands = Vec::with_capacity(scripted.len() + players.len());
+    commands.extend_from_slice(scripted);
+    commands.extend_from_slice(players);
+    let (report, mut results) = pax_engine::tick::step_with(world, &commands);
+    let players = results.split_off(scripted.len());
+    let scripted = scripted.iter().copied().zip(results).collect();
+    DayStep { report, outcomes: Outcomes { scripted, players } }
+}
+
+/// [`step_day`] with no players' commands, for replaying a scenario on its own.
 /// Returns the day's report and every rejection, as `(command, error)`.
-/// Logs are validated when loaded, so a rejection means the log and the world
-/// disagree. The day runs either way; each caller decides whether that is
-/// fatal (the harness: yes; the interactive CLI: warn).
 pub fn step_logged(world: &mut World, log: &CommandLog) -> (pax_engine::DayReport, Vec<(Command, CommandError)>) {
-    let commands = log.for_day(world.day);
-    let (report, results) = pax_engine::tick::step_with(world, commands);
-    let rejected = commands.iter().zip(results).filter_map(|(&c, r)| r.err().map(|e| (c, e))).collect();
-    (report, rejected)
+    let step = step_day(world, log, &[]);
+    let rejected = step.outcomes.scripted.into_iter().filter_map(|(c, r)| r.err().map(|e| (c, e))).collect();
+    (step.report, rejected)
 }
 
 /// Runs `days` ticks with [`step_logged`], returning the state hash after each
