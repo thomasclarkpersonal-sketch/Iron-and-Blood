@@ -23,6 +23,8 @@ tokio = { version = "1.37", features = ["rt-multi-thread", "net", "io-util", "sy
 # tasks (FIFO, no polling), blocking receives with a timeout on the sim thread (D23).
 flume = { version = "0.12", default-features = false, features = ["async"] }
 tracing = "0.1"
+# Resume tokens (D24): unguessable, so from the OS's secure random source.
+getrandom = "0.3"
 tracing-subscriber = "0.3"
 
 [dev-dependencies]

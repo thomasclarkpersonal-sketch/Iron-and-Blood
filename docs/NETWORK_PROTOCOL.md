@@ -58,7 +58,7 @@ sequenceDiagram
 3. **Subscribe** replaces the whole subscription. The server immediately answers with a `DayUpdate` for the current day, even while paused, so a newly opened panel fills at once.
 4. **Daily updates** follow the flow-control rule in §5.
 5. **Keep-alive:** a session silent for `pax_protocol::IDLE_TIMEOUT` (10 seconds, D22) is closed, so the client sends `Ping` at least every fifth of that (2 seconds). Both sides take the value from that one constant.
-   - **In multiplayer (D24, M4-4)**, a player silent for 5 s (`--pause-after`) pauses a running game for everyone. Every `ServerState` lists who it waits for (`waiting_for`, protocol 1.5).
+   - **In multiplayer (D24, M4-4)**, a player silent for 5 s (`--pause-after`) pauses a running game for everyone. Every `ServerState` lists who it waits for (`waiting_for`, protocol 1.5). The pause and its resume are the server's doing: `changed_by` keeps the last player who set the speed.
    - When they speak again, or are dropped after 30 s of silence (`--drop-after`), the game resumes at its speed, unless the host has set one meanwhile.
 6. **LoadGame** ends with a new `Welcome` to **every** player, because the scenario and its tables may differ. Each client must drop everything it holds from the old session, whether or not it asked for the load.
 7. **Leaving:** when a player leaves, the others play on (D24). When the last one leaves, the game pauses, because D23 never runs a game nobody is watching.

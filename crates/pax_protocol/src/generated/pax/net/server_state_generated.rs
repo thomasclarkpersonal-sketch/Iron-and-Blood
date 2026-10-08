@@ -64,7 +64,9 @@ impl<'a> ServerState<'a> {
     // which contains a valid value in this slot
     unsafe { self._tab.get::<Speed>(ServerState::VT_SPEED, Some(Speed::Paused)).unwrap()}
   }
-  /// The player who changed it (M4); the M3 player is 0.
+  /// The player who last set the speed (M4); the M3 player is 0. A fairness pause
+  /// and its resume, or the last player leaving, are the server's doing and keep
+  /// it: `waiting_for` says why the game paused (D24).
   #[inline]
   pub fn changed_by(&self) -> u16 {
     // Safety:

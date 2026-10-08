@@ -89,6 +89,29 @@ pub struct Config {
 }
 
 impl Config {
+    /// The rules a configuration must keep, however it was built (the CLI, tests, a
+    /// launcher):
+    /// * the fairness pause is multiplayer only, and comes before the drop (D24), or
+    ///   the connection task would drop a client when it should pause the game;
+    /// * D24's TLS rule: several players bind loopback only until M4-6 brings TLS.
+    pub fn validate(&self) -> Result<(), String> {
+        if let Some(pause) = self.pause_after {
+            if self.max_players <= 1 {
+                return Err("a fairness pause (--pause-after) is for multiplayer (--players above 1)".to_owned());
+            }
+            if pause >= self.idle_timeout {
+                return Err("--pause-after must be shorter than --drop-after".to_owned());
+            }
+        }
+        if self.max_players > 1 && !self.bind.ip().is_loopback() {
+            return Err(format!(
+                "--players {} on {} needs TLS (D24), which arrives with M4-6: until then, bind 127.0.0.1",
+                self.max_players, self.bind
+            ));
+        }
+        Ok(())
+    }
+
     /// A local single-player server for `scenario`, as the client launches it: one
     /// player, sandbox allowed, the protocol's 10 s timeout.
     pub fn local(scenario: impl Into<PathBuf>) -> Self {
@@ -109,6 +132,8 @@ impl Config {
 /// Why a server couldn't start.
 #[derive(Debug)]
 pub enum StartError {
+    /// The configuration breaks a rule (`Config::validate`).
+    Config(String),
     Scenario(pax_data::LoadError),
     Io(std::io::Error),
 }
@@ -116,6 +141,7 @@ pub enum StartError {
 impl std::fmt::Display for StartError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            StartError::Config(e) => write!(f, "{e}"),
             StartError::Scenario(e) => write!(f, "{e}"),
             StartError::Io(e) => write!(f, "{e}"),
         }
@@ -165,6 +191,7 @@ impl Server {
     /// Loads the scenario, binds the listener and starts the sim thread. Returns once
     /// the server accepts connections.
     pub fn start(config: Config) -> Result<Server, StartError> {
+        config.validate().map_err(StartError::Config)?;
         let scenario = pax_data::load_scenario(&config.scenario).map_err(StartError::Scenario)?;
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
@@ -235,6 +262,21 @@ mod tests {
         );
         wire::finish_size_prefixed_client_message_buffer(&mut b, m);
         b.finished_data().to_vec()
+    }
+
+    /// `Server::start` checks the configuration however it was built, not just the
+    /// CLI: a fairness pause no shorter than the drop would drop clients instead.
+    #[test]
+    fn a_server_refuses_a_configuration_that_breaks_the_rules() {
+        let scenario = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two_states");
+        let mut config = Config::local(&scenario);
+        config.max_players = 2;
+        config.pause_after = Some(Duration::from_secs(40));
+        config.idle_timeout = Duration::from_secs(30);
+        assert!(matches!(Server::start(config.clone()), Err(StartError::Config(e)) if e.contains("shorter")));
+        config.pause_after = Some(Duration::from_secs(5));
+        config.bind = SocketAddr::from(([0, 0, 0, 0], 0));
+        assert!(matches!(Server::start(config), Err(StartError::Config(e)) if e.contains("TLS")));
     }
 
     /// A panic on the sim thread reaches the client (Goodbye) and the caller (Err),

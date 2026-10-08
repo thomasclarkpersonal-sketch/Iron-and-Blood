@@ -73,22 +73,12 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> Result<(Config, Option<
     // D24's lag rules replace D22's 10 s timeout in multiplayer only.
     if config.max_players > 1 {
         config.idle_timeout = drop_after.unwrap_or(pax_server::DROP_AFTER);
-        let pause = pause_after.unwrap_or(pax_server::PAUSE_AFTER);
-        if pause >= config.idle_timeout {
-            return Err("--pause-after must be shorter than --drop-after".to_owned());
-        }
-        config.pause_after = Some(pause);
+        config.pause_after = Some(pause_after.unwrap_or(pax_server::PAUSE_AFTER));
     } else if pause_after.is_some() || drop_after.is_some() {
         return Err("--pause-after and --drop-after are multiplayer settings (--players above 1)".to_owned());
     }
-    // D24: TLS whenever the server isn't bound to localhost. Until M4-6 brings it, a
-    // multiplayer server binds loopback only; there is deliberately no opt-out.
-    if config.max_players > 1 && !config.bind.ip().is_loopback() {
-        return Err(format!(
-            "--players {} on {} needs TLS (D24), which arrives with M4-6: until then, bind 127.0.0.1",
-            config.max_players, config.bind
-        ));
-    }
+    // The rules every way of building a server shares (`Config::validate`).
+    config.validate()?;
     Ok((config, port_file))
 }
 
