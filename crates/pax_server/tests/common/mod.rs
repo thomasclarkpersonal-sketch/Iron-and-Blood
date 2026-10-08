@@ -89,6 +89,17 @@ impl Client {
         self.hello_with(pax_protocol::PROTOCOL_MAJOR, nation);
     }
 
+    pub fn subscribe(&mut self, map_mode: MapMode, map_good: u16, market: Option<u32>, province: Option<u32>) {
+        let mut b = FlatBufferBuilder::new();
+        let s = Subscribe::create(&mut b, &SubscribeArgs { map_mode, map_good, market, province });
+        self.send(&mut b, ClientPayload::Subscribe, s.as_union_value());
+    }
+
+    /// Gives up the decoder, for tests that write raw bytes without reading.
+    pub fn into_stream(self) -> TcpStream {
+        self.stream
+    }
+
     pub fn ping(&mut self, nonce: u64) {
         let mut b = FlatBufferBuilder::new();
         let p = Ping::create(&mut b, &PingArgs { nonce });
@@ -147,4 +158,16 @@ fn decode(frame: &[u8]) -> Got {
         return Got::Pong(p.nonce());
     }
     Got::Other(format!("{:?}", msg.payload_type()))
+}
+
+/// One size-prefixed `Ping` frame.
+pub fn ping_frame(nonce: u64) -> Vec<u8> {
+    let mut b = FlatBufferBuilder::new();
+    let p = Ping::create(&mut b, &PingArgs { nonce });
+    let msg = ClientMessage::create(
+        &mut b,
+        &ClientMessageArgs { payload_type: ClientPayload::Ping, payload: Some(p.as_union_value()) },
+    );
+    finish_size_prefixed_client_message_buffer(&mut b, msg);
+    b.finished_data().to_vec()
 }

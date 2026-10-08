@@ -140,14 +140,39 @@ fn consumption_commands_need_a_basket_at_load() {
     assert!(err.messages[0].contains("has no consumption basket"), "{err}");
 }
 
-/// `Welcome.content_hash` (D22) must identify content: stable across loads, and
-/// different whenever any loaded file differs.
+/// `Welcome.content_hash` (D22) must identify content: stable across loads and
+/// paths, and different whenever any one loaded file changes.
 #[test]
-fn content_hash_is_stable_and_content_sensitive() {
-    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two_states");
-    let a = pax_data::load_scenario(&dir).unwrap().content_hash;
-    let b = pax_data::load_scenario(&dir).unwrap().content_hash;
-    assert_eq!(a, b);
-    let mini = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/mini_valley");
-    assert_ne!(a, pax_data::load_scenario(&mini).unwrap().content_hash);
+fn content_hash_is_stable_and_sensitive_to_every_file() {
+    let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let original = pax_data::load_scenario(&repo.join("scenarios/two_states")).unwrap().content_hash;
+
+    // A copy elsewhere: same layout (scenario.toml says data = "../../data"), new path.
+    let tmp = std::env::temp_dir().join(format!("pax-content-hash-{}", std::process::id()));
+    let scenario = tmp.join("scenarios/two_states");
+    std::fs::create_dir_all(&scenario).unwrap();
+    std::fs::create_dir_all(tmp.join("data")).unwrap();
+    let files = [
+        "scenarios/two_states/scenario.toml",
+        "scenarios/two_states/commands.toml",
+        "data/goods.toml",
+        "data/professions.toml",
+        "data/production.toml",
+        "data/rules.toml",
+    ];
+    for f in files {
+        std::fs::copy(repo.join(f), tmp.join(f)).unwrap();
+    }
+    let hash = || pax_data::load_scenario(&scenario).unwrap().content_hash;
+    assert_eq!(hash(), original, "the hash must not depend on where the files are");
+
+    for f in files {
+        let path = tmp.join(f);
+        let text = std::fs::read_to_string(&path).unwrap();
+        std::fs::write(&path, format!("{text}\n# a comment changes the content\n")).unwrap();
+        assert_ne!(hash(), original, "changing {f} must change the hash");
+        std::fs::write(&path, text).unwrap();
+    }
+    assert_eq!(hash(), original);
+    std::fs::remove_dir_all(&tmp).unwrap();
 }

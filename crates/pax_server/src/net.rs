@@ -1,14 +1,19 @@
 //! The network side (D22, D23): one tokio task per connection.
 //!
 //! A connection task splits the byte stream into frames, verifies and decodes them
-//! into [`Request`]s, enforces the session rules that need no game state, and passes
-//! the rest to the sim thread:
+//! into [`Request`]s, enforces the framing-level session rules, and passes the rest
+//! to the sim thread:
 //! * `Hello` must come first, and only once;
 //! * a silent client times out;
 //! * `Ping` is answered here.
 //!
+//! Whether a session is *welcomed*, and so may do anything else, is decided only by
+//! the sim thread.
+//!
 //! Any protocol error ends the session with `Goodbye` and the reason (D22). The sim
-//! thread answers through the connection's outbound channel.
+//! thread answers through the connection's bounded outbound queue. A client that
+//! stops reading fills the queue, and its connection is closed instead of growing
+//! memory without limit.
 
 use std::sync::Arc;
 use std::sync::mpsc::Sender;
@@ -17,11 +22,21 @@ use std::time::Duration;
 use pax_protocol::{Direction, FrameDecoder};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::{Notify, mpsc};
 use tracing::{debug, info, warn};
 
 use crate::encode;
 use crate::request::{self, Request};
+
+/// Frames a connection may have queued for writing. A client that reads normally
+/// never comes close: updates are capped by D23's 3-update window, and replies are
+/// one per request.
+pub(crate) const OUTBOUND_QUEUE: usize = 256;
+
+/// After the session ends, how long the writer may take to flush its queue before
+/// it is cut off (a client that isn't reading would hold it forever).
+const FLUSH_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// What the sim thread sends a connection.
 #[derive(Debug)]
@@ -32,11 +47,29 @@ pub(crate) enum Outbound {
     Close,
 }
 
+/// The sim thread's handle on one connection.
+#[derive(Debug)]
+pub(crate) struct ConnHandle {
+    out: mpsc::Sender<Outbound>,
+    kill: Arc<Notify>,
+}
+
+impl ConnHandle {
+    /// Queues `out` without blocking the sim thread. If the queue is full, the
+    /// client isn't reading, so the connection is closed instead. It can't be sent a
+    /// `Goodbye`, because its queue is what's full. A closed connection is ignored.
+    pub(crate) fn send(&self, out: Outbound) {
+        if let Err(TrySendError::Full(_)) = self.out.try_send(out) {
+            self.kill.notify_one();
+        }
+    }
+}
+
 /// What connections tell the sim thread.
 pub(crate) enum Inbound {
     Connected {
         session: u64,
-        out: mpsc::UnboundedSender<Outbound>,
+        conn: ConnHandle,
     },
     Request {
         session: u64,
@@ -72,15 +105,19 @@ pub(crate) async fn accept_loop(listener: TcpListener, to_sim: Sender<Inbound>, 
 
 async fn connection(stream: TcpStream, session: u64, to_sim: Sender<Inbound>, idle: Duration) {
     let (mut rd, mut wr) = stream.into_split();
-    let (out_tx, mut out_rx) = mpsc::unbounded_channel::<Outbound>();
-    if to_sim.send(Inbound::Connected { session, out: out_tx.clone() }).is_err() {
+    let (out_tx, mut out_rx) = mpsc::channel::<Outbound>(OUTBOUND_QUEUE);
+    let kill = Arc::new(Notify::new());
+    if to_sim
+        .send(Inbound::Connected { session, conn: ConnHandle { out: out_tx.clone(), kill: kill.clone() } })
+        .is_err()
+    {
         return; // the server is shutting down
     }
 
     // The writer drains the outbound queue in order. When it closes the connection
     // it wakes the reader, which must stop too.
     let writer_done = Arc::new(Notify::new());
-    let writer = tokio::spawn({
+    let mut writer = tokio::spawn({
         let writer_done = writer_done.clone();
         async move {
             while let Some(out) = out_rx.recv().await {
@@ -104,6 +141,7 @@ async fn connection(stream: TcpStream, session: u64, to_sim: Sender<Inbound>, id
     let goodbye: Option<String> = 'read: loop {
         let n = tokio::select! {
             _ = writer_done.notified() => break 'read None,
+            _ = kill.notified() => break 'read Some("the client is not reading its messages".to_owned()),
             read = tokio::time::timeout(idle, rd.read(&mut buf)) => match read {
                 Err(_) => break 'read Some(format!("no message for {} s", idle.as_secs_f32())),
                 Ok(Ok(0) | Err(_)) => break 'read None,
@@ -128,7 +166,9 @@ async fn connection(stream: TcpStream, session: u64, to_sim: Sender<Inbound>, id
                 (_, true) => {}
             }
             if let Request::Ping { nonce } = request {
-                let _ = out_tx.send(Outbound::Frame(encode::pong(nonce)));
+                if out_tx.try_send(Outbound::Frame(encode::pong(nonce))).is_err() {
+                    break 'read Some("the client is not reading its messages".to_owned());
+                }
                 continue;
             }
             debug!(session, ?request, "request");
@@ -140,10 +180,13 @@ async fn connection(stream: TcpStream, session: u64, to_sim: Sender<Inbound>, id
 
     if let Some(reason) = &goodbye {
         info!(session, %reason, "closing session");
-        let _ = out_tx.send(Outbound::Frame(encode::goodbye(reason)));
+        let _ = out_tx.try_send(Outbound::Frame(encode::goodbye(reason)));
     }
-    let _ = out_tx.send(Outbound::Close);
+    let _ = out_tx.try_send(Outbound::Close);
     let _ = to_sim.send(Inbound::Closed { session });
-    let _ = writer.await;
+    // A client that isn't reading would keep the writer blocked forever.
+    if tokio::time::timeout(FLUSH_TIMEOUT, &mut writer).await.is_err() {
+        writer.abort();
+    }
     info!(session, "disconnected");
 }

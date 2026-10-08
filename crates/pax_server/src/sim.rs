@@ -9,15 +9,28 @@ use std::sync::mpsc::Receiver;
 
 use pax_data::Scenario;
 use pax_protocol::{PROTOCOL_MAJOR, PROTOCOL_MINOR, wire};
-use tokio::sync::mpsc::UnboundedSender;
 use tracing::{debug, info};
 
 use crate::encode::{self, WelcomeInfo};
-use crate::net::{Inbound, Outbound};
+use crate::net::{ConnHandle, Inbound, Outbound};
 use crate::request::Request;
 
 struct Session {
-    out: UnboundedSender<Outbound>,
+    conn: ConnHandle,
+    /// Set by `Welcome`. Until then the session may only say `Hello`: one choke
+    /// point in [`Sim::handle`] drops anything else, so no request handler has to
+    /// remember to check (a rejected session's queued requests never act).
+    seat: Option<Seat>,
+}
+
+/// Who a welcomed session plays.
+#[derive(Clone, Copy, Debug)]
+struct Seat {
+    #[allow(dead_code)] // read by command handling (M3-4)
+    player: u16,
+    /// `None`: sandbox, may command every nation (M3 only, D24).
+    #[allow(dead_code)] // read by command handling (M3-4)
+    nation: Option<u32>,
 }
 
 pub(crate) struct Sim {
@@ -37,8 +50,7 @@ impl Sim {
 
     fn send(&self, session: u64, out: Outbound) {
         if let Some(s) = self.sessions.get(&session) {
-            // A closed connection drops its receiver; there's nothing left to tell it.
-            let _ = s.out.send(out);
+            s.conn.send(out);
         }
     }
 
@@ -48,7 +60,7 @@ impl Sim {
         self.send(session, Outbound::Close);
     }
 
-    fn hello(&mut self, session: u64, major: u16, minor: u16, name: &str, requested_nation: Option<u32>) {
+    fn hello(&mut self, session: u64, major: u16, minor: u16, name: Option<&str>, requested_nation: Option<u32>) {
         let nations = self.scenario.world.nations.key.len();
         if major != PROTOCOL_MAJOR {
             let reason = format!(
@@ -65,6 +77,9 @@ impl Sim {
             return self.reject(session, &format!("unknown nation {n}: the scenario has {nations}"));
         }
         self.active = Some(session);
+        if let Some(s) = self.sessions.get_mut(&session) {
+            s.seat = Some(Seat { player: 0, nation: requested_nation });
+        }
         info!(session, name, ?requested_nation, "welcomed");
         let info = WelcomeInfo {
             player: 0,
@@ -80,15 +95,19 @@ impl Sim {
     /// Handles one inbound event. Returns `false` when the server should stop.
     fn handle(&mut self, event: Inbound) -> bool {
         match event {
-            Inbound::Connected { session, out } => {
-                self.sessions.insert(session, Session { out });
+            Inbound::Connected { session, conn } => {
+                self.sessions.insert(session, Session { conn, seat: None });
             }
-            Inbound::Request { session, request } => match request {
-                Request::Hello { major, minor, name, requested_nation, .. } => {
-                    self.hello(session, major, minor, &name, requested_nation);
-                }
-                other => debug!(session, ?other, "not handled until M3-3 to M3-6"),
-            },
+            Inbound::Request { session, request: Request::Hello { major, minor, name, requested_nation, .. } } => {
+                self.hello(session, major, minor, name.as_deref(), requested_nation);
+            }
+            // The admission choke point: only welcomed sessions get past here.
+            Inbound::Request { session, request } if !self.sessions.get(&session).is_some_and(|s| s.seat.is_some()) => {
+                debug!(session, ?request, "ignored: the session was not welcomed");
+            }
+            Inbound::Request { session, request } => {
+                debug!(session, ?request, "not handled until M3-3 to M3-6");
+            }
             Inbound::Closed { session } => {
                 self.sessions.remove(&session);
                 if self.active == Some(session) {
@@ -113,7 +132,7 @@ pub(crate) fn run(mut sim: Sim, inbound: Receiver<Inbound>) {
     }
     // Close every remaining connection (e.g. a rejected client that stayed connected).
     for session in sim.sessions.values() {
-        let _ = session.out.send(Outbound::Frame(encode::goodbye("the server is shutting down")));
-        let _ = session.out.send(Outbound::Close);
+        session.conn.send(Outbound::Frame(encode::goodbye("the server is shutting down")));
+        session.conn.send(Outbound::Close);
     }
 }

@@ -115,8 +115,8 @@ sequenceDiagram
 
 ## 6. Single player: how the client runs the server
 
-- The client launches `pax_server` as a child process: `pax_server --scenario <path> --bind 127.0.0.1:0 --port-file <tmp>`. The server binds a free port, writes it to the port file, and the client connects.
-- When the client exits, it closes the connection, and the server shuts down once its last session has gone (`--exit-when-idle`).
+- The client launches `pax_server` as a child process: `pax_server --scenario <dir> --bind 127.0.0.1:0 --port-file <tmp> --exit-when-idle`. The server binds a free port and writes it to the port file (atomically, so a polling client never reads half a number). The client then connects.
+- When the client exits, it closes the connection, and `--exit-when-idle` makes the server shut down once its player has gone.
 - There is no Docker and no separate install: the server binary ships next to the client.
 
 ## 7. Conversions and units

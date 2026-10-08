@@ -19,10 +19,11 @@ pub enum WireCommand {
 /// A verified client message (`ClientPayload`), owned.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Request {
+    /// `name` is display-only; absent stays absent.
     Hello {
         major: u16,
         minor: u16,
-        name: String,
+        name: Option<String>,
         requested_nation: Option<u32>,
         resume_token: u64,
     },
@@ -46,11 +47,12 @@ pub enum Request {
     Ping {
         nonce: u64,
     },
+    /// An absent name stays `None`; the save handler rejects it (M3-6), never a default.
     SaveGame {
-        name: String,
+        name: Option<String>,
     },
     LoadGame {
-        name: String,
+        name: Option<String>,
     },
     ListSaves,
 }
@@ -98,7 +100,8 @@ fn command(s: &wire::SubmitCommand<'_>) -> Option<WireCommand> {
 /// Verifies `frame` (length prefix included) and copies it into a [`Request`].
 pub fn decode(frame: &[u8]) -> Result<Request, RequestError> {
     let msg = read_client_message(frame).map_err(RequestError::Protocol)?;
-    let owned = |s: Option<&str>| s.unwrap_or_default().to_owned();
+    // Absent strings stay absent: whoever owns a field decides whether that's an error.
+    let owned = |s: Option<&str>| s.map(str::to_owned);
     use wire::ClientPayload as P;
     let request = match msg.payload_type() {
         P::Hello => msg.payload_as_hello().map(|h| Request::Hello {

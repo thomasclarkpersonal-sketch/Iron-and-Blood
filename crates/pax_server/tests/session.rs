@@ -182,3 +182,51 @@ fn exit_when_idle_stops_the_server_when_the_player_leaves() {
     });
     done_rx.recv_timeout(Duration::from_secs(5)).expect("server exits after its only player leaves");
 }
+
+#[test]
+fn a_rejected_client_cannot_act_even_if_it_sends_requests_at_once() {
+    let server = two_states();
+    let mut first = Client::connect(server.local_addr());
+    first.hello(None);
+    assert!(matches!(first.next(), Got::Welcome { .. }));
+    // Hello and Subscribe in one burst: the Subscribe reaches the sim thread before
+    // the rejection closes the connection, and must be ignored there.
+    let mut second = Client::connect(server.local_addr());
+    second.hello(None);
+    second.subscribe(pax_protocol::wire::MapMode::Population, 0, None, None);
+    assert!(matches!(second.next(), Got::Rejected(_)));
+    assert_eq!(second.next(), Got::Closed);
+    server.shutdown();
+}
+
+#[test]
+fn a_client_that_never_reads_is_disconnected_instead_of_queued_forever() {
+    use std::io::Write;
+    let server = two_states();
+    let mut c = Client::connect(server.local_addr());
+    c.hello(None);
+    assert!(matches!(c.next(), Got::Welcome { .. }));
+    // Ping without reading: once the socket buffers fill, Pongs back up in the
+    // server's bounded queue, and the server closes the connection.
+    let mut stream = c.into_stream();
+    let mut batch = Vec::new();
+    for nonce in 0..1_000u64 {
+        batch.extend(ping_frame(nonce));
+    }
+    let deadline = std::time::Instant::now() + Duration::from_secs(60);
+    let closed = loop {
+        if stream.write_all(&batch).is_err() {
+            break true;
+        }
+        if std::time::Instant::now() > deadline {
+            break false;
+        }
+    };
+    assert!(closed, "the server kept accepting pings from a client that never reads");
+    // The server is still healthy for others.
+    let mut other = Client::connect(server.local_addr());
+    other.hello(None);
+    let got = other.next();
+    assert!(matches!(got, Got::Welcome { .. } | Got::Rejected(_)), "{got:?}");
+    server.shutdown();
+}
