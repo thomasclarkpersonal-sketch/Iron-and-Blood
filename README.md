@@ -54,7 +54,7 @@ New to the project? Start with **[Onboarding](docs/ONBOARDING.md)**: a codebase 
 
 * [Milestone 1](docs/MILESTONE_1.md): scope, acceptance criteria, team task list, M2 preview.
 * [Milestone 2](docs/MILESTONE_2.md): M2 status, decisions waiting on you, next tasks.
-* [Milestone 3](docs/MILESTONE_3.md): playable single player: `pax_server`, Godot client, saves.
+* [Milestone 3](docs/MILESTONE_3.md): playable single player: `pax_server`, Godot client, saves (closed).
 * [Milestone 4](docs/MILESTONE_4.md): multiplayer: lobby, authority, lag rules, hosting.
 * [Network protocol](docs/NETWORK_PROTOCOL.md): the wire format between server and client.
 * [System Architecture Overview](docs/ARCHITECTURE.md): engine design and the tick schedule.
