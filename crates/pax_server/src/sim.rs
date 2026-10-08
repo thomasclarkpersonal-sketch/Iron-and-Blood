@@ -151,15 +151,20 @@ impl Sim {
         self.lobby_changed();
     }
 
-    /// What a client is told when the table refuses it, with the nation's key.
+    /// What a client is told when the table refuses it (`Rejected`, or a lobby
+    /// notice). The table gives the reason; the sim knows the context.
     fn refusal(&self, refusal: Refusal) -> String {
-        let key = match refusal {
-            Refusal::NationTaken { nation, .. } => {
-                self.game.world().nations.key.get(nation as usize).map(String::as_str)
+        match refusal {
+            Refusal::Full if self.max_players == 1 => {
+                "server full: a single-player server accepts one client".to_owned()
             }
-            _ => None,
-        };
-        refusal.reason(self.max_players, key)
+            Refusal::Full => format!("server full: all {} players are connected", self.max_players),
+            Refusal::NationTaken { nation, player } => match self.game.world().nations.key.get(nation as usize) {
+                Some(key) => format!("nation {nation} ({key}) is taken by player {player}"),
+                None => format!("nation {nation} is taken by player {player}"),
+            },
+            Refusal::NoClaim => "claim a nation before you are ready".to_owned(),
+        }
     }
 
     /// Commands and the clock work: single player, or a multiplayer game the host
@@ -184,7 +189,7 @@ impl Sim {
 
     /// The lobby is over once the game starts (M4-2): claims and ready marks only
     /// count before it. Returns whether the request may go on.
-    fn in_lobby(&self, session: u64) -> bool {
+    fn admit_lobby_request(&self, session: u64) -> bool {
         match self.phase {
             Phase::Lobby => true,
             Phase::Playing => {
@@ -201,7 +206,7 @@ impl Sim {
     }
 
     fn claim_nation(&mut self, session: u64, nation: Option<u32>) {
-        if !self.in_lobby(session) {
+        if !self.admit_lobby_request(session) {
             return;
         }
         let nations = self.game.world().nations.key.len();
@@ -215,7 +220,7 @@ impl Sim {
     }
 
     fn set_ready(&mut self, session: u64, ready: bool) {
-        if !self.in_lobby(session) {
+        if !self.admit_lobby_request(session) {
             return;
         }
         match self.sessions.set_ready(session, ready) {
@@ -227,7 +232,7 @@ impl Sim {
     /// The host starts the game once every player is ready (D24). The clock stays
     /// paused: the host unpauses when everyone is looking.
     fn start_game(&mut self, session: u64) {
-        if !self.in_lobby(session) {
+        if !self.admit_lobby_request(session) {
             return;
         }
         if !self.sessions.is_host(session) {
@@ -432,23 +437,28 @@ impl Sim {
         // Not `set_clock`: the `Welcome` below announces the speed with the new game.
         self.clock = Clock::Paused;
         let nations = self.game.world().nations.key.len();
-        // Every player gets the new game's Welcome, in session order (NETWORK_PROTOCOL §3).
+        // First the seats the new game can't hold: a seat is never widened, so a player
+        // whose nation the loaded game lacks leaves, rather than becoming a sandbox
+        // seat that commands every nation.
         for id in self.sessions.welcomed() {
             let seat = self.sessions.seat(id).expect("welcomed sessions have a seat");
-            // A seat is never widened: a player whose nation the loaded game lacks
-            // leaves, rather than becoming a sandbox seat that commands every nation.
             if let Some(n) = seat.nation().filter(|&n| n as usize >= nations) {
                 self.goodbye(id, &format!("the loaded game has no nation {n}, which you played"));
                 if let Some(v) = self.sessions.unseat(id) {
                     self.seat_ended(id, v);
                 }
-                continue;
             }
+        }
+        // Then every remaining player gets the new game's Welcome, in session order
+        // (NETWORK_PROTOCOL §3), and once the table is final, the lobby.
+        for id in self.sessions.welcomed() {
+            let seat = self.sessions.seat(id).expect("welcomed sessions have a seat");
             let Some(s) = self.sessions.get_mut(id) else { continue };
             s.subscription = CheckedSubscription::default();
             s.window = UpdateWindow::default();
             self.welcome(id, seat);
         }
+        self.lobby_changed();
     }
 
     /// The host ends another player's session (D24). Anything else is ignored: a
@@ -465,14 +475,16 @@ impl Sim {
         if let Some(v) = self.sessions.unseat(target) {
             self.seat_ended(target, v);
         }
+        self.lobby_changed();
     }
 
     /// A player's seat ended: they left, were kicked, or a load dropped them. The
     /// table has already passed the host role on (D24). When the last player
     /// leaves, nobody is watching, so the clock stops (D23), and a server the
     /// client launched stops too. Every path that ends a seat comes through here.
+    /// It doesn't tell the lobby: the request handler does, once, when the table is
+    /// final, so a batch of changes (a load) never shows half done.
     fn seat_ended(&mut self, session: u64, v: Vacated) {
-        self.lobby_changed();
         if let Some(next) = v.new_host {
             info!(session = next, "the host left; the host is now this session");
         }
@@ -548,6 +560,7 @@ impl Sim {
                 // The others play on (D24); see `seat_ended`.
                 if let Some(v) = self.sessions.remove(session) {
                     self.seat_ended(session, v);
+                    self.lobby_changed();
                 }
             }
             Inbound::Shutdown => self.stop = true,
@@ -1087,6 +1100,32 @@ mod tests {
             }
         }
         assert_eq!((sim.sessions.players(), sim.clock), (0, Clock::Paused), "nobody plays a sandbox seat now");
+    }
+
+    /// A load that drops one player tells the others the lobby once, after their new
+    /// Welcome and with the table final, so nothing they decode mixes two games.
+    #[test]
+    fn a_load_tells_the_lobby_once_when_the_table_is_final() {
+        let (mut sim, saves) = multiplayer(2);
+        sim.sandbox = true;
+        let (_a, _) = join(&mut sim, 1, Some(0));
+        let (mut b, _) = join(&mut sim, 2, None); // a sandbox seat survives any load
+        drain_all(&mut b);
+        // A save of mini_valley, which has no nations.
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/mini_valley");
+        let mut config = crate::Config::local(&dir);
+        config.saves_dir = saves.0.clone();
+        let mut other = Sim::new(pax_data::load_scenario(&dir).unwrap(), &config);
+        let (mut o, _) = join(&mut other, 1, None);
+        other.handle(Inbound::Request { session: 1, request: Request::SaveGame { name: Some("mv".into()) } });
+        drain(&mut o);
+        sim.handle(Inbound::Request { session: 1, request: Request::LoadGame { name: Some("mv".into()) } });
+        let sent = drain_all(&mut b);
+        assert_eq!(
+            sent,
+            [Sent::Welcome { player: 1 }, Sent::Lobby { ready: vec![false], started: false, notice: None }],
+            "the new game's Welcome, then one lobby with only the players it holds"
+        );
     }
 
     #[test]

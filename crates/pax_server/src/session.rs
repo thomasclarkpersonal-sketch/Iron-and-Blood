@@ -50,22 +50,6 @@ pub(crate) enum Refusal {
     NoClaim,
 }
 
-impl Refusal {
-    /// The reason a client is told (`Rejected`, or a lobby notice). `key` is the
-    /// taken nation's key, which the table doesn't know.
-    pub(crate) fn reason(self, max_players: usize, key: Option<&str>) -> String {
-        match (self, max_players) {
-            (Refusal::Full, 1) => "server full: a single-player server accepts one client".to_owned(),
-            (Refusal::Full, n) => format!("server full: all {n} players are connected"),
-            (Refusal::NationTaken { nation, player }, _) => match key {
-                Some(key) => format!("nation {nation} ({key}) is taken by player {player}"),
-                None => format!("nation {nation} is taken by player {player}"),
-            },
-            (Refusal::NoClaim, _) => "claim a nation before you are ready".to_owned(),
-        }
-    }
-}
-
 /// Who is host (D24). The table applies the whole rule, electing and succeeding.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum HostRule {
