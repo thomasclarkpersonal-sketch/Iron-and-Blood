@@ -153,3 +153,41 @@ pub fn save_list(names: &[String]) -> Vec<u8> {
     let l = wire::SaveList::create(&mut b, &wire::SaveListArgs { names: Some(names) });
     finish(b, ServerPayload::SaveList, l.as_union_value())
 }
+
+/// One player as the lobby shows them (`LobbyPlayer`, D24).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LobbyEntry {
+    pub player: u16,
+    pub name: String,
+    pub nation: Option<u32>,
+    pub sandbox: bool,
+    pub ready: bool,
+    pub host: bool,
+}
+
+/// The lobby (M4-2): every player, whether the game started, and, for the one
+/// client whose request was refused, why.
+pub fn lobby_state(players: &[LobbyEntry], started: bool, notice: Option<&str>) -> Vec<u8> {
+    let mut b = FlatBufferBuilder::new();
+    let rows: Vec<_> = players
+        .iter()
+        .map(|p| {
+            let name = b.create_string(&p.name);
+            wire::LobbyPlayer::create(
+                &mut b,
+                &wire::LobbyPlayerArgs {
+                    player: p.player,
+                    name: Some(name),
+                    nation: p.nation,
+                    sandbox: p.sandbox,
+                    ready: p.ready,
+                    host: p.host,
+                },
+            )
+        })
+        .collect();
+    let players = b.create_vector(&rows);
+    let notice = notice.map(|n| b.create_string(n));
+    let l = wire::LobbyState::create(&mut b, &wire::LobbyStateArgs { players: Some(players), started, notice });
+    finish(b, ServerPayload::LobbyState, l.as_union_value())
+}

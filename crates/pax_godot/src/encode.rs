@@ -119,6 +119,32 @@ pub fn load_game(name: &str) -> Vec<u8> {
     frame(b, wire::ClientPayload::LoadGame, l.as_union_value())
 }
 
+/// Lobby (M4-2): claim a nation, or `None` to give up the claim.
+pub fn claim_nation(nation: Option<u32>) -> Vec<u8> {
+    let mut b = FlatBufferBuilder::new();
+    let c = wire::ClaimNation::create(&mut b, &wire::ClaimNationArgs { nation });
+    frame(b, wire::ClientPayload::ClaimNation, c.as_union_value())
+}
+
+pub fn set_ready(ready: bool) -> Vec<u8> {
+    let mut b = FlatBufferBuilder::new();
+    let r = wire::SetReady::create(&mut b, &wire::SetReadyArgs { ready });
+    frame(b, wire::ClientPayload::SetReady, r.as_union_value())
+}
+
+pub fn start_game() -> Vec<u8> {
+    let mut b = FlatBufferBuilder::new();
+    let s = wire::StartGame::create(&mut b, &wire::StartGameArgs {});
+    frame(b, wire::ClientPayload::StartGame, s.as_union_value())
+}
+
+/// Host only (D24): end player `player`'s session.
+pub fn kick(player: u16) -> Vec<u8> {
+    let mut b = FlatBufferBuilder::new();
+    let k = wire::Kick::create(&mut b, &wire::KickArgs { player });
+    frame(b, wire::ClientPayload::Kick, k.as_union_value())
+}
+
 pub fn list_saves() -> Vec<u8> {
     let mut b = FlatBufferBuilder::new();
     let l = wire::ListSaves::create(&mut b, &wire::ListSavesArgs {});

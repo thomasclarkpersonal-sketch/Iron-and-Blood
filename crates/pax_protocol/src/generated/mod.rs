@@ -6,6 +6,8 @@ pub mod pax {
     use super::*;
     mod ack_generated;
     pub use self::ack_generated::*;
+    mod claim_nation_generated;
+    pub use self::claim_nation_generated::*;
     mod client_message_generated;
     pub use self::client_message_generated::*;
     mod client_payload_generated;
@@ -32,6 +34,10 @@ pub mod pax {
     pub use self::list_saves_generated::*;
     mod load_game_generated;
     pub use self::load_game_generated::*;
+    mod lobby_player_generated;
+    pub use self::lobby_player_generated::*;
+    mod lobby_state_generated;
+    pub use self::lobby_state_generated::*;
     mod map_mode_generated;
     pub use self::map_mode_generated::*;
     mod map_view_generated;
@@ -70,12 +76,16 @@ pub mod pax {
     pub use self::set_consumption_rate_generated::*;
     mod set_income_tax_generated;
     pub use self::set_income_tax_generated::*;
+    mod set_ready_generated;
+    pub use self::set_ready_generated::*;
     mod set_speed_generated;
     pub use self::set_speed_generated::*;
     mod set_transfer_rate_generated;
     pub use self::set_transfer_rate_generated::*;
     mod speed_generated;
     pub use self::speed_generated::*;
+    mod start_game_generated;
+    pub use self::start_game_generated::*;
     mod static_data_generated;
     pub use self::static_data_generated::*;
     mod submit_command_generated;

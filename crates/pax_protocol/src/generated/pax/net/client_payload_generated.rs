@@ -12,10 +12,10 @@ use super::*;
 #[deprecated(since = "2.0.0", note = "Use associated constants instead. This will no longer be generated in 2021.")]
 pub const ENUM_MIN_CLIENT_PAYLOAD: u8 = 0;
 #[deprecated(since = "2.0.0", note = "Use associated constants instead. This will no longer be generated in 2021.")]
-pub const ENUM_MAX_CLIENT_PAYLOAD: u8 = 10;
+pub const ENUM_MAX_CLIENT_PAYLOAD: u8 = 13;
 #[deprecated(since = "2.0.0", note = "Use associated constants instead. This will no longer be generated in 2021.")]
 #[allow(non_camel_case_types)]
-pub const ENUM_VALUES_CLIENT_PAYLOAD: [ClientPayload; 11] = [
+pub const ENUM_VALUES_CLIENT_PAYLOAD: [ClientPayload; 14] = [
   ClientPayload::NONE,
   ClientPayload::Hello,
   ClientPayload::SubmitCommand,
@@ -27,6 +27,9 @@ pub const ENUM_VALUES_CLIENT_PAYLOAD: [ClientPayload; 11] = [
   ClientPayload::LoadGame,
   ClientPayload::ListSaves,
   ClientPayload::Kick,
+  ClientPayload::ClaimNation,
+  ClientPayload::SetReady,
+  ClientPayload::StartGame,
 ];
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
@@ -45,9 +48,12 @@ impl ClientPayload {
   pub const LoadGame: Self = Self(8);
   pub const ListSaves: Self = Self(9);
   pub const Kick: Self = Self(10);
+  pub const ClaimNation: Self = Self(11);
+  pub const SetReady: Self = Self(12);
+  pub const StartGame: Self = Self(13);
 
   pub const ENUM_MIN: u8 = 0;
-  pub const ENUM_MAX: u8 = 10;
+  pub const ENUM_MAX: u8 = 13;
   pub const ENUM_VALUES: &'static [Self] = &[
     Self::NONE,
     Self::Hello,
@@ -60,6 +66,9 @@ impl ClientPayload {
     Self::LoadGame,
     Self::ListSaves,
     Self::Kick,
+    Self::ClaimNation,
+    Self::SetReady,
+    Self::StartGame,
   ];
   /// Returns the variant's name or "" if unknown.
   pub fn variant_name(self) -> Option<&'static str> {
@@ -75,6 +84,9 @@ impl ClientPayload {
       Self::LoadGame => Some("LoadGame"),
       Self::ListSaves => Some("ListSaves"),
       Self::Kick => Some("Kick"),
+      Self::ClaimNation => Some("ClaimNation"),
+      Self::SetReady => Some("SetReady"),
+      Self::StartGame => Some("StartGame"),
       _ => None,
     }
   }

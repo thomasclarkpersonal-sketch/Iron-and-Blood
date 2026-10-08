@@ -149,7 +149,7 @@ fn the_request_decoder_survives_noise_flipped_bytes_and_truncation() {
 fn hostile_request(n: &mut Noise) -> Request {
     let nation = |n: &mut Noise| n.int(2) as u32;
     let opt = |n: &mut Noise, below: u64| (!n.chance(3)).then(|| n.int(below) as u32);
-    match n.below(11) {
+    match n.below(13) {
         0 => Request::Hello {
             major: if n.chance(2) { PROTOCOL_MAJOR } else { n.next() as u16 },
             minor: n.next() as u16,
@@ -178,6 +178,9 @@ fn hostile_request(n: &mut Noise) -> Request {
         7 => Request::SaveGame { name: n.name() },
         8 => Request::LoadGame { name: n.name() },
         9 => Request::Kick { player: n.int(4) as u16 },
+        10 => Request::ClaimNation { nation: opt(n, 2) },
+        11 => Request::SetReady { ready: n.chance(2) },
+        12 => Request::StartGame,
         _ => Request::ListSaves,
     }
 }
@@ -212,6 +215,11 @@ fn the_sim_thread_survives_hostile_requests() {
     let mut open: Vec<u64> = Vec::new();
     let mut next_session = 1;
     for round in 0..6_000u64 {
+        // The first half plays in the lobby, where hostile claims and starts rarely
+        // line everyone up; the second half plays the game itself.
+        if round == 3_000 {
+            sim.start_without_lobby();
+        }
         match noise.below(40) {
             0 if open.len() < 4 => {
                 let (conn, rx) = ConnHandle::for_test();

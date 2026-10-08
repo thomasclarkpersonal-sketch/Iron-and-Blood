@@ -31,6 +31,7 @@ keys! {
     SAVE_RESULT = "save_result",
     SAVE_LIST = "save_list",
     GOODBYE = "goodbye",
+    LOBBY_STATE = "lobby_state",
     UNKNOWN = "unknown",
     /// Not a server message: the connection ended (reason in `REASON`).
     CLOSED = "closed",
@@ -134,6 +135,16 @@ keys! {
     REQUEST = "request",
     NAME = "name",
     NAMES = "names",
+
+    // LobbyState (M4-2). `LOBBY_PLAYERS` is a table: one column per key below (and
+    // `PLAYER`, `NAME`, `NATION`), one entry per player; `NATION` entries may be null.
+    LOBBY_PLAYERS = "lobby_players",
+    SANDBOX = "sandbox",
+    READY = "ready",
+    HOST = "host",
+    STARTED = "started",
+    /// Why this client's last lobby request was refused, or null.
+    NOTICE = "notice",
 
     // A loaded map (PaxClient.load_map): ERROR, or the ID texture and labels.
     WIDTH = "width",

@@ -200,6 +200,31 @@ table Goodbye {
   reason: string;
 }
 
+/// One player in the lobby (D24, protocol 1.4).
+table LobbyPlayer {
+  player: ushort;
+  /// The name the client gave in Hello.
+  name: string;
+  /// The claimed nation; absent for none yet, or for a sandbox seat.
+  nation: uint = null;
+  /// A sandbox seat (only on a server run with --sandbox): may command every nation.
+  sandbox: bool;
+  ready: bool;
+  host: bool;
+}
+
+/// The lobby of a multiplayer server (D24, protocol 1.4), sent to every player
+/// whenever it changes: a player joins, leaves, claims, readies, the host changes, or
+/// the game starts. A single-player server never sends it.
+table LobbyState {
+  players: [LobbyPlayer];
+  /// The host started the game: commands and the clock work from now on.
+  started: bool;
+  /// Why this client's last lobby request was refused; absent otherwise. A LobbyState
+  /// with a notice goes only to the client that asked.
+  notice: string;
+}
+
 union ServerPayload {
   Welcome,
   Rejected,
@@ -210,6 +235,7 @@ union ServerPayload {
   SaveResult,
   SaveList,
   Goodbye,
+  LobbyState,
 }
 
 table ServerMessage {

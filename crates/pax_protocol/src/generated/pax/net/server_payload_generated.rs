@@ -12,10 +12,10 @@ use super::*;
 #[deprecated(since = "2.0.0", note = "Use associated constants instead. This will no longer be generated in 2021.")]
 pub const ENUM_MIN_SERVER_PAYLOAD: u8 = 0;
 #[deprecated(since = "2.0.0", note = "Use associated constants instead. This will no longer be generated in 2021.")]
-pub const ENUM_MAX_SERVER_PAYLOAD: u8 = 9;
+pub const ENUM_MAX_SERVER_PAYLOAD: u8 = 10;
 #[deprecated(since = "2.0.0", note = "Use associated constants instead. This will no longer be generated in 2021.")]
 #[allow(non_camel_case_types)]
-pub const ENUM_VALUES_SERVER_PAYLOAD: [ServerPayload; 10] = [
+pub const ENUM_VALUES_SERVER_PAYLOAD: [ServerPayload; 11] = [
   ServerPayload::NONE,
   ServerPayload::Welcome,
   ServerPayload::Rejected,
@@ -26,6 +26,7 @@ pub const ENUM_VALUES_SERVER_PAYLOAD: [ServerPayload; 10] = [
   ServerPayload::SaveResult,
   ServerPayload::SaveList,
   ServerPayload::Goodbye,
+  ServerPayload::LobbyState,
 ];
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
@@ -43,9 +44,10 @@ impl ServerPayload {
   pub const SaveResult: Self = Self(7);
   pub const SaveList: Self = Self(8);
   pub const Goodbye: Self = Self(9);
+  pub const LobbyState: Self = Self(10);
 
   pub const ENUM_MIN: u8 = 0;
-  pub const ENUM_MAX: u8 = 9;
+  pub const ENUM_MAX: u8 = 10;
   pub const ENUM_VALUES: &'static [Self] = &[
     Self::NONE,
     Self::Welcome,
@@ -57,6 +59,7 @@ impl ServerPayload {
     Self::SaveResult,
     Self::SaveList,
     Self::Goodbye,
+    Self::LobbyState,
   ];
   /// Returns the variant's name or "" if unknown.
   pub fn variant_name(self) -> Option<&'static str> {
@@ -71,6 +74,7 @@ impl ServerPayload {
       Self::SaveResult => Some("SaveResult"),
       Self::SaveList => Some("SaveList"),
       Self::Goodbye => Some("Goodbye"),
+      Self::LobbyState => Some("LobbyState"),
       _ => None,
     }
   }
