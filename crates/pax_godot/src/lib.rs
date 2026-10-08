@@ -115,7 +115,8 @@ impl PaxClient {
     }
 
     /// Where this client's copy of the scenario is, for a server it didn't launch
-    /// (`launch` sets it itself). `load_map` reads the map files from there.
+    /// (`launch` sets it itself; call this after `connect_to`, which clears it).
+    /// `load_map` reads the map files from there.
     #[func]
     fn set_scenario_dir(&mut self, scenario_dir: GString) {
         self.scenario_dir = Some(scenario_dir.to_string().into());
@@ -125,6 +126,13 @@ impl PaxClient {
     #[func]
     fn connect_to(&mut self, host: GString, port: i64) -> GString {
         let Ok(port) = u16::try_from(port) else { return rejected(format!("port {port} out of range")) };
+        // A new session: nothing of the previous one carries over, including a
+        // launched server and its scenario directory (call `set_scenario_dir` after).
+        self.connection = None;
+        self.server = None;
+        self.welcome = None;
+        self.map = None;
+        self.scenario_dir = None;
         match format!("{host}:{port}").parse() {
             Ok(addr) => self.connect_addr(addr),
             Err(e) => rejected(format!("bad address: {e}")),
