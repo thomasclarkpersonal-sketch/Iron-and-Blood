@@ -1,13 +1,15 @@
-//! `pax_server --scenario DIR [--bind ADDR] [--port-file PATH] [--saves DIR] [--players N] [--sandbox] [--admin NAME] [--pause-after S] [--drop-after S] [--updates-per-second N] [--map-every N] [--exit-when-idle]`
+//! `pax_server --scenario DIR [--bind ADDR] [--port-file PATH] [--saves DIR] [--players N] [--sandbox] [--admin NAME --admin-password-file PATH] [--password-file PATH] [--commands-per-second N] [--pause-after S] [--drop-after S] [--updates-per-second N] [--map-every N] [--exit-when-idle]`
 //!
 //! The authoritative game server (D10). In single player the client launches it with
 //! `--scenario <dir> --bind 127.0.0.1:0 --port-file <tmp> --sandbox --exit-when-idle`
 //! and reads the port from the file (NETWORK_PROTOCOL §6). `--players N` lets up to N
 //! clients play at once (M4-1; default 1). `--sandbox` accepts sessions without a
-//! nation, and `--admin NAME` makes the client of that name the host (D24, M4-3).
+//! nation. `--admin NAME --admin-password-file PATH` makes the client of that name
+//! the host when it gives the admin password (D24, M4-3, M4-6): a name alone proves
+//! nothing. `--password-file PATH` makes every player give the server password.
 //!
 //! D24 requires TLS whenever a server is not bound to localhost, and TLS arrives with
-//! M4-6. Until then, `--players` above 1 is refused on any non-loopback address.
+//! M4-6b. Until then, `--players` above 1 is refused on any non-loopback address.
 //!
 //! With several players, a silent client pauses the game after `--pause-after`
 //! seconds and is dropped after `--drop-after` (D24: 5 and 30 by default). A remote
@@ -18,14 +20,26 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::Duration;
 
-use pax_server::{Config, Server};
+use pax_server::{Config, Secret, Server};
 use tracing::error;
 
-const USAGE: &str = "usage: pax_server --scenario DIR [--bind ADDR] [--port-file PATH] [--saves DIR] [--players N] [--sandbox] [--admin NAME] [--pause-after S] [--drop-after S] [--updates-per-second N] [--map-every N] [--exit-when-idle]";
+const USAGE: &str = "usage: pax_server --scenario DIR [--bind ADDR] [--port-file PATH] [--saves DIR] [--players N] [--sandbox] [--admin NAME --admin-password-file PATH] [--password-file PATH] [--commands-per-second N] [--pause-after S] [--drop-after S] [--updates-per-second N] [--map-every N] [--exit-when-idle]";
 
 /// The most players `--players` allows. Player ids are `u16` on the wire; the cap is
 /// far below that, a sanity limit for a server whose every player gets every update.
 const MAX_PLAYERS: u16 = 64;
+
+/// A password from the file at `path` (D24, M4-6): read from a file, so it never
+/// shows in the process list, with a trailing line break removed.
+fn secret(flag: &str, path: Option<String>) -> Result<Secret, String> {
+    let path = path.ok_or(format!("{flag} needs a value"))?;
+    let text = std::fs::read_to_string(&path).map_err(|e| format!("{flag}: cannot read {path}: {e}"))?;
+    let password = text.trim_end_matches(['\n', '\r']).to_owned();
+    if password.is_empty() {
+        return Err(format!("{flag}: {path} is empty"));
+    }
+    Ok(Secret::new(password))
+}
 
 /// Parses the arguments after the program name.
 fn parse_args(args: impl IntoIterator<Item = String>) -> Result<(Config, Option<PathBuf>), String> {
@@ -49,6 +63,7 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> Result<(Config, Option<
         let value = value.ok_or(format!("{flag} needs a value"))?;
         value.parse::<u32>().ok().filter(|&n| n > 0).ok_or(format!("{flag}: '{value}' is not a whole number above 0"))
     };
+    let (mut admin_name, mut admin_password) = (None, None);
     while let Some(flag) = it.next() {
         match flag.as_str() {
             "--scenario" => scenario = Some(PathBuf::from(it.next().ok_or("--scenario needs a value")?)),
@@ -60,7 +75,10 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> Result<(Config, Option<
                 config.bandwidth.updates_per_second = count("--updates-per-second", it.next())?;
             }
             "--map-every" => config.bandwidth.map_every = count("--map-every", it.next())?,
-            "--admin" => config.admin = Some(it.next().ok_or("--admin needs a value")?),
+            "--admin" => admin_name = Some(it.next().ok_or("--admin needs a value")?),
+            "--password-file" => config.password = Some(secret("--password-file", it.next())?),
+            "--admin-password-file" => admin_password = Some(secret("--admin-password-file", it.next())?),
+            "--commands-per-second" => config.commands_per_second = count("--commands-per-second", it.next())?,
             "--bind" => {
                 let value = it.next().ok_or("--bind needs a value")?;
                 config.bind =
@@ -80,6 +98,13 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> Result<(Config, Option<
         }
     }
     config.scenario = scenario.ok_or("missing --scenario DIR")?;
+    config.admin = match (admin_name, admin_password) {
+        (Some(name), Some(password)) => Some(pax_server::Admin { name, password }),
+        (None, None) => None,
+        _ => {
+            return Err("--admin and --admin-password-file go together: a name alone proves nothing (D24)".to_owned());
+        }
+    };
     // D24's lag rules replace D22's 10 s timeout in multiplayer only.
     if config.max_players > 1 {
         config.use_multiplayer_lag();
@@ -199,8 +224,21 @@ mod tests {
         let (config, _) = parse_args(args("--scenario s")).unwrap();
         assert!(!config.sandbox, "D24: sandbox only with --sandbox");
         assert_eq!(config.admin, None);
-        let (config, _) = parse_args(args("--scenario s --admin ada")).unwrap();
-        assert_eq!(config.admin.as_deref(), Some("ada"));
+        assert!(parse_args(args("--scenario s --admin ada")).unwrap_err().contains("a name alone proves nothing"));
+        let file = std::env::temp_dir().join(format!("pax-admin-pw-{}", std::process::id()));
+        std::fs::write(&file, "s3cret\n").unwrap();
+        let line = format!("--scenario s --admin ada --admin-password-file {}", file.display());
+        let (config, _) = parse_args(args(&line)).unwrap();
+        let admin = config.admin.expect("an admin");
+        assert_eq!((admin.name.as_str(), &admin.password), ("ada", &Secret::new("s3cret")));
+        assert!(!format!("{admin:?}").contains("s3cret"), "Debug never prints the password");
+        assert!(parse_args(args(&format!("--scenario s --admin-password-file {}", file.display()))).is_err());
+        let line = format!("--scenario s --password-file {}", file.display());
+        assert_eq!(parse_args(args(&line)).unwrap().0.password, Some(Secret::new("s3cret")), "line break trimmed");
+        std::fs::write(&file, "\n").unwrap();
+        assert!(parse_args(args(&line)).unwrap_err().contains("is empty"));
+        std::fs::remove_file(&file).unwrap();
+        assert!(parse_args(args("--scenario s --commands-per-second 0")).is_err());
     }
 
     #[test]

@@ -31,6 +31,7 @@ impl<'a> Hello<'a> {
   pub const VT_CLIENT_NAME: flatbuffers::VOffsetT = 8;
   pub const VT_REQUESTED_NATION: flatbuffers::VOffsetT = 10;
   pub const VT_RESUME_TOKEN: flatbuffers::VOffsetT = 12;
+  pub const VT_PASSWORD: flatbuffers::VOffsetT = 14;
 
   #[inline]
   pub unsafe fn init_from_table(table: flatbuffers::Table<'a>) -> Self {
@@ -43,6 +44,7 @@ impl<'a> Hello<'a> {
   ) -> flatbuffers::WIPOffset<Hello<'bldr>> {
     let mut builder = HelloBuilder::new(_fbb);
     builder.add_resume_token(args.resume_token);
+    if let Some(x) = args.password { builder.add_password(x); }
     if let Some(x) = args.requested_nation { builder.add_requested_nation(x); }
     if let Some(x) = args.client_name { builder.add_client_name(x); }
     builder.add_protocol_minor(args.protocol_minor);
@@ -93,6 +95,16 @@ impl<'a> Hello<'a> {
     // which contains a valid value in this slot
     unsafe { self._tab.get::<u64>(Hello::VT_RESUME_TOKEN, Some(0)).unwrap()}
   }
+  /// The server's password, if it has one, or its admin password (D24, protocol
+  /// 1.6). A wrong or missing one is Rejected. Off localhost it travels only over
+  /// TLS (M4-6).
+  #[inline]
+  pub fn password(&self) -> Option<&'a str> {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<&str>>(Hello::VT_PASSWORD, None)}
+  }
 }
 
 impl flatbuffers::Verifiable for Hello<'_> {
@@ -107,6 +119,7 @@ impl flatbuffers::Verifiable for Hello<'_> {
      .visit_field::<flatbuffers::ForwardsUOffset<&str>>("client_name", Self::VT_CLIENT_NAME, false)?
      .visit_field::<u32>("requested_nation", Self::VT_REQUESTED_NATION, false)?
      .visit_field::<u64>("resume_token", Self::VT_RESUME_TOKEN, false)?
+     .visit_field::<flatbuffers::ForwardsUOffset<&str>>("password", Self::VT_PASSWORD, false)?
      .finish();
     Ok(())
   }
@@ -117,6 +130,7 @@ pub struct HelloArgs<'a> {
     pub client_name: Option<flatbuffers::WIPOffset<&'a str>>,
     pub requested_nation: Option<u32>,
     pub resume_token: u64,
+    pub password: Option<flatbuffers::WIPOffset<&'a str>>,
 }
 impl<'a> Default for HelloArgs<'a> {
   #[inline]
@@ -127,6 +141,7 @@ impl<'a> Default for HelloArgs<'a> {
       client_name: None,
       requested_nation: None,
       resume_token: 0,
+      password: None,
     }
   }
 }
@@ -157,6 +172,10 @@ impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> HelloBuilder<'a, 'b, A> {
     self.fbb_.push_slot::<u64>(Hello::VT_RESUME_TOKEN, resume_token, 0);
   }
   #[inline]
+  pub fn add_password(&mut self, password: flatbuffers::WIPOffset<&'b  str>) {
+    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(Hello::VT_PASSWORD, password);
+  }
+  #[inline]
   pub fn new(_fbb: &'b mut flatbuffers::FlatBufferBuilder<'a, A>) -> HelloBuilder<'a, 'b, A> {
     let start = _fbb.start_table();
     HelloBuilder {
@@ -179,6 +198,7 @@ impl core::fmt::Debug for Hello<'_> {
       ds.field("client_name", &self.client_name());
       ds.field("requested_nation", &self.requested_nation());
       ds.field("resume_token", &self.resume_token());
+      ds.field("password", &self.password());
       ds.finish()
   }
 }

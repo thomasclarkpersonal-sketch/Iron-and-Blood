@@ -339,6 +339,7 @@ pub fn hello_frame(major: u16, nation: Option<u32>) -> Vec<u8> {
         client_name: Some(name),
         requested_nation: nation,
         resume_token: 0,
+        password: None,
     };
     let h = Hello::create(&mut b, &args);
     let msg = ClientMessage::create(

@@ -18,6 +18,10 @@ table Hello {
   requested_nation: uint = null;
   /// M4: token from an earlier Welcome, to reclaim a dropped session. 0 = new session.
   resume_token: ulong;
+  /// The server's password, if it has one, or its admin password (D24, protocol
+  /// 1.6). A wrong or missing one is Rejected. Off localhost it travels only over
+  /// TLS (M4-6).
+  password: string;
 }
 
 /// Ask for a command to be applied at the start of the next tick.

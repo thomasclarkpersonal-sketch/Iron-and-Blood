@@ -79,7 +79,7 @@ sequenceDiagram
 
 | Message | Purpose | Reply |
 |---|---|---|
-| `Hello` | Open the session; request a nation (absent = sandbox, only on a server run with `--sandbox`, D24), or reclaim a kept seat with `resume_token` (§3.9) | `Welcome` or `Rejected` |
+| `Hello` | Open the session; request a nation (absent = sandbox, only on a server run with `--sandbox`, D24), or reclaim a kept seat with `resume_token` (§3.9); `password` if the server has one (protocol 1.6, D24) | `Welcome` or `Rejected` |
 | `SubmitCommand` | One engine command (`SetIncomeTax`, `SetTransferRate`, `SetConsumptionRate`) with a client-chosen `client_seq` | exactly one `CommandResult` |
 | `SetSpeed` | Pause, or set speed 1–5. Any player may pause; only the host sets a speed (D24). A refused change, or a speed the server doesn't know (D22), gets the unchanged `ServerState`, to the asker only | `ServerState` |
 | `Subscribe` | Choose the map mode, market panel and province panel | a `DayUpdate` for the current day |
@@ -137,7 +137,7 @@ sequenceDiagram
 - At most **3** `DayUpdate`s may be unacknowledged. When the window is full, the server stops sending to that client but keeps simulating. When an `Ack` frees the window, it sends only the latest day, with `skipped` set to the number of days skipped.
 - The simulation never waits for a client in single player. A slow client sees fewer updates; it never sees stale ones.
 - `ServerState`, `CommandResult` and replies bypass the window. They are small and must not wait behind updates.
-- **Remote sessions (D24, M4-7):** a session whose peer is not on the server's machine gets at most 4 updates a second (`--updates-per-second`); the days in between are coalesced (`skipped`), and a day held by the cap still goes out when its time comes, even if the game pauses meanwhile. Its `MapView` goes out with the answer to `Subscribe` and then with every 5th update (`--map-every`); the updates in between have no `map`, and the client keeps the colours it has. Local sessions (single player, or a player on the server's machine) get every update with the map.
+- **Remote sessions (D24, M4-7):** a session whose peer is not on the server's machine gets at most 4 day updates a second (`--updates-per-second`); the days in between are coalesced (`skipped`), and a day held by the cap still goes out when its time comes, even if the game pauses meanwhile. Its `MapView` goes out with the answer to `Subscribe` and then with every 5th update (`--map-every`); the updates in between have no `map`, and the client keeps the colours it has. The answer to `Subscribe` goes out at once, with the map, and the next day update keeps the gap from it; it is not itself capped, nor counted by the command rate limit (§6), so a client that re-subscribes many times a second costs more than the cap suggests. Local sessions (single player, or a player on the server's machine) get every update with the map.
 
 ## 6. Single player: how the client runs the server
 
@@ -146,10 +146,11 @@ sequenceDiagram
 - The client's bridge (`pax_godot::connection`) does this, and also what every client owes the server: it acknowledges each `DayUpdate` on the poll after the one that delivered it (§5), and sends a `Ping` after a fifth of `IDLE_TIMEOUT` (2 s) without sending anything. It also pairs each `SaveResult` and load `Welcome` with the request it answers, oldest first, because the server answers save requests in order. A `Welcome` nothing asked for is another player's load (§3), and replaces the session's tables all the same.
 - There is no Docker and no separate install: the server binary ships next to the client.
 - **Several players (M4-1, M4-3):** run the server yourself, for example `pax_server --scenario <dir> --bind 127.0.0.1:7777 --players 2`, and have each client connect to it.
-  - **The host** is the first player to join. When the host leaves, the remaining player with the lowest id becomes host. On a dedicated server, `--admin NAME` makes the client named `NAME` the host instead, whenever it joins; while it is away there is no host (D24).
+  - **The host** is the first player to join. When the host leaves, the remaining player with the lowest id becomes host. On a dedicated server, `--admin NAME --admin-password-file PATH` makes the client named `NAME` the host instead, whenever it joins with the admin password; while it is away there is no host (D24). A name alone proves nothing: a client that gives the admin's name without the admin password joins as an ordinary player (the server logs it), and `--admin` without `--admin-password-file` is refused (M4-6).
   - `--pause-after S` and `--drop-after S` set D24's lag thresholds (5 and 30 by default).
   - `--updates-per-second N` and `--map-every N` set D24's bandwidth for remote sessions (4 and 5 by default, M4-7).
-  - TLS and a server password are still to come (M4-6). D24 requires TLS off localhost, so until M4-6 the server refuses `--players` above 1 on any other address: multiplayer is for testing on one machine until then.
+  - `--password-file PATH` makes players give a password in `Hello` (protocol 1.6). The admin password also admits the admin. `--commands-per-second N` sets the rate limit (20 by default). Passwords come from files so they never show in the process list. A password never crosses the network in clear: off localhost, a server with a password or an admin needs TLS (M4-6b), and is refused until then.
+  - TLS is still to come (M4-6b). D24 requires TLS off localhost, so until then the server refuses `--players` above 1 on any other address: multiplayer is for testing on one machine until then.
 
 ## 7. Conversions and units
 
@@ -171,7 +172,7 @@ FlatBuffers stays compatible across versions only if changes follow these rules.
 - **Never delete** a field; mark it `(deprecated)`.
 - **Add union members and enum values only at the end.** Never renumber them. Receivers must ignore an unknown union member or enum value, not crash on it.
 - A change that breaks these rules bumps `protocol_major`. A compatible addition bumps `protocol_minor`.
-- A receiver treats a field added in a later minor version as *no data* when it is absent, never as an error: a newer client must still read an older server. History: 1.1 (M3) added `StaticData.map_dir`; 1.2 (M3) added `NationTable.militancy`; 1.3 (M4-3) added the `Kick` request; 1.4 (M4-2) added the lobby: `ClaimNation`, `SetReady`, `StartGame`, `LobbyState` and `CommandError.NotStarted`; 1.5 (M4-4) added `ServerState.waiting_for` and `LobbyPlayer.away`.
+- A receiver treats a field added in a later minor version as *no data* when it is absent, never as an error: a newer client must still read an older server. History: 1.1 (M3) added `StaticData.map_dir`; 1.2 (M3) added `NationTable.militancy`; 1.3 (M4-3) added the `Kick` request; 1.4 (M4-2) added the lobby: `ClaimNation`, `SetReady`, `StartGame`, `LobbyState` and `CommandError.NotStarted`; 1.5 (M4-4) added `ServerState.waiting_for` and `LobbyPlayer.away`; 1.6 (M4-6) added `Hello.password`.
 - Rust code is generated with **flatc 24.3.25**, matching the `flatbuffers` crate version, into the `pax_protocol` crate. It is checked in, and CI regenerates it and fails on any difference. Mismatched compiler and runtime versions produce code that doesn't compile.
 
 ## 9. Testing

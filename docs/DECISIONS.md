@@ -392,7 +392,7 @@ The state → national → sphere → global roll-up in the old ECONOMY_SYSTEM w
   - `Welcome.content_hash` covers every file the scenario loader reads, maps included; saves record it too (D23).
   - `StaticData.map_hash` covers only the two map files (M3-7). The client hashes its own copy of them the same way and refuses to draw a map that doesn't match.
 - **Ids:** every id is a `uint` index into the `StaticData` tables sent in `Welcome`, fixed for the session (player ids are `ushort`). "None" is an absent optional field, never a sentinel such as `-1`, so a missing id can't be cast into a huge index. POPs are identified by `(province, profession)`, never by row index, because compaction reorders rows (D7).
-- **Views, not state:** a `DayUpdate` carries `WorldSummary` and `NationTable` always, plus the subscribed `MapView`, `MarketDetail` and `ProvinceDetail`. The full POP and producer tables are never sent.
+- **Views, not state:** a `DayUpdate` carries `WorldSummary` and `NationTable` always, plus the subscribed `MapView`, `MarketDetail` and `ProvinceDetail` (a remote multiplayer session gets its `MapView` only with some updates: D24, M4-7). The full POP and producer tables are never sent.
   - The views themselves are built from the engine's read-only `views::ProvinceStats` and the day's report, in about 3 ms at that scale (M3-3).
   - Budget at the D13 long-term scale: ≤ 16 KB summary-only and ≤ 128 KB with every view subscribed.
   - Measured on the schema: 8.3 KB and 91 KB.
@@ -451,17 +451,17 @@ The state → national → sphere → global roll-up in the old ECONOMY_SYSTEM w
 - **Lobby (M4-2):** a multiplayer server starts in a lobby. Players claim nations (a nation another player holds is refused) and mark themselves ready, which needs a nation or a sandbox seat. The host starts the game once everyone is ready. Until then commands get `NotStarted` and the clock doesn't run. Single player has no lobby. A load in a multiplayer game goes back to the lobby: players keep the claims the loaded game has and become unclaimed otherwise (a seat is never widened to sandbox), and the host starts again (M4-5).
 - **Host:** only the host changes speed, unpauses, saves, loads and kicks. Any player may pause.
   - The host is the first player on a player-hosted server. When the host leaves, the remaining player with the lowest id becomes host, so a game is never left without anyone able to unpause it (M4-3).
-  - On a dedicated server, `--admin NAME` names the host's client instead. While the admin is away there is no host, and the role never passes to another player. The name is only what the client says it is, so until M4-6's server password authenticates the admin, a multiplayer server binds loopback only.
+  - On a dedicated server, `--admin NAME` names the host's client instead. While the admin is away there is no host, and the role never passes to another player. A name is only what the client says it is, so the admin proves it with the admin password (`--admin-password-file`, required with `--admin`, M4-6); the name without it joins as an ordinary player.
   - A refused speed change is answered with the unchanged `ServerState`, and a refused save or load with a `SaveResult` error. A refused kick is ignored.
 - **Order:** commands apply in `(day, player, sequence)` order, all server-stamped. Any future command that can conflict with another player's must define its own conflict rule in its decision. Player order is only a deterministic tie-break, and would otherwise always favour lower ids.
 - **Lag, in wall-clock time:**
   - updates coalesce per client (D23);
-  - a remote session (its peer is not on the server's machine) gets at most 4 updates a second (`--updates-per-second`), and its `MapView` with the answer to `Subscribe` and then with every 5th update (`--map-every`). The updates in between carry no `MapView`, the one exception to D22's "Views, not state"; the client keeps its colours. Local sessions get every update with the map (M4-7);
+  - a remote session (its peer is not on the server's machine) gets at most 4 day updates a second (`--updates-per-second`; the answer to `Subscribe` goes out at once, and the next day keeps the gap from it), and its `MapView` with the answer to `Subscribe` and then with every 5th update (`--map-every`). The updates in between carry no `MapView`, the one exception to D22's "Views, not state"; the client keeps its colours. Local sessions get every update with the map (M4-7);
   - 5 s of silence from a client pauses the game ("waiting for player"). `ServerState.waiting_for` names who it waits for. When everyone is back, or the silent player is dropped, the game resumes at the speed it had. A speed the host sets while it waits is the speed it resumes at; the game doesn't run until everyone is back or dropped, also when the silence began in the lobby (M4-4);
   - 30 s drops the session, and its nation keeps its current policies. In multiplayer this replaces D22's 10 s liveness rule, which would otherwise drop a client before the fairness pause could help it; single player keeps D22's rule;
   - a resume token (64 bits from the OS's secure random source) reclaims the nation. In a started game, any player who leaves keeps their seat (player id and nation) for their token: the server can't tell a crash from a quit. A kept seat counts toward the player limit, nobody else can take its nation, and the lobby shows it as away. A kick or a load drops kept seats (M4-4).
 - **Transport:**
   - TLS whenever the server is not bound to localhost;
-  - an optional server password;
-  - a per-session command rate limit (default 20 per second).
+  - an optional server password, sent in `Hello` (`--password-file`; M4-6). A wrong or missing one is `Rejected`, and passwords are compared in constant time. On a dedicated server the admin also proves who they are with an admin password (`--admin-password-file`, required with `--admin`): a name alone proves nothing;
+  - a per-session command rate limit (default 20 per second, `--commands-per-second`): more get `RateLimited` (M4-6).
 

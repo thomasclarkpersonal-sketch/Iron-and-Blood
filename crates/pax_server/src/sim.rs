@@ -34,13 +34,23 @@ use crate::net::{Inbound, Outbound};
 use crate::queue::CommandQueue;
 use crate::request::{Request, WireCommand};
 use crate::session::{Claim, HostRule, LobbyEntry, OnLeave, Refusal, Seat, Session, SessionTable, Vacated};
-use crate::view::{self, DayViews, Subscription};
+use crate::view::{self, DayViews, MapPart, Subscription};
 
 /// The lobby as players last saw it (`LobbyState` without a notice).
 #[derive(Debug, PartialEq)]
 struct LobbyView {
     players: Vec<LobbyEntry>,
     started: bool,
+}
+
+/// A `Hello`'s fields, borrowed from the request (D22, D24).
+struct HelloFields<'a> {
+    major: u16,
+    minor: u16,
+    name: Option<&'a str>,
+    requested_nation: Option<u32>,
+    resume_token: u64,
+    password: Option<&'a crate::Secret>,
 }
 
 /// Where a server's game is (D24, M4-2).
@@ -70,6 +80,11 @@ pub(crate) struct Sim {
     sandbox: bool,
     /// How remote sessions are throttled (D24, M4-7).
     bandwidth: crate::Bandwidth,
+    /// The server password (`Config::password`, D24, M4-6). The admin's is in the
+    /// table's `HostRule::Admin`.
+    password: Option<crate::Secret>,
+    /// D24's command rate limit (`Config::commands_per_second`).
+    commands_per_second: u32,
     /// Stop when the last player leaves (the client launched this server).
     exit_when_idle: bool,
     /// Set when the server should stop; [`Sim::handle`] returns it. A flag rather
@@ -105,6 +120,8 @@ impl Sim {
             max_players: usize::from(config.max_players),
             sandbox: config.sandbox,
             bandwidth: config.bandwidth,
+            password: config.password.clone(),
+            commands_per_second: config.commands_per_second,
             exit_when_idle: config.exit_when_idle,
             stop: false,
             phase: if config.max_players > 1 { Phase::Lobby } else { Phase::SinglePlayer },
@@ -133,15 +150,8 @@ impl Sim {
         self.send(session, Outbound::Close);
     }
 
-    fn hello(
-        &mut self,
-        session: u64,
-        major: u16,
-        minor: u16,
-        name: Option<&str>,
-        requested_nation: Option<u32>,
-        resume_token: u64,
-    ) {
+    fn hello(&mut self, session: u64, hello: HelloFields<'_>) {
+        let HelloFields { major, minor, name, requested_nation, resume_token, password } = hello;
         let nations = self.game.world().nations.key.len();
         if major != PROTOCOL_MAJOR {
             let reason = format!(
@@ -153,9 +163,23 @@ impl Sim {
         if self.sessions.seat(session).is_some() {
             return self.goodbye(session, "Hello sent twice");
         }
+        // The admin proves it with the admin password; it, or the server password,
+        // admits a player to a server that has one (D24, M4-6).
+        // `Secret`'s equality is constant-time.
+        let matches = |expected: Option<&crate::Secret>| expected.is_some_and(|e| password == Some(e));
+        let admin = self.sessions.admin();
+        let admin_proved = matches(admin.map(|a| &a.password));
+        // The admin's name without its password is an ordinary player: say so, or a
+        // mistyped password shows only as `NotPermitted` later (NETWORK_PROTOCOL §6).
+        if !admin_proved && admin.is_some_and(|a| name == Some(a.name.as_str())) {
+            info!(session, "the admin's name without the admin password: not the host");
+        }
+        if self.password.is_some() && !admin_proved && !matches(self.password.as_ref()) {
+            return self.reject(session, "wrong password");
+        }
         // A player coming back to a started game with their token gets their seat (D24).
         if let Some(token) = std::num::NonZeroU64::new(resume_token) {
-            match self.sessions.resume(session, token) {
+            match self.sessions.resume(session, token, admin_proved) {
                 Ok(seat) => {
                     info!(session, player = seat.player, nation = ?seat.nation(), "resumed");
                     self.welcome(session, seat);
@@ -182,7 +206,7 @@ impl Sim {
         // The table checks the limit and that the nation is free (D24), and picks the
         // player id. A connection's events arrive in order on one channel (Connected,
         // its requests, then Closed), so a session that sent Hello is always known.
-        let seat = match self.sessions.sit(session, name.unwrap_or(""), claim, self.max_players) {
+        let seat = match self.sessions.sit(session, name.unwrap_or(""), claim, self.max_players, admin_proved) {
             Ok(seat) => seat,
             Err(refusal) => return self.reject(session, &self.refusal(refusal)),
         };
@@ -305,9 +329,11 @@ impl Sim {
         };
         let Some(s) = self.sessions.get_mut(session) else { return };
         s.subscription = subscription;
-        // The answer always carries the map, so a remote session's count restarts.
-        s.throttle.resubscribed();
-        s.conn.send(Outbound::Frame(view::day_update(&self.game.views(), &subscription, self.clock.speed(), 0, true)));
+        // The answer always carries the map. It counts as an update for a remote
+        // session's throttle, so the next day keeps its distance (D24, M4-7).
+        s.throttle.resubscribed(Instant::now());
+        let answer = view::day_update(&self.game.views(), &subscription, self.clock.speed(), 0, MapPart::Include);
+        s.conn.send(Outbound::Frame(answer));
     }
 
     fn command_result(&self, session: u64, client_seq: u32, error: wire::CommandError) {
@@ -326,6 +352,10 @@ impl Sim {
     /// follows only if the command fails when it is applied.
     fn submit(&mut self, session: u64, client_seq: u32, command: Option<WireCommand>) {
         let Some(seat) = self.sessions.seat(session) else { return };
+        // D24's rate limit comes before anything else: a flood costs the server little.
+        if !self.sessions.admit_command(session, Instant::now(), self.commands_per_second) {
+            return self.command_result(session, client_seq, wire::CommandError::RateLimited);
+        }
         let command = match command.ok_or(wire::CommandError::Malformed).and_then(commands::to_engine) {
             Ok(c) => c,
             Err(e) => return self.command_result(session, client_seq, e),
@@ -479,6 +509,13 @@ impl Sim {
                 }
             }
         }
+    }
+
+    /// Changes the command rate limit mid-run: the hostile-input test fuzzes the
+    /// refusal path with it. A running server's limit is fixed (`Config`).
+    #[cfg(test)]
+    pub(crate) fn set_commands_per_second(&mut self, limit: u32) {
+        self.commands_per_second = limit;
     }
 
     /// When the next update a throttle held may go out (D24, M4-7); `None` if none
@@ -704,9 +741,11 @@ impl Sim {
             Inbound::Connected { session, conn } => self.sessions.connect(session, conn, self.bandwidth),
             Inbound::Request {
                 session,
-                request: Request::Hello { major, minor, name, requested_nation, resume_token },
+                request: Request::Hello { major, minor, name, requested_nation, resume_token, password },
             } => {
-                self.hello(session, major, minor, name.as_deref(), requested_nation, resume_token);
+                let password = password.as_ref();
+                let name = name.as_deref();
+                self.hello(session, HelloFields { major, minor, name, requested_nation, resume_token, password });
             }
             // The admission choke point: only welcomed sessions get past here.
             Inbound::Request { session, request } if self.sessions.seat(session).is_none() => {
@@ -780,12 +819,12 @@ impl Sim {
 /// Unless the session's throttle holds it until [`Sim::flush`] (a remote session,
 /// D24), with or without the map as the throttle says.
 fn send_update(s: &mut Session, views: &DayViews<'_>, speed: wire::Speed, now: Instant) {
-    if !s.throttle.may_send(now) {
+    if !s.throttle.admit(now) {
         return;
     }
     let skipped = s.window.sent(views.world.day);
-    let with_map = s.throttle.sent(now);
-    s.conn.send(Outbound::Frame(view::day_update(views, &s.subscription, speed, skipped, with_map)));
+    let map = s.throttle.sent(now);
+    s.conn.send(Outbound::Frame(view::day_update(views, &s.subscription, speed, skipped, map)));
 }
 
 /// The sim thread's loop: handle everything already waiting, tick if due, otherwise
@@ -964,6 +1003,7 @@ mod tests {
             name: Some("t".into()),
             requested_nation: nation,
             resume_token: 0,
+            password: None,
         };
         sim.handle(Inbound::Request { session: SESSION, request: hello });
         assert_eq!(drain(&mut rx), [Sent::Welcome { player: 0 }]);
@@ -1100,8 +1140,14 @@ mod tests {
     fn join(sim: &mut Sim, id: u64, nation: Option<u32>) -> (Receiver<Outbound>, Vec<Sent>) {
         let (conn, mut rx) = ConnHandle::for_test();
         sim.handle(Inbound::Connected { session: id, conn });
-        let hello =
-            Request::Hello { major: PROTOCOL_MAJOR, minor: 0, name: None, requested_nation: nation, resume_token: 0 };
+        let hello = Request::Hello {
+            major: PROTOCOL_MAJOR,
+            minor: 0,
+            name: None,
+            requested_nation: nation,
+            resume_token: 0,
+            password: None,
+        };
         sim.handle(Inbound::Request { session: id, request: hello });
         let sent = drain(&mut rx);
         (rx, sent)
@@ -1235,24 +1281,33 @@ mod tests {
     #[test]
     fn an_admin_name_makes_that_player_the_host() {
         let (mut sim, _saves) = multiplayer(2);
-        // As `Sim::new` sets it for `--admin ada`.
-        sim.sessions = SessionTable::new(HostRule::Admin("ada".into()));
+        // As `Sim::new` sets it for `--admin ada --admin-password-file …`.
+        let admin = crate::Admin { name: "ada".into(), password: crate::Secret::new("s3cret") };
+        sim.sessions = SessionTable::new(HostRule::Admin(admin));
         let (_a, _) = join(&mut sim, 1, Some(0));
         assert_eq!(sim.sessions.host(), None, "the first player isn't host on a dedicated server");
-        let (conn, mut rx) = ConnHandle::for_test();
-        sim.handle(Inbound::Connected { session: 2, conn });
-        let hello = Request::Hello {
-            major: PROTOCOL_MAJOR,
-            minor: 0,
-            name: Some("ada".into()),
-            requested_nation: Some(1),
-            resume_token: 0,
+        let ada = |sim: &mut Sim, id: u64, password: Option<&str>| {
+            let (conn, mut rx) = ConnHandle::for_test();
+            sim.handle(Inbound::Connected { session: id, conn });
+            let hello = Request::Hello {
+                major: PROTOCOL_MAJOR,
+                minor: 0,
+                name: Some("ada".into()),
+                requested_nation: Some(1),
+                resume_token: 0,
+                password: password.map(crate::Secret::new),
+            };
+            sim.handle(Inbound::Request { session: id, request: hello });
+            drain(&mut rx)
         };
-        sim.handle(Inbound::Request { session: 2, request: hello });
-        assert_eq!(drain(&mut rx), [Sent::Welcome { player: 1 }]);
-        assert_eq!(sim.sessions.host(), Some(2));
-        // The admin leaving doesn't hand the role to someone else.
+        // The name alone (M4-6): a player like any other, not the host.
+        assert_eq!(ada(&mut sim, 2, None), [Sent::Welcome { player: 1 }]);
+        assert_eq!(sim.sessions.host(), None, "a name is not proof");
         sim.handle(Inbound::Closed { session: 2 });
+        assert_eq!(ada(&mut sim, 3, Some("s3cret")), [Sent::Welcome { player: 1 }]);
+        assert_eq!(sim.sessions.host(), Some(3));
+        // The admin leaving doesn't hand the role to someone else.
+        sim.handle(Inbound::Closed { session: 3 });
         assert_eq!(sim.sessions.host(), None);
     }
 
@@ -1335,8 +1390,14 @@ mod tests {
         drain(&mut a);
         let (conn, mut rx) = ConnHandle::for_test();
         sim.handle(Inbound::Connected { session: 3, conn });
-        let hello =
-            Request::Hello { major: PROTOCOL_MAJOR, minor: 0, name: None, requested_nation: None, resume_token: token };
+        let hello = Request::Hello {
+            major: PROTOCOL_MAJOR,
+            minor: 0,
+            name: None,
+            requested_nation: None,
+            resume_token: token,
+            password: None,
+        };
         sim.handle(Inbound::Request { session: 3, request: hello });
         assert_eq!(drain(&mut rx), [Sent::Rejected, Sent::Close], "the kept seat went with the old game");
         assert_eq!(join(&mut sim, 4, Some(1)).1, [Sent::Welcome { player: 1 }], "its nation is free");
@@ -1530,6 +1591,7 @@ mod tests {
                 name: None,
                 requested_nation: None,
                 resume_token: token,
+                password: None,
             };
             sim.handle(Inbound::Request { session: id, request: hello });
             drain(&mut rx)
@@ -1557,8 +1619,14 @@ mod tests {
         let mut sim = Sim::new(pax_data::load_scenario(&dir).unwrap(), &config);
         let (conn, mut rx) = ConnHandle::for_test_remote();
         sim.handle(Inbound::Connected { session: SESSION, conn });
-        let hello =
-            Request::Hello { major: PROTOCOL_MAJOR, minor: 0, name: None, requested_nation: None, resume_token: 0 };
+        let hello = Request::Hello {
+            major: PROTOCOL_MAJOR,
+            minor: 0,
+            name: None,
+            requested_nation: None,
+            resume_token: 0,
+            password: None,
+        };
         sim.handle(Inbound::Request { session: SESSION, request: hello });
         sim.handle(Inbound::Request {
             session: SESSION,
@@ -1581,8 +1649,9 @@ mod tests {
                 }
             }
         }
-        // A day every 50 ms for two seconds.
-        for i in 1..=40u64 {
+        // A day every 50 ms for a little over two seconds. The Subscribe answer
+        // counted as an update, so the first day goes out a gap after it.
+        for i in 1..=42u64 {
             let now = start + Duration::from_millis(50 * i);
             sim.advance_at(now);
             read(&mut rx, &mut sim, now, &mut updates);
@@ -1593,10 +1662,10 @@ mod tests {
         assert_eq!(maps, [updates[4].0], "the map every fifth update: {updates:?}");
         assert!(updates.iter().skip(1).all(|u| u.1 > 0), "the days between are coalesced: {updates:?}");
         // The game stops here: the held last day still goes out when its time comes.
-        let at = sim.next_flush().expect("day 40 is held");
+        let at = sim.next_flush().expect("day 42 is held");
         sim.flush(at);
         read(&mut rx, &mut sim, at, &mut updates);
-        assert_eq!(updates.last().map(|u| u.0), Some(40), "{updates:?}");
+        assert_eq!(updates.last().map(|u| u.0), Some(42), "{updates:?}");
         assert_eq!(sim.next_flush(), None);
 
         // A seat that ends (a kick, a load without its nation) with a day held leaves
@@ -1608,6 +1677,46 @@ mod tests {
         let vacated = sim.sessions.unseat(SESSION).expect("it was seated");
         sim.seat_ended(SESSION, vacated);
         assert_eq!(sim.next_flush(), None, "an ended seat holds nothing");
+    }
+
+    /// M4-6: a server with a password admits only who gives it (or the admin
+    /// password); a wrong one is refused with the same words as a missing one.
+    #[test]
+    fn a_password_admits_and_a_wrong_one_is_refused() {
+        let (mut sim, _saves) = multiplayer(3);
+        sim.password = Some(crate::Secret::new("open sesame"));
+        let hello = |sim: &mut Sim, id: u64, password: Option<&str>| {
+            let (conn, mut rx) = ConnHandle::for_test();
+            sim.handle(Inbound::Connected { session: id, conn });
+            let request = Request::Hello {
+                major: PROTOCOL_MAJOR,
+                minor: 0,
+                name: None,
+                requested_nation: None,
+                resume_token: 0,
+                password: password.map(crate::Secret::new),
+            };
+            sim.handle(Inbound::Request { session: id, request });
+            drain(&mut rx)
+        };
+        assert_eq!(hello(&mut sim, 1, None), [Sent::Rejected, Sent::Close]);
+        assert_eq!(hello(&mut sim, 2, Some("open sesamE")), [Sent::Rejected, Sent::Close]);
+        assert_eq!(hello(&mut sim, 3, Some("open sesame")), [Sent::Welcome { player: 0 }]);
+    }
+
+    /// M4-6: D24's rate limit, 20 commands a second per session by default; more
+    /// get `RateLimited`, and other sessions are unaffected.
+    #[test]
+    fn commands_past_the_rate_limit_are_refused() {
+        let (mut sim, mut rx, _saves) = welcomed(None);
+        for seq in 0..25 {
+            submit(&mut sim, seq, tax(0, 100_000));
+        }
+        let limited = drain(&mut rx)
+            .into_iter()
+            .filter(|s| matches!(s, Sent::Result { error: wire::CommandError::RateLimited, .. }))
+            .count();
+        assert_eq!(limited, 5, "twenty a second, then refused");
     }
 
     /// A single-player server has no lobby and never sends LobbyState: lobby

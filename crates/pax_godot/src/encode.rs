@@ -17,15 +17,18 @@ fn frame(mut b: FlatBufferBuilder<'_>, kind: wire::ClientPayload, payload: WIPOf
 
 /// Opens the session. `nation: None` asks for sandbox (M3, D24), or in a lobby for
 /// no claim yet. A non-zero `resume_token` reclaims a kept seat instead (D24).
-pub fn hello(client_name: &str, nation: Option<u32>, resume_token: u64) -> Vec<u8> {
+/// `password`: the server's or the admin's (protocol 1.6), if it needs one.
+pub fn hello(client_name: &str, nation: Option<u32>, resume_token: u64, password: Option<&str>) -> Vec<u8> {
     let mut b = FlatBufferBuilder::new();
     let name = b.create_string(client_name);
+    let password = password.map(|p| b.create_string(p));
     let args = wire::HelloArgs {
         protocol_major: PROTOCOL_MAJOR,
         protocol_minor: PROTOCOL_MINOR,
         client_name: Some(name),
         requested_nation: nation,
         resume_token,
+        password,
     };
     let h = wire::Hello::create(&mut b, &args);
     frame(b, wire::ClientPayload::Hello, h.as_union_value())
@@ -160,7 +163,7 @@ mod tests {
     #[test]
     fn every_frame_verifies_as_the_message_it_claims() {
         let read = |f: &[u8]| read_client_message(f).expect("verifies").payload_type();
-        assert_eq!(read(&hello("c", Some(1), 0)), wire::ClientPayload::Hello);
+        assert_eq!(read(&hello("c", Some(1), 0, None)), wire::ClientPayload::Hello);
         assert_eq!(read(&set_speed(wire::Speed::Fast)), wire::ClientPayload::SetSpeed);
         assert_eq!(read(&subscribe(wire::MapMode::Price, 2, Some(0), None)), wire::ClientPayload::Subscribe);
         assert_eq!(read(&ack(9)), wire::ClientPayload::Ack);
@@ -179,7 +182,7 @@ mod tests {
         let s = read_client_message(&f).unwrap().payload_as_submit_command().unwrap();
         let c = s.command_as_set_transfer_rate().unwrap();
         assert_eq!((s.client_seq(), c.nation(), c.rate().unwrap().raw()), (7, 1, 123_457));
-        let f = hello("c", None, 0);
+        let f = hello("c", None, 0, None);
         assert_eq!(read_client_message(&f).unwrap().payload_as_hello().unwrap().requested_nation(), None);
     }
 }

@@ -328,6 +328,14 @@ impl PaxClient {
         }
     }
 
+    /// The server's password (or the admin's), sent with the next `hello` or
+    /// `resume` (D24, protocol 1.6). `""` for none.
+    #[func]
+    fn set_password(&mut self, password: GString) -> GString {
+        let password = Some(password.to_string()).filter(|p| !p.is_empty());
+        self.with_connection(|c| c.set_password(password))
+    }
+
     /// Reclaims the seat a dropped session kept (D24): `token` is the old `Welcome`'s
     /// `RESUME_TOKEN`. A `Welcome` answers, or `Rejected` if no seat is kept for it.
     #[func]

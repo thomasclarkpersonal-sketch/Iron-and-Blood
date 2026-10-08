@@ -18,6 +18,8 @@
 
 use std::time::{Duration, Instant};
 
+use crate::view::MapPart;
+
 /// A server's bandwidth settings for remote sessions (D24, M4-7).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Bandwidth {
@@ -51,11 +53,12 @@ pub(crate) struct Throttle {
 
 impl Throttle {
     pub(crate) fn new(remote: bool, bandwidth: Bandwidth) -> Self {
-        debug_assert!(bandwidth.updates_per_second > 0 && bandwidth.map_every > 0, "Config::validate");
+        // Config::validate refuses zero (ConfigError::NoUpdates).
+        assert!(bandwidth.updates_per_second > 0 && bandwidth.map_every > 0, "a validated Bandwidth");
         Throttle {
             remote,
-            gap: Duration::from_secs(1) / bandwidth.updates_per_second.max(1),
-            map_every: bandwidth.map_every.max(1),
+            gap: Duration::from_secs(1) / bandwidth.updates_per_second,
+            map_every: bandwidth.map_every,
             last_sent: None,
             held: false,
             since_map: None,
@@ -70,9 +73,10 @@ impl Throttle {
         self.since_map = None;
     }
 
-    /// Whether an update may go out at `now`. If not, the day is held until
-    /// [`Self::ready_at`], when the sim thread sends the latest day.
-    pub(crate) fn may_send(&mut self, now: Instant) -> bool {
+    /// Admits an update at `now`, or holds it: then the day waits until
+    /// [`Self::ready_at`], when the sim thread sends the latest day. Not a query:
+    /// each call sets or clears the hold, so call it only to send.
+    pub(crate) fn admit(&mut self, now: Instant) -> bool {
         let early = self.remote && self.last_sent.is_some_and(|t| now < t + self.gap);
         self.held = early;
         !early
@@ -84,21 +88,24 @@ impl Throttle {
     }
 
     /// An update goes out at `now`. Returns whether it carries the `MapView`.
-    pub(crate) fn sent(&mut self, now: Instant) -> bool {
+    pub(crate) fn sent(&mut self, now: Instant) -> MapPart {
         self.held = false;
         self.last_sent = Some(now);
         if !self.remote {
-            return true;
+            return MapPart::Include;
         }
         let with_map = self.since_map.is_none_or(|n| n + 1 >= self.map_every);
         self.since_map = Some(if with_map { 0 } else { self.since_map.map_or(0, |n| n + 1) });
-        with_map
+        if with_map { MapPart::Include } else { MapPart::Omit }
     }
 
-    /// The session's subscription changed, and its `Subscribe` was answered with a
-    /// full update, map included: the count starts again from there.
-    pub(crate) fn resubscribed(&mut self) {
+    /// The session's subscription changed, and its `Subscribe` was answered at `now`
+    /// with a full update, map included. It counts as an update: the map count
+    /// starts again from there, and the next day keeps the gap from it, so clicking
+    /// through provinces can't add days beyond the cap. A held day stays held.
+    pub(crate) fn resubscribed(&mut self, now: Instant) {
         self.since_map = Some(0);
+        self.last_sent = Some(now);
     }
 }
 
@@ -111,8 +118,8 @@ mod tests {
         let mut t = Throttle::new(false, Bandwidth::default());
         let now = Instant::now();
         for _ in 0..20 {
-            assert!(t.may_send(now));
-            assert!(t.sent(now), "every update carries the map");
+            assert!(t.admit(now));
+            assert_eq!(t.sent(now), MapPart::Include, "every update carries the map");
         }
         assert_eq!(t.ready_at(), None);
     }
@@ -125,8 +132,8 @@ mod tests {
         // A day every 50 ms (Fastest-like) for two seconds.
         for i in 0..40u64 {
             let now = start + Duration::from_millis(50 * i);
-            if t.may_send(now) {
-                sent.push((i, t.sent(now)));
+            if t.admit(now) {
+                sent.push((i, t.sent(now) == MapPart::Include));
             }
         }
         assert_eq!(sent.len(), 8, "four a second: {sent:?}");
@@ -134,10 +141,12 @@ mod tests {
         assert_eq!(maps, [0, 25], "the first update, then every fifth");
         // The last day was held: it may go out once the gap has passed.
         assert!(t.ready_at().is_some_and(|at| at <= start + Duration::from_millis(2_000)));
-        t.resubscribed();
         let now = start + Duration::from_secs(3);
-        assert!(t.may_send(now));
-        assert!(!t.sent(now), "a resubscription's answer carried the map");
+        t.resubscribed(now);
+        assert!(!t.admit(now + Duration::from_millis(100)), "the answer counts toward the cap");
+        let now = now + Duration::from_millis(250);
+        assert!(t.admit(now));
+        assert_eq!(t.sent(now), MapPart::Omit, "a resubscription's answer carried the map");
     }
 
     #[test]
@@ -147,8 +156,8 @@ mod tests {
         let mut sent = 0;
         for i in 0..20u64 {
             let now = start + Duration::from_millis(50 * i);
-            if t.may_send(now) {
-                assert!(t.sent(now), "every update carries the map");
+            if t.admit(now) {
+                assert_eq!(t.sent(now), MapPart::Include, "every update carries the map");
                 sent += 1;
             }
         }
@@ -159,13 +168,17 @@ mod tests {
     fn a_restart_drops_what_was_held() {
         let mut t = Throttle::new(true, Bandwidth::default());
         let now = Instant::now();
-        assert!(t.may_send(now));
+        assert!(t.admit(now));
         t.sent(now);
-        assert!(!t.may_send(now + Duration::from_millis(10)));
+        assert!(!t.admit(now + Duration::from_millis(10)));
         assert!(t.ready_at().is_some());
         t.restart();
         assert_eq!(t.ready_at(), None);
-        assert!(t.may_send(now + Duration::from_millis(20)));
-        assert!(t.sent(now + Duration::from_millis(20)), "the first update after a restart carries the map");
+        assert!(t.admit(now + Duration::from_millis(20)));
+        assert_eq!(
+            t.sent(now + Duration::from_millis(20)),
+            MapPart::Include,
+            "the first update after a restart carries the map"
+        );
     }
 }
