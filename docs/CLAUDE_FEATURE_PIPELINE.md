@@ -11,6 +11,7 @@ flowchart LR
     Br -->|you click Open pull request| PR[PR: CI + critic]
     PR -->|checks green| M[Merge]
     PR -->|feedback + re-label claude-implement| B
+    PR -->|critic findings + re-label claude-implement| B
 ```
 
 ## One-time setup
@@ -77,7 +78,14 @@ Review it like any PR. If it's over 200 lines, the critic reviews it too, and CR
 ### 6. Iterate
 To change the implementation, comment on the **issue** and re-add `claude-implement`. Claude continues on the same branch, and the open PR updates.
 
-The workflow's pushes don't start new CI runs on the PR (the same token limitation). After an iteration, start the checks by pushing any commit yourself, or by closing and reopening the PR.
+**Acting on the critic.** If the PR has a critic review, re-adding `claude-implement` also gives Claude the critic's latest comment ([AGENTS.md §9](../AGENTS.md#9-critic-feedback)):
+- It must fix CRITICAL findings.
+- It should fix DEBT findings, and gives a reason in its summary for any it leaves. You then fix it yourself, ask again, or waive it on the PR with `critic-waive: <finding title>, <reason>`.
+- It considers each suggestion and lists the ones it applied or skipped.
+
+The critic comment on a `claude/issue-<n>` PR includes a reminder of this.
+
+The workflow's pushes don't start new CI runs on the PR (the same token limitation). The issue report says so; start the checks by closing and reopening the PR, or by pushing any commit yourself.
 
 ## Guard rails
 
@@ -86,7 +94,8 @@ The workflow's pushes don't start new CI runs on the PR (the same token limitati
 | Strangers triggering paid runs | Only users with triage/write access can add labels, and the Claude action also checks the actor has write access |
 | Prompt injection via issue text | Issue text is passed as a data file, never interpolated into the prompt or shell. The prompt puts `AGENTS.md`/`DECISIONS.md` above it. The label is a human checkpoint: only label issues you have read |
 | Implementing an unapproved plan | `claude-implement` only uses plans posted by the pipeline itself: author `github-actions` and a comment that *starts* with the plan marker. Implementation reports carry a different marker. User comments cannot pose as a plan, and the pipeline's own comments are never fed back as feedback |
-| Weakening its own review | Changes under `.github/`, `.claude/` and to `AGENTS.md` are never committed, even if made. **Known gap:** the critic reads `docs/DECISIONS.md` from the PR branch, which the pipeline is supposed to edit. A PR that changes `DECISIONS.md` therefore also changes the yardstick it is judged by. Review decision changes by hand |
+| Weakening its own review | Changes under `.github/`, `.claude/` and to `AGENTS.md` are never committed, even if made. The critic judges every PR against `main`'s `AGENTS.md`, `DECISIONS.md` and `critic.md`, so the pipeline's edits to `DECISIONS.md` are reviewed, not trusted. Relaxing an existing decision is CRITICAL unless a maintainer adds the `contract-change` label |
+| Prompt injection via the critic's comment | Only the critic workflow's own comment is used (author `github-actions`, starting with its marker), and it is passed as data. Waivers are read only from people with write access, and only lines starting with `critic-waive` |
 | Touching `main` | The workflow pushes only `claude/issue-<n>`. `main` remains protected by the ruleset |
 | Bad code reaching `main` | You open the PR, then CI, the critic, and your merge decision |
 
