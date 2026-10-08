@@ -13,6 +13,10 @@ publish.workspace = true
 bench = []
 
 [dependencies]
+# Engine-free: the content-hash scheme the client shares (D22).
+pax_protocol.workspace = true
+# Province maps (M3-7): pure-Rust PNG decoding.
+png = "0.18"
 pax_engine.workspace = true
 serde.workspace = true
 toml.workspace = true

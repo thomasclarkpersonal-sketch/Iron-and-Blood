@@ -36,6 +36,7 @@
 #[rustfmt::skip]
 mod generated;
 
+pub mod content_hash;
 pub mod frame;
 
 pub use frame::{FrameDecoder, FrameError};

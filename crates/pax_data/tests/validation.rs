@@ -150,11 +150,13 @@ fn content_hash_is_stable_and_sensitive_to_every_file() {
     // A copy elsewhere: same layout (scenario.toml says data = "../../data"), new path.
     let tmp = std::env::temp_dir().join(format!("pax-content-hash-{}", std::process::id()));
     let scenario = tmp.join("scenarios/two_states");
-    std::fs::create_dir_all(&scenario).unwrap();
+    std::fs::create_dir_all(scenario.join("map")).unwrap();
     std::fs::create_dir_all(tmp.join("data")).unwrap();
     let files = [
         "scenarios/two_states/scenario.toml",
         "scenarios/two_states/commands.toml",
+        "scenarios/two_states/map/provinces.toml",
+        "scenarios/two_states/map/provinces.png",
         "data/goods.toml",
         "data/professions.toml",
         "data/production.toml",
@@ -168,10 +170,13 @@ fn content_hash_is_stable_and_sensitive_to_every_file() {
 
     for f in files {
         let path = tmp.join(f);
-        let text = std::fs::read_to_string(&path).unwrap();
-        std::fs::write(&path, format!("{text}\n# a comment changes the content\n")).unwrap();
+        let bytes = std::fs::read(&path).unwrap();
+        // A TOML comment, or bytes after a PNG's end chunk: valid files, new content.
+        let mut changed = bytes.clone();
+        changed.extend_from_slice(b"\n# a comment changes the content\n");
+        std::fs::write(&path, changed).unwrap();
         assert_ne!(hash(), original, "changing {f} must change the hash");
-        std::fs::write(&path, text).unwrap();
+        std::fs::write(&path, bytes).unwrap();
     }
     assert_eq!(hash(), original);
     std::fs::remove_dir_all(&tmp).unwrap();
