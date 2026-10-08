@@ -20,10 +20,11 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use pax_protocol::{Direction, FrameDecoder};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::{TcpListener, TcpStream};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use tokio::net::TcpListener;
 use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::{Notify, mpsc};
+use tokio_rustls::TlsAcceptor;
 use tracing::{debug, info, warn};
 
 use crate::encode;
@@ -188,7 +189,18 @@ impl std::fmt::Display for ReadError {
     }
 }
 
-pub(crate) async fn accept_loop(listener: TcpListener, sim: flume::Sender<Inbound>, timing: Timing) {
+/// How long a client may take over its TLS handshake (D24, M4-6), so a connection
+/// that never finishes one can't hold a task forever.
+const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Accepts connections. With `tls`, each one does the TLS handshake first, and a
+/// failed or slow handshake is dropped before it becomes a session (D24, M4-6).
+pub(crate) async fn accept_loop(
+    listener: TcpListener,
+    sim: flume::Sender<Inbound>,
+    timing: Timing,
+    tls: Option<TlsAcceptor>,
+) {
     let mut next_session = 1u64;
     loop {
         match listener.accept().await {
@@ -200,7 +212,21 @@ pub(crate) async fn accept_loop(listener: TcpListener, sim: flume::Sender<Inboun
                 let _ = stream.set_nodelay(true);
                 // `to_canonical`: on a dual-stack socket, a local IPv4 client is ::ffff:127.0.0.1.
                 let remote = !peer.ip().to_canonical().is_loopback();
-                tokio::spawn(connection(stream, session, sim.clone(), timing, remote));
+                let sim = sim.clone();
+                match tls.clone() {
+                    None => {
+                        tokio::spawn(connection(stream, session, sim, timing, remote));
+                    }
+                    Some(acceptor) => {
+                        tokio::spawn(async move {
+                            match tokio::time::timeout(HANDSHAKE_TIMEOUT, acceptor.accept(stream)).await {
+                                Ok(Ok(stream)) => connection(stream, session, sim, timing, remote).await,
+                                Ok(Err(e)) => info!(session, error = %e, "TLS handshake failed"),
+                                Err(_) => info!(session, "TLS handshake timed out"),
+                            }
+                        });
+                    }
+                }
             }
             Err(e) => {
                 // Usually transient (e.g. out of file descriptors): back off briefly.
@@ -211,9 +237,13 @@ pub(crate) async fn accept_loop(listener: TcpListener, sim: flume::Sender<Inboun
     }
 }
 
-async fn connection(stream: TcpStream, session: u64, sim: flume::Sender<Inbound>, timing: Timing, remote: bool) {
+/// One session's connection task, over plain TCP or TLS.
+async fn connection<S>(stream: S, session: u64, sim: flume::Sender<Inbound>, timing: Timing, remote: bool)
+where
+    S: AsyncRead + AsyncWrite + Send + Unpin + 'static,
+{
     let idle = timing.idle;
-    let (mut rd, mut wr) = stream.into_split();
+    let (mut rd, mut wr) = tokio::io::split(stream);
     let (out_tx, mut out_rx) = mpsc::channel::<Outbound>(OUTBOUND_QUEUE);
     let kill = Arc::new(Notify::new());
     let conn = ConnHandle { out: out_tx.clone(), kill: kill.clone(), remote };

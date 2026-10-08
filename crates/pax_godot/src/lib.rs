@@ -19,7 +19,9 @@ pub mod encode;
 pub mod keys;
 pub mod map;
 pub mod rates;
+pub mod transport;
 
+use std::net::ToSocketAddrs;
 use std::path::Path;
 use std::time::Duration;
 
@@ -147,6 +149,33 @@ impl PaxClient {
                 GString::new()
             }
             _ => rejected("not connected".to_owned()),
+        }
+    }
+
+    /// Connects to a multiplayer server elsewhere over TLS (D24, M4-6), trusting only
+    /// the certificate whose SHA-256 is `fingerprint`: what the server printed, as
+    /// the host shared it (any case, `:` and spaces allowed). Returns an error message
+    /// (nothing connected), or `""`; a wrong certificate ends the connection with a
+    /// reason as it is polled.
+    #[func]
+    fn connect_secure(&mut self, host: GString, port: i64, fingerprint: GString) -> GString {
+        let Ok(port) = u16::try_from(port) else { return rejected(format!("port {port} out of range")) };
+        self.connection = None;
+        self.server = None;
+        self.welcome = None;
+        self.map = None;
+        self.scenario_dir = None;
+        let addr = match (host.to_string(), port).to_socket_addrs().map(|mut a| a.next()) {
+            Ok(Some(addr)) => addr,
+            Ok(None) => return rejected(format!("{host} has no address")),
+            Err(e) => return rejected(format!("bad address {host}: {e}")),
+        };
+        match Connection::connect_tls(addr, Duration::from_secs(5), &fingerprint.to_string()) {
+            Ok(c) => {
+                self.connection = Some(c);
+                GString::new()
+            }
+            Err(e) => rejected(format!("cannot connect to {addr}: {e}")),
         }
     }
 

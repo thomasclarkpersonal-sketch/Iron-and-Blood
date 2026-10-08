@@ -198,3 +198,77 @@ fn a_closed_server_is_reported_once() {
     assert!(!c.is_open());
     assert_eq!(c.poll().closed, None, "reported once");
 }
+
+/// A multiplayer server with TLS (M4-6) as a child process: the port and the
+/// certificate's fingerprint, read from the files it writes once it listens.
+struct TlsServer {
+    child: std::process::Child,
+    port: u16,
+    fingerprint: String,
+}
+
+impl Drop for TlsServer {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+fn tls_server(dir: &TempDir) -> TlsServer {
+    std::fs::create_dir_all(&dir.0).unwrap();
+    let (port_file, fingerprint_file) = (dir.0.join("port"), dir.0.join("fingerprint"));
+    let child = std::process::Command::new(server_binary())
+        .arg("--scenario")
+        .arg(repo().join("scenarios/two_states"))
+        .args(["--bind", "127.0.0.1:0", "--players", "2", "--tls-self-signed"])
+        .arg("--port-file")
+        .arg(&port_file)
+        .arg("--fingerprint-file")
+        .arg(&fingerprint_file)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .expect("pax_server starts");
+    let deadline = Instant::now() + Duration::from_secs(10);
+    // The fingerprint is written before the port, so the port's arrival means both.
+    let port = loop {
+        if let Some(port) = std::fs::read_to_string(&port_file).ok().and_then(|p| p.trim().parse().ok()) {
+            break port;
+        }
+        assert!(Instant::now() < deadline, "the server wrote no port file");
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    let fingerprint = std::fs::read_to_string(&fingerprint_file).unwrap().trim().to_owned();
+    TlsServer { child, port, fingerprint }
+}
+
+/// M4-6: the bridge plays over TLS, pinned to the server's certificate, and refuses
+/// a server whose certificate isn't the pinned one.
+#[test]
+fn a_session_over_tls_pinned_to_the_servers_certificate() {
+    let dir = TempDir::new("tls");
+    let server = tls_server(&dir);
+    let addr = std::net::SocketAddr::from(([127, 0, 0, 1], server.port));
+    assert_eq!(server.fingerprint.len(), 64, "SHA-256 in hex: {}", server.fingerprint);
+
+    let mut c = Tester::new(Connection::connect_tls(addr, Duration::from_secs(5), &server.fingerprint).unwrap());
+    c.hello(Some(0));
+    let ServerEvent::Welcome(w) = c.wait_for(|e| matches!(e, ServerEvent::Welcome(_))) else { unreachable!() };
+    assert_eq!((w.player, w.nation), (0, Some(0)));
+    c.wait_for(|e| matches!(e, ServerEvent::LobbyState { .. }));
+
+    // Another certificate's fingerprint: the handshake fails, and the reason says why.
+    let wrong = "00".repeat(32);
+    let mut bad = Connection::connect_tls(addr, Duration::from_secs(5), &wrong).unwrap();
+    bad.hello(Some(1));
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let reason = loop {
+        if let Some(reason) = bad.poll().closed {
+            break reason;
+        }
+        assert!(Instant::now() < deadline, "a wrong certificate must end the connection");
+        std::thread::sleep(Duration::from_millis(10));
+    };
+    assert!(reason.contains("not the one its fingerprint names"), "{reason}");
+    assert!(Connection::connect_tls(addr, Duration::from_secs(5), "not hex").is_err());
+}

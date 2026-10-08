@@ -31,10 +31,13 @@ mod secret;
 mod session;
 mod sim;
 mod throttle;
-pub use secret::Secret;
-pub use throttle::Bandwidth;
+mod tls;
 mod view;
 mod window;
+
+pub use secret::Secret;
+pub use throttle::Bandwidth;
+pub use tls::fingerprint;
 
 /// A connection task's input side, for the cargo-fuzz target only (`fuzz/`, M3-10):
 /// it fuzzes exactly what a connection runs on its socket's bytes.
@@ -113,6 +116,9 @@ pub struct Config {
     /// At most this many commands per second per session; more get `RateLimited`
     /// (`--commands-per-second`, D24's default 20).
     pub commands_per_second: u32,
+    /// TLS for every connection (D24, M4-6); `None`: plain TCP, which multiplayer
+    /// allows only on loopback.
+    pub tls: Option<TlsSetting>,
     /// Where `SaveGame` writes and `LoadGame` reads `<name>.toml` (D23).
     pub saves_dir: PathBuf,
     /// How often a remote session gets an update, and its map (D24, M4-7):
@@ -127,9 +133,9 @@ impl Config {
     /// * the fairness pause is multiplayer only, and comes before the drop (D24), or
     ///   the connection task would drop a client when it should pause the game;
     /// * a remote session gets updates, and a map, at some rate (M4-7);
-    /// * D24's TLS rule: several players bind loopback only until TLS (M4-6b);
+    /// * D24's TLS rule: several players off localhost need TLS (M4-6);
     /// * a password never crosses the network in clear: a server with a password or
-    ///   an admin binds loopback only until TLS (M4-6b);
+    ///   an admin needs TLS off localhost (M4-6);
     /// * a rate limit of at least one command a second (D24).
     pub fn validate(&self) -> Result<(), ConfigError> {
         if let Some(pause) = self.pause_after {
@@ -143,10 +149,10 @@ impl Config {
         if self.bandwidth.updates_per_second == 0 || self.bandwidth.map_every == 0 {
             return Err(ConfigError::NoUpdates);
         }
-        if self.max_players > 1 && !self.bind.ip().is_loopback() {
+        if self.max_players > 1 && !self.bind.ip().is_loopback() && self.tls.is_none() {
             return Err(ConfigError::MultiplayerNeedsTls { players: self.max_players, bind: self.bind });
         }
-        if (self.password.is_some() || self.admin.is_some()) && !self.bind.ip().is_loopback() {
+        if (self.password.is_some() || self.admin.is_some()) && !self.bind.ip().is_loopback() && self.tls.is_none() {
             return Err(ConfigError::PasswordNeedsTls { bind: self.bind });
         }
         if self.commands_per_second == 0 {
@@ -188,8 +194,18 @@ impl Config {
             bandwidth: Bandwidth::default(),
             password: None,
             commands_per_second: COMMANDS_PER_SECOND,
+            tls: None,
         }
     }
+}
+
+/// Where a server's TLS certificate comes from (D24, M4-6).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TlsSetting {
+    /// Made at start (`--tls-self-signed`): a player-hosted game.
+    SelfSigned,
+    /// PEM files (`--tls-cert`, `--tls-key`): a dedicated server.
+    Files { certificate: PathBuf, key: PathBuf },
 }
 
 /// A rule a [`Config`] breaks (`Config::validate`).
@@ -202,10 +218,10 @@ pub enum ConfigError {
     /// `--updates-per-second` or `--map-every` is 0: a remote session would never
     /// get an update, or never a map.
     NoUpdates,
-    /// D24: TLS off localhost, which arrives with M4-6b.
+    /// D24: TLS off localhost.
     MultiplayerNeedsTls { players: u16, bind: SocketAddr },
     /// A password in `Hello` would cross the network in clear: off localhost, a
-    /// server with a password or an admin needs TLS (D24, M4-6b).
+    /// server with a password or an admin needs TLS (D24, M4-6).
     PasswordNeedsTls { bind: SocketAddr },
     /// A rate limit of 0 commands per second would refuse every command.
     NoCommandsAllowed,
@@ -221,11 +237,11 @@ impl std::fmt::Display for ConfigError {
             ConfigError::NoUpdates => write!(f, "--updates-per-second and --map-every must be at least 1"),
             ConfigError::MultiplayerNeedsTls { players, bind } => write!(
                 f,
-                "--players {players} on {bind} needs TLS (D24), which arrives with M4-6b: until then, bind 127.0.0.1"
+                "--players {players} on {bind} needs TLS (D24): add --tls-self-signed, or --tls-cert and --tls-key"
             ),
             ConfigError::PasswordNeedsTls { bind } => write!(
                 f,
-                "a password on {bind} would cross the network in clear: it needs TLS (D24), which arrives with M4-6b; until then, bind 127.0.0.1"
+                "a password on {bind} would cross the network in clear: it needs TLS (D24): add --tls-self-signed, or --tls-cert and --tls-key"
             ),
             ConfigError::NoCommandsAllowed => write!(f, "--commands-per-second must be at least 1"),
         }
@@ -241,6 +257,8 @@ pub enum StartError {
     Config(ConfigError),
     Scenario(pax_data::LoadError),
     Io(std::io::Error),
+    /// The certificate couldn't be made or read.
+    Tls(String),
 }
 
 impl std::fmt::Display for StartError {
@@ -249,6 +267,7 @@ impl std::fmt::Display for StartError {
             StartError::Config(e) => write!(f, "{e}"),
             StartError::Scenario(e) => write!(f, "{e}"),
             StartError::Io(e) => write!(f, "{e}"),
+            StartError::Tls(e) => write!(f, "{e}"),
         }
     }
 }
@@ -287,6 +306,8 @@ impl From<std::io::Error> for StartError {
 /// A running server.
 pub struct Server {
     local_addr: SocketAddr,
+    /// The TLS certificate's SHA-256 that clients pin; `None` without TLS.
+    fingerprint: Option<String>,
     to_sim: flume::Sender<net::Inbound>,
     sim: JoinHandle<Result<(), ServerFailure>>,
     runtime: tokio::runtime::Runtime,
@@ -308,8 +329,16 @@ impl Server {
         // Bounded: a connection whose requests pile up stops being read (backpressure),
         // as a connection whose replies pile up is closed (net.rs).
         let (to_sim, inbound) = flume::bounded(net::INBOUND_QUEUE);
+        let tls = match &config.tls {
+            None => None,
+            Some(TlsSetting::SelfSigned) => Some(tls::self_signed().map_err(StartError::Tls)?),
+            Some(TlsSetting::Files { certificate, key }) => {
+                Some(tls::from_pem(certificate, key).map_err(StartError::Tls)?)
+            }
+        };
+        let fingerprint = tls.as_ref().map(|t| t.fingerprint.clone());
         let timing = net::Timing { idle: config.idle_timeout, stall_after: config.pause_after };
-        runtime.spawn(net::accept_loop(listener, to_sim.clone(), timing));
+        runtime.spawn(net::accept_loop(listener, to_sim.clone(), timing, tls.map(|t| t.acceptor)));
         let mut sim = sim::Sim::new(scenario, &config);
         let sim = std::thread::Builder::new().name("pax-sim".to_owned()).spawn(move || {
             // A panic is caught only to tell the clients and the caller; the default
@@ -324,7 +353,13 @@ impl Server {
             }
         })?;
         tracing::info!(%local_addr, "listening");
-        Ok(Server { local_addr, to_sim, sim, runtime })
+        Ok(Server { local_addr, fingerprint, to_sim, sim, runtime })
+    }
+
+    /// The TLS certificate's SHA-256 in hex, which clients pin (D24, M4-6); `None`
+    /// without TLS.
+    pub fn fingerprint(&self) -> Option<&str> {
+        self.fingerprint.as_deref()
     }
 
     /// The address the server listens on (the actual port when bound to port 0).
@@ -393,6 +428,9 @@ mod tests {
         config.password = None;
         config.admin = Some(Admin { name: "ada".into(), password: Secret::new("pw") });
         assert!(matches!(config.validate(), Err(ConfigError::PasswordNeedsTls { .. })));
+        config.tls = Some(TlsSetting::SelfSigned);
+        assert_eq!(config.validate(), Ok(()), "over TLS, a password is fine");
+        config.tls = None;
         config.bind = SocketAddr::from(([127, 0, 0, 1], 0));
         assert_eq!(config.validate(), Ok(()), "on loopback, a password is fine");
     }

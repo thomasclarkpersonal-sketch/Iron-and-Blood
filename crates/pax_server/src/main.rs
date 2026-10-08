@@ -1,4 +1,4 @@
-//! `pax_server --scenario DIR [--bind ADDR] [--port-file PATH] [--saves DIR] [--players N] [--sandbox] [--admin NAME --admin-password-file PATH] [--password-file PATH] [--commands-per-second N] [--pause-after S] [--drop-after S] [--updates-per-second N] [--map-every N] [--exit-when-idle]`
+//! `pax_server --scenario DIR [--bind ADDR] [--port-file PATH] [--saves DIR] [--players N] [--sandbox] [--admin NAME --admin-password-file PATH] [--password-file PATH] [--commands-per-second N] [--pause-after S] [--drop-after S] [--updates-per-second N] [--map-every N] [--tls-self-signed | --tls-cert PEM --tls-key PEM] [--fingerprint-file PATH] [--exit-when-idle]`
 //!
 //! The authoritative game server (D10). In single player the client launches it with
 //! `--scenario <dir> --bind 127.0.0.1:0 --port-file <tmp> --sandbox --exit-when-idle`
@@ -8,22 +8,24 @@
 //! the host when it gives the admin password (D24, M4-3, M4-6): a name alone proves
 //! nothing. `--password-file PATH` makes every player give the server password.
 //!
-//! D24 requires TLS whenever a server is not bound to localhost, and TLS arrives with
-//! M4-6b. Until then, `--players` above 1 is refused on any non-loopback address.
+//! D24 requires TLS whenever a server is not bound to localhost: `--players` above 1
+//! on any other address needs `--tls-self-signed` (a player-hosted game) or
+//! `--tls-cert` and `--tls-key` (a dedicated server). Clients pin the certificate's
+//! SHA-256, which the server prints at start and writes to `--fingerprint-file`.
 //!
 //! With several players, a silent client pauses the game after `--pause-after`
 //! seconds and is dropped after `--drop-after` (D24: 5 and 30 by default). A remote
 //! client gets at most `--updates-per-second` updates a second, and the map with
 //! every `--map-every`th (D24, M4-7: 4 and 5 by default).
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::Duration;
 
-use pax_server::{Config, Secret, Server};
+use pax_server::{Config, Secret, Server, TlsSetting};
 use tracing::error;
 
-const USAGE: &str = "usage: pax_server --scenario DIR [--bind ADDR] [--port-file PATH] [--saves DIR] [--players N] [--sandbox] [--admin NAME --admin-password-file PATH] [--password-file PATH] [--commands-per-second N] [--pause-after S] [--drop-after S] [--updates-per-second N] [--map-every N] [--exit-when-idle]";
+const USAGE: &str = "usage: pax_server --scenario DIR [--bind ADDR] [--port-file PATH] [--saves DIR] [--players N] [--sandbox] [--admin NAME --admin-password-file PATH] [--password-file PATH] [--commands-per-second N] [--pause-after S] [--drop-after S] [--updates-per-second N] [--map-every N] [--tls-self-signed | --tls-cert PEM --tls-key PEM] [--fingerprint-file PATH] [--exit-when-idle]";
 
 /// The most players `--players` allows. Player ids are `u16` on the wire; the cap is
 /// far below that, a sanity limit for a server whose every player gets every update.
@@ -42,13 +44,23 @@ fn secret(flag: &str, path: Option<String>) -> Result<Secret, String> {
 }
 
 /// Parses the arguments after the program name.
-fn parse_args(args: impl IntoIterator<Item = String>) -> Result<(Config, Option<PathBuf>), String> {
+/// Files the server writes once it listens.
+#[derive(Debug, Default, PartialEq)]
+struct Outputs {
+    /// The port, for the client that launched it (NETWORK_PROTOCOL §6).
+    port_file: Option<PathBuf>,
+    /// The TLS certificate's SHA-256, for the host to share with players (M4-6).
+    fingerprint_file: Option<PathBuf>,
+}
+
+fn parse_args(args: impl IntoIterator<Item = String>) -> Result<(Config, Outputs), String> {
     let mut it = args.into_iter();
     let mut scenario = None;
     let mut config = Config::local(PathBuf::new());
     // Sandbox seats exist only when asked for (D24).
     config.sandbox = false;
     let mut port_file = None;
+    let (mut tls_self_signed, mut tls_cert, mut tls_key, mut fingerprint_file) = (false, None, None, None);
     let (mut pause_after, mut drop_after) = (None, None);
     let seconds = |flag: &str, value: Option<String>| -> Result<Duration, String> {
         let value = value.ok_or(format!("{flag} needs a value"))?;
@@ -69,6 +81,12 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> Result<(Config, Option<
             "--scenario" => scenario = Some(PathBuf::from(it.next().ok_or("--scenario needs a value")?)),
             "--exit-when-idle" => config.exit_when_idle = true,
             "--sandbox" => config.sandbox = true,
+            "--tls-self-signed" => tls_self_signed = true,
+            "--tls-cert" => tls_cert = Some(PathBuf::from(it.next().ok_or("--tls-cert needs a value")?)),
+            "--tls-key" => tls_key = Some(PathBuf::from(it.next().ok_or("--tls-key needs a value")?)),
+            "--fingerprint-file" => {
+                fingerprint_file = Some(PathBuf::from(it.next().ok_or("--fingerprint-file needs a value")?));
+            }
             "--pause-after" => pause_after = Some(seconds("--pause-after", it.next())?),
             "--drop-after" => drop_after = Some(seconds("--drop-after", it.next())?),
             "--updates-per-second" => {
@@ -117,21 +135,30 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> Result<(Config, Option<
     } else if pause_after.is_some() || drop_after.is_some() {
         return Err("--pause-after and --drop-after are multiplayer settings (--players above 1)".to_owned());
     }
+    config.tls = match (tls_self_signed, tls_cert, tls_key) {
+        (false, None, None) => None,
+        (true, None, None) => Some(TlsSetting::SelfSigned),
+        (false, Some(certificate), Some(key)) => Some(TlsSetting::Files { certificate, key }),
+        _ => return Err("use --tls-self-signed, or both --tls-cert and --tls-key".to_owned()),
+    };
+    if fingerprint_file.is_some() && config.tls.is_none() {
+        return Err("--fingerprint-file needs TLS".to_owned());
+    }
     // The rules every way of building a server shares (`Config::validate`).
     config.validate().map_err(|e| e.to_string())?;
-    Ok((config, port_file))
+    Ok((config, Outputs { port_file, fingerprint_file }))
 }
 
-/// Writes the port atomically, so a client polling the file never reads half of it.
-fn write_port_file(path: &PathBuf, port: u16) -> std::io::Result<()> {
+/// Writes `text` atomically, so a client polling the file never reads half of it.
+fn write_atomically(path: &Path, text: &str) -> std::io::Result<()> {
     let tmp = path.with_extension("tmp");
-    std::fs::write(&tmp, format!("{port}\n"))?;
+    std::fs::write(&tmp, format!("{text}\n"))?;
     std::fs::rename(&tmp, path)
 }
 
 fn main() -> ExitCode {
     tracing_subscriber::fmt().with_max_level(tracing::Level::INFO).init();
-    let (config, port_file) = match parse_args(std::env::args().skip(1)) {
+    let (config, outputs) = match parse_args(std::env::args().skip(1)) {
         Ok(args) => args,
         Err(e) => {
             eprintln!("error: {e}\n{USAGE}");
@@ -145,10 +172,24 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    if let Some(path) = port_file
-        && let Err(e) = write_port_file(&path, server.local_addr().port())
-    {
-        error!("could not write the port file {}: {e}", path.display());
+    if let Some(fingerprint) = server.fingerprint() {
+        // Players pin this to join (D24, M4-6); the host shares it with them.
+        println!("TLS certificate SHA-256: {fingerprint}");
+    }
+    let written = outputs
+        .fingerprint_file
+        .as_ref()
+        .zip(server.fingerprint())
+        .map_or(Ok(()), |(path, fingerprint)| write_atomically(path, fingerprint))
+        .map_err(|e| format!("could not write the fingerprint file: {e}"))
+        .and_then(|()| {
+            outputs.port_file.as_ref().map_or(Ok(()), |path| {
+                write_atomically(path, &server.local_addr().port().to_string())
+                    .map_err(|e| format!("could not write the port file {}: {e}", path.display()))
+            })
+        });
+    if let Err(e) = written {
+        error!("{e}");
         let _ = server.shutdown();
         return ExitCode::FAILURE;
     }
@@ -178,19 +219,29 @@ mod tests {
         .unwrap();
         assert_eq!(config.scenario, PathBuf::from("scenarios/two_states"));
         assert_eq!(config.bind, "127.0.0.1:0".parse().unwrap());
-        assert_eq!(port_file, Some(PathBuf::from("/tmp/p")));
+        assert_eq!(port_file.port_file, Some(PathBuf::from("/tmp/p")));
         assert!(config.exit_when_idle);
         assert_eq!(config.max_players, 1, "single player by default");
         assert!(config.sandbox);
     }
 
-    /// D24: no plaintext multiplayer off localhost. M4-6's TLS lifts this.
+    /// D24: no plaintext multiplayer off localhost; TLS (M4-6) allows it.
     #[test]
-    fn multiplayer_binds_loopback_only_until_tls() {
+    fn multiplayer_off_localhost_needs_tls() {
         let e = parse_args(args("--scenario s --players 2 --bind 0.0.0.0:7777")).unwrap_err();
         assert!(e.contains("needs TLS"), "{e}");
         assert!(parse_args(args("--scenario s --players 2 --bind 0.0.0.0:7777 --insecure-no-tls")).is_err());
         assert!(parse_args(args("--scenario s --players 2 --bind 127.0.0.1:7777")).is_ok());
+        let (config, outputs) = parse_args(args(
+            "--scenario s --players 2 --bind 0.0.0.0:7777 --tls-self-signed --fingerprint-file /tmp/f",
+        ))
+        .unwrap();
+        assert_eq!(
+            (config.tls, outputs.fingerprint_file),
+            (Some(TlsSetting::SelfSigned), Some(PathBuf::from("/tmp/f")))
+        );
+        assert!(parse_args(args("--scenario s --tls-cert c.pem")).unwrap_err().contains("both"));
+        assert!(parse_args(args("--scenario s --fingerprint-file /tmp/f")).unwrap_err().contains("needs TLS"));
         assert!(parse_args(args("--scenario s --bind 0.0.0.0:7777")).is_ok(), "one player: unchanged from M3");
     }
 

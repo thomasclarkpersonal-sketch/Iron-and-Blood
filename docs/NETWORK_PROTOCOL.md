@@ -13,7 +13,7 @@ The schemas are the source of truth: [`schemas/common.fbs`](../schemas/common.fb
 
 ## 2. Transport and framing
 
-- **TCP.** In single player the server binds `127.0.0.1` on a port chosen by the client that launches it (§6). Multiplayer adds TLS (D24).
+- **TCP.** In single player the server binds `127.0.0.1` on a port chosen by the client that launches it (§6). Multiplayer adds TLS (D24, M4-6): a server with a certificate speaks TLS on every connection, and the frames below travel inside it unchanged. Clients pin the certificate's SHA-256 (§6).
 - **Message frame:** a 4-byte little-endian length, then one FlatBuffer. This is FlatBuffers' *size-prefixed* buffer: `finish_size_prefixed` to write, `size_prefixed_root_as_…` to read.
 - **File identifiers:** `PAXC` for client→server (`ClientMessage`) and `PAXS` for server→client (`ServerMessage`). A buffer with the wrong identifier is a protocol error.
 - **Limits:** client messages are at most 64 KiB and server messages at most 16 MiB. A frame over the limit is a protocol error, so the receiver never allocates for it.
@@ -149,8 +149,8 @@ sequenceDiagram
   - **The host** is the first player to join. When the host leaves, the remaining player with the lowest id becomes host. On a dedicated server, `--admin NAME --admin-password-file PATH` makes the client named `NAME` the host instead, whenever it joins with the admin password; while it is away there is no host (D24). A name alone proves nothing: a client that gives the admin's name without the admin password joins as an ordinary player (the server logs it), and `--admin` without `--admin-password-file` is refused (M4-6).
   - `--pause-after S` and `--drop-after S` set D24's lag thresholds (5 and 30 by default).
   - `--updates-per-second N` and `--map-every N` set D24's bandwidth for remote sessions (4 and 5 by default, M4-7).
-  - `--password-file PATH` makes players give a password in `Hello` (protocol 1.6). The admin password also admits the admin. `--commands-per-second N` sets the rate limit (20 by default). Passwords come from files so they never show in the process list. A password never crosses the network in clear: off localhost, a server with a password or an admin needs TLS (M4-6b), and is refused until then.
-  - TLS is still to come (M4-6b). D24 requires TLS off localhost, so until then the server refuses `--players` above 1 on any other address: multiplayer is for testing on one machine until then.
+  - `--password-file PATH` makes players give a password in `Hello` (protocol 1.6). The admin password also admits the admin. `--commands-per-second N` sets the rate limit (20 by default). Passwords come from files so they never show in the process list. A password never crosses the network in clear: off localhost, a server with a password or an admin needs TLS, and is refused without it.
+  - **TLS (M4-6):** off localhost, several players need TLS. `--tls-self-signed` makes a certificate at start (a player-hosted game); `--tls-cert PEM --tls-key PEM` loads one (a dedicated server). The server prints the certificate's SHA-256, and writes it to `--fingerprint-file PATH` (before the port file, for a launcher waiting on that). Players connect with it pinned (`PaxClient.connect_secure(host, port, fingerprint)`); a different certificate ends the connection.
 
 ## 7. Conversions and units
 
