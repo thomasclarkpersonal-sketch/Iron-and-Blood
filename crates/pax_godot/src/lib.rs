@@ -7,9 +7,10 @@
 //! it against a real `pax_server`). This file only converts between it and Godot
 //! types, with every Dictionary key named once in `keys.rs`.
 //!
-//! It depends on `pax_protocol` only, never on `pax_engine`, so the client can't
-//! simulate (D10). Float arithmetic is linted everywhere except `decode::display`:
-//! code that builds commands (simulation input) must use integers (D3).
+//! It depends on `pax_protocol` and D12's side-neutral crates (`pax_map`,
+//! `pax_content`), never on `pax_engine`, so the client can't simulate (D10). Float
+//! arithmetic is linted everywhere except `decode::display`: code that builds
+//! commands (simulation input) must use integers (D3).
 
 pub mod args;
 pub mod connection;

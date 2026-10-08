@@ -11,8 +11,9 @@ publish.workspace = true
 # cdylib: the library Godot loads (client/pax_godot.gdextension). rlib: so tests can link it.
 crate-type = ["cdylib", "rlib"]
 
-# Depends on the protocol only, never on pax_engine: the client must not be able to
-# simulate (D10, D12). CI checks this with `cargo tree`.
+# Depends on pax_protocol and D12's side-neutral crates (pax_map, pax_content), never
+# on pax_engine: the client must not be able to simulate (D10, D12). CI allowlists
+# these with `cargo tree`.
 [dependencies]
 pax_protocol.workspace = true
 # The map reader the server validates maps with (no engine, no wire types).

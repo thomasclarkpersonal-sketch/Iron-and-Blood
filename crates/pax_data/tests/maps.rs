@@ -45,7 +45,7 @@ fn errors(scenario: &common::TempScenario) -> String {
 #[test]
 fn a_valid_map_loads_with_colours_in_scenario_order() {
     let s = scenario_with_map("valid", &[&[RIVERLANDS, COAST, DALE, PEAKS], &[SEA, SEA, SEA, SEA]], &standard_toml());
-    let map = pax_data::load_scenario(&s.dir).unwrap().map.expect("two_states names a map");
+    let map = pax_data::load_scenario(&s.dir).unwrap().map.expect("two_states names a map").map;
     assert_eq!((map.width, map.height, map.background), (4, 2, Some(SEA)));
     assert_eq!(map.colors, [RIVERLANDS, COAST, DALE, PEAKS]);
     assert_eq!(map.labels[3], [3, 0]);
@@ -105,6 +105,6 @@ fn a_label_must_sit_on_its_own_province() {
 
 #[test]
 fn the_shipped_two_states_map_is_valid() {
-    let map = pax_data::load_scenario(&common::repo().join("scenarios/two_states")).unwrap().map.unwrap();
+    let map = pax_data::load_scenario(&common::repo().join("scenarios/two_states")).unwrap().map.unwrap().map;
     assert_eq!((map.width, map.height, map.colors.len()), (640, 400, 4));
 }

@@ -11,22 +11,15 @@ use pax_map::{PNG_FILE, ProvinceMap, TOML_FILE};
 
 use crate::{LoadError, read};
 
-/// A validated province map.
+/// A scenario's validated province map: where it is, and what `pax_map` read.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MapData {
     /// The map's directory, relative to the scenario's (`scenario.toml`'s `map`): sent
     /// to the client as `StaticData.map_dir`.
     pub dir: String,
-    pub width: u32,
-    pub height: u32,
-    /// Each province's colour, in scenario order (index = province id).
-    pub colors: Vec<[u8; 3]>,
-    /// Each province's label anchor, in scenario order.
-    pub labels: Vec<[u32; 2]>,
-    pub background: Option<[u8; 3]>,
-    /// `pax_content::map_hash` of the two map files: `StaticData.map_hash` (D22). The
-    /// client computes the same function over its own copies.
-    pub map_hash: u64,
+    /// The map: sizes, colours and labels in scenario order, and `map_hash`
+    /// (`StaticData.map_hash`, D22), which the client computes over its own copies.
+    pub map: ProvinceMap,
 }
 
 /// The map's files, for the scenario's content hash.
@@ -49,10 +42,9 @@ pub(crate) fn load(scenario_dir: &Path, dir: &str, world: &World) -> Result<(Map
     let toml = read(&path.join(TOML_FILE))?;
     let png_path = path.join(PNG_FILE);
     let png = std::fs::read(&png_path).map_err(|e| LoadError::single(format!("{}: {e}", png_path.display())))?;
-    // The server never draws, so it doesn't keep the per-pixel ids.
-    let map = ProvinceMap::read(&toml, &png, &world.geography.province_keys, false).map_err(|messages| LoadError {
+    // The server never draws, so it reads without the per-pixel ids.
+    let map = ProvinceMap::read(&toml, &png, &world.geography.province_keys).map_err(|messages| LoadError {
         messages: messages.into_iter().map(|m| format!("{}: {m}", path.display())).collect(),
     })?;
-    let ProvinceMap { width, height, colors, labels, background, ids: _, map_hash } = map;
-    Ok((MapData { dir: dir.to_owned(), width, height, colors, labels, background, map_hash }, MapFiles { toml, png }))
+    Ok((MapData { dir: dir.to_owned(), map }, MapFiles { toml, png }))
 }

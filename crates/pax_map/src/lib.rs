@@ -29,6 +29,11 @@ use serde::Deserialize;
 /// The largest map accepted, per side: a sanity bound against corrupt files.
 pub const MAX_SIDE: u32 = 16_384;
 
+/// The most provinces a map can have: what the client's 16-bit ID texture can draw
+/// (id 0 is background). The server refuses a bigger map at load, so a client never
+/// connects to a game it can't draw.
+pub const MAX_PROVINCES: usize = 65_535;
+
 /// The files of a map directory.
 pub const TOML_FILE: &str = "provinces.toml";
 pub const PNG_FILE: &str = "provinces.png";
@@ -61,11 +66,41 @@ pub struct ProvinceMap {
     /// Each province's label anchor, `[x, y]` in pixels.
     pub labels: Vec<[u32; 2]>,
     pub background: Option<[u8; 3]>,
-    /// Each pixel's province id, row by row ([`province_of`] reads it); empty when
-    /// read without them (the server, which never draws).
-    pub ids: Vec<u32>,
     /// `pax_content::map_hash` of the two files: `StaticData.map_hash` (D22).
     pub map_hash: u64,
+}
+
+/// Each pixel's province id, row by row: what the client draws and picks with. Only
+/// [`ProvinceMap::read_with_ids`] makes one, so it always holds `width × height` ids.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProvinceIds {
+    width: u32,
+    height: u32,
+    ids: Vec<u32>,
+}
+
+impl ProvinceIds {
+    pub fn width(&self) -> u32 {
+        self.width
+    }
+
+    pub fn height(&self) -> u32 {
+        self.height
+    }
+
+    /// Every pixel's id, row by row ([`province_of`] reads one).
+    pub fn ids(&self) -> &[u32] {
+        &self.ids
+    }
+
+    /// The province at pixel `(x, y)`, or `None` for background or off the map.
+    pub fn province_at(&self, x: i64, y: i64) -> Option<u32> {
+        let (x, y) = (u32::try_from(x).ok()?, u32::try_from(y).ok()?);
+        if x >= self.width || y >= self.height {
+            return None;
+        }
+        province_of(self.ids[(y * self.width + x) as usize])
+    }
 }
 
 /// The id stored for a background pixel (sea). A province's id is its index + 1:
@@ -111,108 +146,134 @@ fn decode_png(bytes: &[u8]) -> Result<(u32, u32, Vec<[u8; 3]>), String> {
 }
 
 impl ProvinceMap {
-    /// Reads the map files in `dir` against `province_keys` (scenario order). Every
-    /// problem found is reported, each prefixed `map:`.
-    pub fn load(dir: &Path, province_keys: &[String], keep_ids: bool) -> Result<ProvinceMap, Vec<String>> {
+    /// Validates the two files' contents against `province_keys` (scenario order).
+    /// Every problem found is reported, each prefixed `map:`. The server reads maps
+    /// this way: it never draws, so it never builds the per-pixel ids.
+    pub fn read(toml: &str, png: &[u8], province_keys: &[String]) -> Result<ProvinceMap, Vec<String>> {
+        validate(toml, png, province_keys, false).map(|(map, _)| map)
+    }
+
+    /// [`ProvinceMap::read`], plus each pixel's province id: what the client draws with.
+    pub fn read_with_ids(
+        toml: &str,
+        png: &[u8],
+        province_keys: &[String],
+    ) -> Result<(ProvinceMap, ProvinceIds), Vec<String>> {
+        let (map, ids) = validate(toml, png, province_keys, true)?;
+        let ids = ProvinceIds { width: map.width, height: map.height, ids: ids.expect("asked for") };
+        Ok((map, ids))
+    }
+
+    /// Reads the map files in `dir` with their per-pixel ids (the client).
+    pub fn load_with_ids(dir: &Path, province_keys: &[String]) -> Result<(ProvinceMap, ProvinceIds), Vec<String>> {
         let read = |name: &str| std::fs::read(dir.join(name)).map_err(|e| vec![format!("map: {name}: {e}")]);
         let toml = read(TOML_FILE)?;
         let png = read(PNG_FILE)?;
         let toml = String::from_utf8(toml).map_err(|_| vec![format!("map: {TOML_FILE} is not UTF-8")])?;
-        ProvinceMap::read(&toml, &png, province_keys, keep_ids)
+        ProvinceMap::read_with_ids(&toml, &png, province_keys)
+    }
+}
+
+/// The checks every reader runs; the per-pixel ids only when `keep_ids`.
+fn validate(
+    toml: &str,
+    png: &[u8],
+    province_keys: &[String],
+    keep_ids: bool,
+) -> Result<(ProvinceMap, Option<Vec<u32>>), Vec<String>> {
+    if province_keys.len() > MAX_PROVINCES {
+        return Err(vec![format!(
+            "map: the scenario has {} provinces; a map can draw at most {MAX_PROVINCES}",
+            province_keys.len()
+        )]);
+    }
+    let file: MapFile = toml::from_str(toml).map_err(|e| vec![format!("map: {TOML_FILE}: {e}")])?;
+    let (width, height, image) = decode_png(png).map_err(|e| vec![format!("map: {PNG_FILE}: {e}")])?;
+
+    let keys = province_keys;
+    let mut errors = Vec::new();
+    let mut colors: Vec<Option<[u8; 3]>> = vec![None; keys.len()];
+    let mut labels = vec![[0, 0]; keys.len()];
+    let mut owner: BTreeMap<[u8; 3], usize> = BTreeMap::new();
+    for entry in &file.province {
+        let Some(p) = keys.iter().position(|k| *k == entry.key) else {
+            errors.push(format!("map: province '{}' is not in the scenario", entry.key));
+            continue;
+        };
+        if colors[p].is_some() {
+            errors.push(format!("map: province '{}' is listed twice", entry.key));
+            continue;
+        }
+        if Some(entry.color) == file.background {
+            errors.push(format!("map: province '{}' uses the background colour", entry.key));
+        }
+        if let Some(&other) = owner.get(&entry.color) {
+            errors.push(format!(
+                "map: provinces '{}' and '{}' share the colour {:?}",
+                keys[other], entry.key, entry.color
+            ));
+        }
+        owner.insert(entry.color, p);
+        colors[p] = Some(entry.color);
+        labels[p] = entry.label;
+    }
+    for (p, color) in colors.iter().enumerate() {
+        if color.is_none() {
+            errors.push(format!("map: province '{}' has no colour", keys[p]));
+        }
+    }
+    if !errors.is_empty() {
+        return Err(errors);
     }
 
-    /// Validates the two files' contents against `province_keys` (scenario order).
-    /// `keep_ids`: whether to return each pixel's province id (the client draws with
-    /// them; the server doesn't need them).
-    pub fn read(toml: &str, png: &[u8], province_keys: &[String], keep_ids: bool) -> Result<ProvinceMap, Vec<String>> {
-        let file: MapFile = toml::from_str(toml).map_err(|e| vec![format!("map: {TOML_FILE}: {e}")])?;
-        let (width, height, image) = decode_png(png).map_err(|e| vec![format!("map: {PNG_FILE}: {e}")])?;
-
-        let keys = province_keys;
-        let mut errors = Vec::new();
-        let mut colors: Vec<Option<[u8; 3]>> = vec![None; keys.len()];
-        let mut labels = vec![[0, 0]; keys.len()];
-        let mut owner: BTreeMap<[u8; 3], usize> = BTreeMap::new();
-        for entry in &file.province {
-            let Some(p) = keys.iter().position(|k| *k == entry.key) else {
-                errors.push(format!("map: province '{}' is not in the scenario", entry.key));
-                continue;
-            };
-            if colors[p].is_some() {
-                errors.push(format!("map: province '{}' is listed twice", entry.key));
-                continue;
-            }
-            if Some(entry.color) == file.background {
-                errors.push(format!("map: province '{}' uses the background colour", entry.key));
-            }
-            if let Some(&other) = owner.get(&entry.color) {
-                errors.push(format!(
-                    "map: provinces '{}' and '{}' share the colour {:?}",
-                    keys[other], entry.key, entry.color
-                ));
-            }
-            owner.insert(entry.color, p);
-            colors[p] = Some(entry.color);
-            labels[p] = entry.label;
-        }
-        for (p, color) in colors.iter().enumerate() {
-            if color.is_none() {
-                errors.push(format!("map: province '{}' has no colour", keys[p]));
+    // Every pixel must belong to a province or the background; every province needs pixels.
+    let mut painted = vec![0u64; keys.len()];
+    let mut stray: BTreeMap<[u8; 3], (u32, u32)> = BTreeMap::new();
+    let mut ids = Vec::with_capacity(if keep_ids { image.len() } else { 0 });
+    for (i, px) in image.iter().enumerate() {
+        let p = owner.get(px).copied();
+        match p {
+            Some(p) => painted[p] += 1,
+            None if Some(*px) == file.background => {}
+            None => {
+                stray.entry(*px).or_insert((i as u32 % width, i as u32 / width));
             }
         }
-        if !errors.is_empty() {
-            return Err(errors);
+        if keep_ids {
+            ids.push(p.map_or(BACKGROUND_ID, id_of));
         }
-
-        // Every pixel must belong to a province or the background; every province needs pixels.
-        let mut painted = vec![0u64; keys.len()];
-        let mut stray: BTreeMap<[u8; 3], (u32, u32)> = BTreeMap::new();
-        let mut ids = Vec::with_capacity(if keep_ids { image.len() } else { 0 });
-        for (i, px) in image.iter().enumerate() {
-            let p = owner.get(px).copied();
-            match p {
-                Some(p) => painted[p] += 1,
-                None if Some(*px) == file.background => {}
-                None => {
-                    stray.entry(*px).or_insert((i as u32 % width, i as u32 / width));
-                }
-            }
-            if keep_ids {
-                ids.push(p.map_or(BACKGROUND_ID, id_of));
-            }
-        }
-        const SHOWN: usize = 5;
-        for (color, (x, y)) in stray.iter().take(SHOWN) {
-            errors.push(format!("map: colour {color:?} (first at pixel {x},{y}) is not a province or the background"));
-        }
-        if stray.len() > SHOWN {
-            errors.push(format!("map: ...and {} more stray colours", stray.len() - SHOWN));
-        }
-        for (p, &n) in painted.iter().enumerate() {
-            if n == 0 {
-                errors.push(format!("map: province '{}' has no pixels", keys[p]));
-            }
-        }
-        for (p, &[x, y]) in labels.iter().enumerate() {
-            let on_own_pixel = x < width && y < height && owner.get(&image[(y * width + x) as usize]) == Some(&p);
-            if !on_own_pixel {
-                errors.push(format!("map: province '{}' has its label at {x},{y}, outside its own pixels", keys[p]));
-            }
-        }
-        if !errors.is_empty() {
-            return Err(errors);
-        }
-
-        Ok(ProvinceMap {
-            width,
-            height,
-            colors: colors.into_iter().map(|c| c.expect("checked above")).collect(),
-            labels,
-            background: file.background,
-            ids,
-            map_hash: pax_content::map_hash(toml.as_bytes(), png),
-        })
     }
+    const SHOWN: usize = 5;
+    for (color, (x, y)) in stray.iter().take(SHOWN) {
+        errors.push(format!("map: colour {color:?} (first at pixel {x},{y}) is not a province or the background"));
+    }
+    if stray.len() > SHOWN {
+        errors.push(format!("map: ...and {} more stray colours", stray.len() - SHOWN));
+    }
+    for (p, &n) in painted.iter().enumerate() {
+        if n == 0 {
+            errors.push(format!("map: province '{}' has no pixels", keys[p]));
+        }
+    }
+    for (p, &[x, y]) in labels.iter().enumerate() {
+        let on_own_pixel = x < width && y < height && owner.get(&image[(y * width + x) as usize]) == Some(&p);
+        if !on_own_pixel {
+            errors.push(format!("map: province '{}' has its label at {x},{y}, outside its own pixels", keys[p]));
+        }
+    }
+    if !errors.is_empty() {
+        return Err(errors);
+    }
+
+    let map = ProvinceMap {
+        width,
+        height,
+        colors: colors.into_iter().map(|c| c.expect("checked above")).collect(),
+        labels,
+        background: file.background,
+        map_hash: pax_content::map_hash(toml.as_bytes(), png),
+    };
+    Ok((map, keep_ids.then_some(ids)))
 }
 
 #[cfg(test)]
@@ -227,25 +288,32 @@ mod tests {
     fn the_two_states_map_reads_with_every_pixel_assigned() {
         let keys: Vec<String> = ["riverlands", "coast", "dale", "peaks"].map(String::from).to_vec();
         let dir = resolve_map_dir(&two_states(), "map");
-        let map = ProvinceMap::load(&dir, &keys, true).unwrap();
-        assert_eq!(map.ids.len(), (map.width * map.height) as usize);
+        let (map, ids) = ProvinceMap::load_with_ids(&dir, &keys).unwrap();
+        assert_eq!(ids.ids().len(), (map.width * map.height) as usize);
         for (p, &[x, y]) in map.labels.iter().enumerate() {
-            assert_eq!(
-                province_of(map.ids[(y * map.width + x) as usize]),
-                Some(p as u32),
-                "a label sits on its province"
-            );
+            assert_eq!(ids.province_at(i64::from(x), i64::from(y)), Some(p as u32), "a label sits on its province");
         }
+        assert_eq!(ids.province_at(-1, 0), None);
         let toml = std::fs::read(dir.join(TOML_FILE)).unwrap();
         let png = std::fs::read(dir.join(PNG_FILE)).unwrap();
         assert_eq!(map.map_hash, pax_content::map_hash(&toml, &png));
+    }
+
+    /// The client's ID texture draws at most MAX_PROVINCES; the reader refuses more,
+    /// so the server never serves a map a client can't draw.
+    #[test]
+    fn more_provinces_than_a_map_can_draw_are_refused() {
+        let keys: Vec<String> = (0..=MAX_PROVINCES).map(|p| format!("p{p}")).collect();
+        let dir = resolve_map_dir(&two_states(), "map");
+        let errors = ProvinceMap::load_with_ids(&dir, &keys).unwrap_err();
+        assert!(errors[0].contains("at most 65535"), "{errors:?}");
     }
 
     #[test]
     fn keys_the_map_does_not_cover_are_reported() {
         let keys: Vec<String> = ["riverlands", "coast", "dale", "peaks", "nowhere"].map(String::from).to_vec();
         let dir = resolve_map_dir(&two_states(), "map");
-        let errors = ProvinceMap::load(&dir, &keys, true).unwrap_err();
+        let errors = ProvinceMap::load_with_ids(&dir, &keys).unwrap_err();
         assert_eq!(errors, ["map: province 'nowhere' has no colour"]);
     }
 }

@@ -5,17 +5,14 @@
 //!
 //! **ID texture:** RGB8, one texel per map pixel, holding `pax_map`'s id for it
 //! (`r + 256·g`: the province index + 1, and [`pax_map::BACKGROUND_ID`] for sea), so a
-//! map can have at most [`MAX_PROVINCES`] provinces. A map-mode change then rewrites
+//! map can have at most `pax_map::MAX_PROVINCES` provinces (the reader enforces it). A map-mode change then rewrites
 //! only the small per-province colour table, never this image. `client/ui/map.gdshader`
 //! decodes the same texels (it says it mirrors this); picking goes through
 //! [`MapImage::province_at`], so GDScript never decodes them.
 
 use std::path::Path;
 
-use pax_map::ProvinceMap;
-
-/// The most provinces the 16-bit ID texture can address (0 is background).
-pub const MAX_PROVINCES: usize = 65_535;
+use pax_map::{ProvinceIds, ProvinceMap};
 
 /// The map, ready to draw.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -24,8 +21,8 @@ pub struct MapImage {
     pub height: u32,
     /// RGB8 province-ID texels, row by row (see the module docs).
     pub texels: Vec<u8>,
-    /// Each pixel's `pax_map` id, row by row: what [`MapImage::province_at`] reads.
-    pub ids: Vec<u32>,
+    /// Each pixel's `pax_map` id: what [`MapImage::province_at`] reads.
+    pub ids: ProvinceIds,
     /// Each province's label anchor, `[x, y]` in pixels.
     pub labels: Vec<[u32; 2]>,
 }
@@ -33,11 +30,7 @@ pub struct MapImage {
 impl MapImage {
     /// The province at pixel `(x, y)`, or `None` for sea or off the map.
     pub fn province_at(&self, x: i64, y: i64) -> Option<u32> {
-        let (x, y) = (u32::try_from(x).ok()?, u32::try_from(y).ok()?);
-        if x >= self.width || y >= self.height {
-            return None;
-        }
-        pax_map::province_of(self.ids[(y * self.width + x) as usize])
+        self.ids.province_at(x, y)
     }
 }
 
@@ -53,7 +46,7 @@ pub fn load(
 ) -> Result<Option<MapImage>, String> {
     let (Some(map_dir), Some(expected)) = (map_dir, expected_hash) else { return Ok(None) };
     let dir = pax_map::resolve_map_dir(scenario_dir, map_dir);
-    let map = ProvinceMap::load(&dir, provinces, true).map_err(|errors| errors.join("\n"))?;
+    let (map, ids) = ProvinceMap::load_with_ids(&dir, provinces).map_err(|errors| errors.join("\n"))?;
     if map.map_hash != expected {
         return Err(format!(
             "this copy of the map ({}) differs from the server's: map hash {:#018x}, the server's is {expected:#018x}",
@@ -61,20 +54,17 @@ pub fn load(
             map.map_hash,
         ));
     }
-    image(&map).map(Some)
+    Ok(Some(image(&map, ids)))
 }
 
-/// The ID texture of a validated map.
-pub fn image(map: &ProvinceMap) -> Result<MapImage, String> {
-    if map.colors.len() > MAX_PROVINCES {
-        return Err(format!("the map has {} provinces; the client draws at most {MAX_PROVINCES}", map.colors.len()));
-    }
-    let mut texels = Vec::with_capacity(map.ids.len() * 3);
-    for &id in &map.ids {
-        // Fits in 16 bits (checked above).
+/// The ID texture of a validated map and its ids. The reader bounds the provinces at
+/// `pax_map::MAX_PROVINCES`, so every id fits the texture's 16 bits.
+pub fn image(map: &ProvinceMap, ids: ProvinceIds) -> MapImage {
+    let mut texels = Vec::with_capacity(ids.ids().len() * 3);
+    for &id in ids.ids() {
         texels.extend_from_slice(&[(id & 0xff) as u8, (id >> 8) as u8, 0]);
     }
-    Ok(MapImage { width: map.width, height: map.height, texels, ids: map.ids.clone(), labels: map.labels.clone() })
+    MapImage { width: map.width, height: map.height, texels, ids, labels: map.labels.clone() }
 }
 
 #[cfg(test)]
@@ -90,7 +80,7 @@ mod tests {
     }
 
     fn true_hash() -> u64 {
-        ProvinceMap::load(&pax_map::resolve_map_dir(&two_states(), "map"), &keys(), false).unwrap().map_hash
+        ProvinceMap::load_with_ids(&pax_map::resolve_map_dir(&two_states(), "map"), &keys()).unwrap().0.map_hash
     }
 
     #[test]
