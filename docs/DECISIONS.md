@@ -34,7 +34,7 @@ To change a decision, edit its entry in the same pull request as the code. Say w
 | [D21](#d21-commands-and-command-logs) | Commands and command logs | Accepted |
 | [D22](#d22-wire-protocol-and-client-sessions) | Wire protocol and sessions | Accepted (M3) |
 | [D23](#d23-server-loop-pacing-flow-control-and-saves) | Server loop, pacing, saves | Accepted (M3) |
-| [D24](#d24-multiplayer-authority) | Multiplayer authority | Proposed (M4) |
+| [D24](#d24-multiplayer-authority) | Multiplayer authority | Accepted (M4-0) |
 
 ---
 
@@ -444,7 +444,7 @@ The state → national → sphere → global roll-up in the old ECONOMY_SYSTEM w
 
 ## D24. Multiplayer authority
 
-**Proposed (M4).** Full design: [MILESTONE_4.md](MILESTONE_4.md).
+**Accepted (M4-0, owner, 2026-10-08).** Full design: [MILESTONE_4.md](MILESTONE_4.md). The numbers below (5 s, 30 s, 20 per second, and MILESTONE_4's bandwidth defaults) are **server settings with defaults**, to be confirmed in a multiplayer playtest; changing a default is not a change to this decision.
 
 - **Permissions:** each session commands at most one nation, claimed in the lobby. The server checks a command's nation against the session's before `World::validate`; a mismatch gets `NotPermitted`. Permission (here) and rule validity (D21) are separate checks, in that order. Sandbox sessions exist only with `--sandbox`.
 - **Host:** only the host changes speed, unpauses, saves, loads and kicks. Any player may pause.
@@ -452,7 +452,7 @@ The state → national → sphere → global roll-up in the old ECONOMY_SYSTEM w
 - **Lag, in wall-clock time:**
   - updates coalesce per client (D23);
   - 5 s of silence from a client pauses the game ("waiting for player");
-  - 30 s drops the session, and its nation keeps its current policies;
+  - 30 s drops the session, and its nation keeps its current policies. In multiplayer this replaces M3's 10 s idle timeout (`pax_protocol::IDLE_TIMEOUT`), which would otherwise drop a client before the fairness pause could help it; single player keeps the 10 s rule;
   - a resume token reclaims the nation.
 - **Transport:**
   - TLS whenever the server is not bound to localhost;

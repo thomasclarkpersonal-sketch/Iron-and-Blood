@@ -22,14 +22,13 @@ To build a highly concurrent, performant, and deeply interconnected socioeconomi
    - Taxation, tariffs, and government spending directly influence the economy and POP wealth.
 
 ## 🚦 Status
-**Milestone 1 (closed single-market economy) is complete, and Milestone 2 has started** (nations, income tax and transfers: D15). It includes:
-- fixed-point determinism;
-- an outside-money conservation check on every tick;
-- golden-hash replay verification;
-- a TOML data loader;
-- a headless CLI, benchmarked at about 36 ms per simulated day for 1M POPs on 8 threads.
+**Milestones 1 and 3 are closed. Milestone 2 is partly done:** trade, banking and investment await design decisions. **Milestone 4 (multiplayer) is in progress.** The game so far:
+- a deterministic, fixed-point economy with nations, taxes, government spending, labour mobility, migration and militancy (M1, M2);
+- an outside-money conservation check on every tick, and golden-hash replay verification;
+- an authoritative `pax_server` and a Godot client that plays `two_states` single player, with saves (M3);
+- a headless CLI for runs, reports, replays and benchmarks.
 
-See [docs/MILESTONE_1.md](docs/MILESTONE_1.md) for acceptance criteria and open team tasks.
+See [docs/MILESTONE_4.md](docs/MILESTONE_4.md) for the current tasks and [docs/MILESTONE_2.md](docs/MILESTONE_2.md) for the decisions M2 is waiting on.
 
 ## 🚀 Quick Start
 ```bash
