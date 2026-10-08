@@ -90,6 +90,8 @@ fn to_dictionary(event: ServerEvent) -> VarDictionary {
             d.set("scenario", &GString::from(&w.scenario));
             // Godot ints are signed 64-bit; the hash is an identifier, so its bits are kept as-is.
             d.set("content_hash", w.content_hash as i64);
+            // null when the scenario has no map (D22: absent ids/values are null, never a sentinel).
+            d.set("map_hash", &w.map_hash.map_or(Variant::nil(), |h| Variant::from(h as i64)));
             d.set("goods", &strings(&w.goods));
             d.set("professions", &strings(&w.professions));
             d.set("provinces", &strings(&w.provinces));

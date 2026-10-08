@@ -58,6 +58,9 @@ pub struct WelcomeView {
     pub day: u64,
     pub scenario: String,
     pub content_hash: u64,
+    /// The hash the client's copy of the map files must have (`StaticData.map_hash`);
+    /// `None` if the scenario has no map.
+    pub map_hash: Option<u64>,
     pub goods: Vec<String>,
     pub professions: Vec<String>,
     pub provinces: Vec<String>,
@@ -135,6 +138,7 @@ fn welcome(w: wire::Welcome<'_>) -> Result<WelcomeView, StreamError> {
         day: w.day(),
         scenario: required(w.scenario(), "a scenario name")?.to_owned(),
         content_hash: w.content_hash(),
+        map_hash: defs.map_hash(),
         goods: strings(defs.goods(), "goods")?,
         professions: strings(defs.professions(), "professions")?,
         provinces: strings(defs.provinces(), "provinces")?,
@@ -330,6 +334,7 @@ mod tests {
                     province_market: Some(province_market),
                     markets: Some(markets),
                     nations: Some(nations),
+                    map_hash: None,
                 },
             )
         });

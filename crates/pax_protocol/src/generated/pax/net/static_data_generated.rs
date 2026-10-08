@@ -35,6 +35,7 @@ impl<'a> StaticData<'a> {
   pub const VT_PROVINCE_MARKET: flatbuffers::VOffsetT = 12;
   pub const VT_MARKETS: flatbuffers::VOffsetT = 14;
   pub const VT_NATIONS: flatbuffers::VOffsetT = 16;
+  pub const VT_MAP_HASH: flatbuffers::VOffsetT = 18;
 
   #[inline]
   pub unsafe fn init_from_table(table: flatbuffers::Table<'a>) -> Self {
@@ -46,6 +47,7 @@ impl<'a> StaticData<'a> {
     args: &'args StaticDataArgs<'args>
   ) -> flatbuffers::WIPOffset<StaticData<'bldr>> {
     let mut builder = StaticDataBuilder::new(_fbb);
+    if let Some(x) = args.map_hash { builder.add_map_hash(x); }
     if let Some(x) = args.nations { builder.add_nations(x); }
     if let Some(x) = args.markets { builder.add_markets(x); }
     if let Some(x) = args.province_market { builder.add_province_market(x); }
@@ -107,6 +109,16 @@ impl<'a> StaticData<'a> {
     // which contains a valid value in this slot
     unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<NationDef>>>>(StaticData::VT_NATIONS, None)}
   }
+  /// `pax_content::map_hash` of the scenario's two map files (`map/provinces.toml`,
+  /// `map/provinces.png`); absent if it has no map (M3-7). The client hashes its
+  /// own copies with the same function and refuses to draw on a mismatch.
+  #[inline]
+  pub fn map_hash(&self) -> Option<u64> {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<u64>(StaticData::VT_MAP_HASH, None)}
+  }
 }
 
 impl flatbuffers::Verifiable for StaticData<'_> {
@@ -123,6 +135,7 @@ impl flatbuffers::Verifiable for StaticData<'_> {
      .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, u32>>>("province_market", Self::VT_PROVINCE_MARKET, false)?
      .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, flatbuffers::ForwardsUOffset<&'_ str>>>>("markets", Self::VT_MARKETS, false)?
      .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, flatbuffers::ForwardsUOffset<NationDef>>>>("nations", Self::VT_NATIONS, false)?
+     .visit_field::<u64>("map_hash", Self::VT_MAP_HASH, false)?
      .finish();
     Ok(())
   }
@@ -135,6 +148,7 @@ pub struct StaticDataArgs<'a> {
     pub province_market: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, u32>>>,
     pub markets: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<&'a str>>>>,
     pub nations: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<NationDef<'a>>>>>,
+    pub map_hash: Option<u64>,
 }
 impl<'a> Default for StaticDataArgs<'a> {
   #[inline]
@@ -147,6 +161,7 @@ impl<'a> Default for StaticDataArgs<'a> {
       province_market: None,
       markets: None,
       nations: None,
+      map_hash: None,
     }
   }
 }
@@ -185,6 +200,10 @@ impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> StaticDataBuilder<'a, 'b, A> {
     self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(StaticData::VT_NATIONS, nations);
   }
   #[inline]
+  pub fn add_map_hash(&mut self, map_hash: u64) {
+    self.fbb_.push_slot_always::<u64>(StaticData::VT_MAP_HASH, map_hash);
+  }
+  #[inline]
   pub fn new(_fbb: &'b mut flatbuffers::FlatBufferBuilder<'a, A>) -> StaticDataBuilder<'a, 'b, A> {
     let start = _fbb.start_table();
     StaticDataBuilder {
@@ -209,6 +228,7 @@ impl core::fmt::Debug for StaticData<'_> {
       ds.field("province_market", &self.province_market());
       ds.field("markets", &self.markets());
       ds.field("nations", &self.nations());
+      ds.field("map_hash", &self.map_hash());
       ds.finish()
   }
 }

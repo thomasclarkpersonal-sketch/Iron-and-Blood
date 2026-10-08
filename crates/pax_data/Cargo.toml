@@ -13,6 +13,11 @@ publish.workspace = true
 bench = []
 
 [dependencies]
+# Dependency-free: the content-hash scheme the client shares (D22). Never pax_protocol:
+# pax_server is the only crate that sees both engine and wire types (AGENTS.md section 2).
+pax_content.workspace = true
+# Province maps (M3-7): pure-Rust PNG decoding.
+png = "0.18"
 pax_engine.workspace = true
 serde.workspace = true
 toml.workspace = true

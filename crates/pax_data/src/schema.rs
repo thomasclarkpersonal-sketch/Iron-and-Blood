@@ -158,6 +158,9 @@ pub struct ScenarioFile {
     /// Optional command log, relative to the scenario directory (D21).
     #[serde(default)]
     pub commands: Option<String>,
+    /// Optional province map directory, relative to the scenario directory (M3-7).
+    #[serde(default)]
+    pub map: Option<String>,
     #[serde(default)]
     pub nation: Vec<NationEntry>,
     #[serde(default)]
