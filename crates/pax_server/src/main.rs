@@ -62,11 +62,16 @@ fn main() -> ExitCode {
         && let Err(e) = write_port_file(&path, server.local_addr().port())
     {
         error!("could not write the port file {}: {e}", path.display());
-        server.shutdown();
+        let _ = server.shutdown();
         return ExitCode::FAILURE;
     }
-    server.wait();
-    ExitCode::SUCCESS
+    match server.wait() {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(failure) => {
+            error!("{failure}");
+            ExitCode::FAILURE
+        }
+    }
 }
 
 #[cfg(test)]

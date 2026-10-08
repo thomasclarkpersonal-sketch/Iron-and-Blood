@@ -39,7 +39,7 @@ fn hello_gets_welcome_with_the_scenario_tables() {
         }
         other => panic!("expected Welcome, got {other:?}"),
     }
-    server.shutdown();
+    server.shutdown().expect("clean shutdown");
 }
 
 #[test]
@@ -48,7 +48,7 @@ fn hello_without_a_nation_is_sandbox() {
     let mut c = Client::connect(server.local_addr());
     c.hello(None);
     assert!(matches!(c.next(), Got::Welcome { nation: None, .. }));
-    server.shutdown();
+    server.shutdown().expect("clean shutdown");
 }
 
 #[test]
@@ -64,7 +64,7 @@ fn a_second_client_is_refused_while_the_first_plays() {
     // The first session is unaffected.
     first.ping(7);
     assert_eq!(first.next(), Got::Pong(7));
-    server.shutdown();
+    server.shutdown().expect("clean shutdown");
 }
 
 #[test]
@@ -84,7 +84,7 @@ fn the_seat_frees_up_when_the_player_leaves() {
             other => panic!("expected Welcome after the first player left, got {other:?}"),
         }
     }
-    server.shutdown();
+    server.shutdown().expect("clean shutdown");
 }
 
 #[test]
@@ -96,7 +96,7 @@ fn wrong_protocol_major_and_unknown_nation_are_rejected() {
     let mut c = Client::connect(server.local_addr());
     c.hello(Some(2));
     assert_rejected(c.next(), "unknown nation 2");
-    server.shutdown();
+    server.shutdown().expect("clean shutdown");
 }
 
 #[test]
@@ -106,7 +106,7 @@ fn anything_before_hello_is_a_protocol_error() {
     c.ping(1);
     assert_goodbye(c.next(), "first message must be Hello");
     assert_eq!(c.next(), Got::Closed);
-    server.shutdown();
+    server.shutdown().expect("clean shutdown");
 }
 
 #[test]
@@ -117,7 +117,7 @@ fn hello_twice_is_a_protocol_error() {
     assert!(matches!(c.next(), Got::Welcome { .. }));
     c.hello(None);
     assert_goodbye(c.next(), "Hello sent twice");
-    server.shutdown();
+    server.shutdown().expect("clean shutdown");
 }
 
 #[test]
@@ -130,7 +130,7 @@ fn ping_gets_pong() {
         c.ping(nonce);
         assert_eq!(c.next(), Got::Pong(nonce));
     }
-    server.shutdown();
+    server.shutdown().expect("clean shutdown");
 }
 
 #[test]
@@ -149,7 +149,7 @@ fn oversized_and_garbage_frames_end_the_session_without_a_panic() {
     let mut c = Client::connect(server.local_addr());
     c.hello(None);
     assert!(matches!(c.next(), Got::Welcome { .. }));
-    server.shutdown();
+    server.shutdown().expect("clean shutdown");
 }
 
 #[test]
@@ -162,7 +162,7 @@ fn a_silent_client_times_out() {
     assert!(matches!(c.next(), Got::Welcome { .. }));
     assert_goodbye(c.next(), "no message for");
     assert_eq!(c.next(), Got::Closed);
-    server.shutdown();
+    server.shutdown().expect("clean shutdown");
 }
 
 #[test]
@@ -177,7 +177,7 @@ fn exit_when_idle_stops_the_server_when_the_player_leaves() {
     // wait() returns only because the server stopped by itself.
     let (done_tx, done_rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
-        server.wait();
+        server.wait().expect("clean exit");
         let _ = done_tx.send(());
     });
     done_rx.recv_timeout(Duration::from_secs(5)).expect("server exits after its only player leaves");
@@ -196,7 +196,7 @@ fn a_rejected_client_cannot_act_even_if_it_sends_requests_at_once() {
     second.subscribe(pax_protocol::wire::MapMode::Population, 0, None, None);
     assert!(matches!(second.next(), Got::Rejected(_)));
     assert_eq!(second.next(), Got::Closed);
-    server.shutdown();
+    server.shutdown().expect("clean shutdown");
 }
 
 #[test]
@@ -228,5 +228,5 @@ fn a_client_that_never_reads_is_disconnected_instead_of_queued_forever() {
     other.hello(None);
     let got = other.next();
     assert!(matches!(got, Got::Welcome { .. } | Got::Rejected(_)), "{got:?}");
-    server.shutdown();
+    server.shutdown().expect("clean shutdown");
 }

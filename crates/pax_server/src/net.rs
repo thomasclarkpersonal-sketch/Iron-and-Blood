@@ -16,7 +16,7 @@
 //! memory without limit.
 
 use std::sync::Arc;
-use std::sync::mpsc::Sender;
+use std::sync::mpsc::{SyncSender, TrySendError as SyncTrySendError};
 use std::time::Duration;
 
 use pax_protocol::{Direction, FrameDecoder};
@@ -33,6 +33,11 @@ use crate::request::{self, Request};
 /// never comes close: updates are capped by D23's 3-update window, and replies are
 /// one per request.
 pub(crate) const OUTBOUND_QUEUE: usize = 256;
+
+/// Events all connections may have queued for the sim thread. When it is full, a
+/// connection stops reading its socket until there is room: TCP backpressure,
+/// not unbounded memory.
+pub(crate) const INBOUND_QUEUE: usize = 1024;
 
 /// After the session ends, how long the writer may take to flush its queue before
 /// it is cut off (a client that isn't reading would hold it forever).
@@ -80,9 +85,27 @@ pub(crate) enum Inbound {
     },
     /// Stop the server (tests, and future admin commands).
     Shutdown,
+    /// Make the sim thread panic, to test how a failure reaches clients and the caller.
+    #[cfg(test)]
+    Crash,
 }
 
-pub(crate) async fn accept_loop(listener: TcpListener, to_sim: Sender<Inbound>, idle: Duration) {
+/// Hands `event` to the sim thread, waiting (without blocking the runtime) while its
+/// queue is full. `Err` once the sim thread has stopped.
+async fn to_sim(sim: &SyncSender<Inbound>, mut event: Inbound) -> Result<(), ()> {
+    loop {
+        match sim.try_send(event) {
+            Ok(()) => return Ok(()),
+            Err(SyncTrySendError::Full(back)) => {
+                event = back;
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+            Err(SyncTrySendError::Disconnected(_)) => return Err(()),
+        }
+    }
+}
+
+pub(crate) async fn accept_loop(listener: TcpListener, sim: SyncSender<Inbound>, idle: Duration) {
     let mut next_session = 1u64;
     loop {
         match listener.accept().await {
@@ -92,7 +115,7 @@ pub(crate) async fn accept_loop(listener: TcpListener, to_sim: Sender<Inbound>, 
                 info!(session, %peer, "connection");
                 // Small, latency-sensitive messages: don't wait to coalesce them.
                 let _ = stream.set_nodelay(true);
-                tokio::spawn(connection(stream, session, to_sim.clone(), idle));
+                tokio::spawn(connection(stream, session, sim.clone(), idle));
             }
             Err(e) => {
                 // Usually transient (e.g. out of file descriptors): back off briefly.
@@ -103,14 +126,12 @@ pub(crate) async fn accept_loop(listener: TcpListener, to_sim: Sender<Inbound>, 
     }
 }
 
-async fn connection(stream: TcpStream, session: u64, to_sim: Sender<Inbound>, idle: Duration) {
+async fn connection(stream: TcpStream, session: u64, sim: SyncSender<Inbound>, idle: Duration) {
     let (mut rd, mut wr) = stream.into_split();
     let (out_tx, mut out_rx) = mpsc::channel::<Outbound>(OUTBOUND_QUEUE);
     let kill = Arc::new(Notify::new());
-    if to_sim
-        .send(Inbound::Connected { session, conn: ConnHandle { out: out_tx.clone(), kill: kill.clone() } })
-        .is_err()
-    {
+    let conn = ConnHandle { out: out_tx.clone(), kill: kill.clone() };
+    if to_sim(&sim, Inbound::Connected { session, conn }).await.is_err() {
         return; // the server is shutting down
     }
 
@@ -172,7 +193,7 @@ async fn connection(stream: TcpStream, session: u64, to_sim: Sender<Inbound>, id
                 continue;
             }
             debug!(session, ?request, "request");
-            if to_sim.send(Inbound::Request { session, request }).is_err() {
+            if to_sim(&sim, Inbound::Request { session, request }).await.is_err() {
                 break 'read Some("the server is shutting down".to_owned());
             }
         }
@@ -183,7 +204,7 @@ async fn connection(stream: TcpStream, session: u64, to_sim: Sender<Inbound>, id
         let _ = out_tx.try_send(Outbound::Frame(encode::goodbye(reason)));
     }
     let _ = out_tx.try_send(Outbound::Close);
-    let _ = to_sim.send(Inbound::Closed { session });
+    let _ = to_sim(&sim, Inbound::Closed { session }).await;
     // A client that isn't reading would keep the writer blocked forever.
     if tokio::time::timeout(FLUSH_TIMEOUT, &mut writer).await.is_err() {
         writer.abort();

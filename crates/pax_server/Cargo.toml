@@ -11,8 +11,7 @@ publish.workspace = true
 pax_engine.workspace = true
 pax_data.workspace = true
 pax_protocol.workspace = true
-# Must match pax_protocol's pin: messages are built here with the generated code.
-flatbuffers = "=24.3.25"
+flatbuffers.workspace = true
 # Networking only. The simulation runs on its own thread, never on the async runtime (D23).
 tokio = { version = "1.37", features = ["rt-multi-thread", "net", "io-util", "sync", "time", "macros"] }
 tracing = "0.1"

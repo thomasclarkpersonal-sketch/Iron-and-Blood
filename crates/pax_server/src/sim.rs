@@ -76,10 +76,11 @@ impl Sim {
         {
             return self.reject(session, &format!("unknown nation {n}: the scenario has {nations}"));
         }
+        // A connection's events arrive in order on one channel: Connected, its
+        // requests, then Closed. So a session that sent Hello is always known here.
+        let s = self.sessions.get_mut(&session).expect("Connected precedes every request of a session");
+        s.seat = Some(Seat { player: 0, nation: requested_nation });
         self.active = Some(session);
-        if let Some(s) = self.sessions.get_mut(&session) {
-            s.seat = Some(Seat { player: 0, nation: requested_nation });
-        }
         info!(session, name, ?requested_nation, "welcomed");
         let info = WelcomeInfo {
             player: 0,
@@ -119,12 +120,25 @@ impl Sim {
                 }
             }
             Inbound::Shutdown => return false,
+            #[cfg(test)]
+            Inbound::Crash => panic!("injected crash for a test"),
         }
         true
     }
 }
 
-pub(crate) fn run(mut sim: Sim, inbound: Receiver<Inbound>) {
+impl Sim {
+    /// After the sim thread panicked: tell every connection why it is being closed.
+    pub(crate) fn fail(&self, message: &str) {
+        let reason = format!("the server failed: {message}");
+        for session in self.sessions.values() {
+            session.conn.send(Outbound::Frame(encode::goodbye(&reason)));
+            session.conn.send(Outbound::Close);
+        }
+    }
+}
+
+pub(crate) fn run(sim: &mut Sim, inbound: Receiver<Inbound>) {
     while let Ok(event) = inbound.recv() {
         if !sim.handle(event) {
             break;

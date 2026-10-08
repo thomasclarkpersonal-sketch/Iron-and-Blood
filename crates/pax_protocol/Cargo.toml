@@ -10,9 +10,7 @@ publish.workspace = true
 # No pax_engine dependency, ever: clients link this crate, and a client must not be able
 # to simulate (D10, D12).
 [dependencies]
-# Pinned exactly: generated code only works with the runtime of the flatc version that
-# produced it (scripts/gen-protocol.sh, D22).
-flatbuffers = "=24.3.25"
+flatbuffers.workspace = true
 
 # The workspace lints, except one. The workspace forbids `unsafe_code`, but flatc's
 # generated Rust uses `unsafe` internally, and `forbid` can't be relaxed for a single
