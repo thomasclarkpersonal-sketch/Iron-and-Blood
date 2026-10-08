@@ -98,12 +98,7 @@ impl PaxClient {
     /// Returns an error message, or `""` on success.
     #[func]
     fn launch(&mut self, server_path: GString, scenario_dir: GString, saves_dir: GString) -> GString {
-        // A previous session ends first: its connection, then its server, so that
-        // server can exit by itself (`--exit-when-idle`).
-        self.connection = None;
-        self.server = None;
-        self.welcome = None;
-        self.map = None;
+        self.end_session();
         let (server, scenario, saves) = (server_path.to_string(), scenario_dir.to_string(), saves_dir.to_string());
         self.scenario_dir = Some(scenario.clone().into());
         match LocalServer::launch(Path::new(&server), Path::new(&scenario), Path::new(&saves)) {
@@ -114,6 +109,59 @@ impl PaxClient {
             }
             Err(e) => rejected(e),
         }
+    }
+
+    /// Hosts a multiplayer game (M4-9): starts `server_path` for `scenario_dir` with
+    /// room for `players`, reachable from other machines over TLS (D24, M4-6), and
+    /// connects to it. `hosted()` then gives what to share with the players. Returns
+    /// an error message, or `""`.
+    #[func]
+    fn host_game(&mut self, server_path: GString, scenario_dir: GString, saves_dir: GString, players: i64) -> GString {
+        let Ok(players) = u16::try_from(players).map_err(|_| ()).and_then(|p| if p >= 2 { Ok(p) } else { Err(()) })
+        else {
+            return rejected(format!("{players} players: a hosted game has at least 2"));
+        };
+        self.end_session();
+        let (server, scenario, saves) = (server_path.to_string(), scenario_dir.to_string(), saves_dir.to_string());
+        self.scenario_dir = Some(scenario.clone().into());
+        let local = match LocalServer::host(Path::new(&server), Path::new(&scenario), Path::new(&saves), players) {
+            Ok(local) => local,
+            Err(e) => return rejected(e),
+        };
+        let (addr, fingerprint) = (local.addr, local.fingerprint.clone().unwrap_or_default());
+        self.server = Some(local);
+        // The host reaches its own server over TLS too, pinned like everyone else.
+        match Connection::connect_tls(addr, Duration::from_secs(5), &fingerprint) {
+            Ok(c) => {
+                self.connection = Some(c);
+                GString::new()
+            }
+            Err(e) => rejected(format!("cannot connect to the hosted game: {e}")),
+        }
+    }
+
+    /// What the host shares so players can join (`PORT` and `FINGERPRINT`), or an
+    /// empty Dictionary when this client isn't hosting.
+    #[func]
+    fn hosted(&self) -> VarDictionary {
+        let mut d = VarDictionary::new();
+        if let Some(local) = &self.server
+            && let Some(fingerprint) = &local.fingerprint
+        {
+            d.set(keys::PORT, i64::from(local.addr.port()));
+            d.set(keys::FINGERPRINT, &GString::from(fingerprint));
+        }
+        d
+    }
+
+    /// The player's name, sent with the next `hello` or `resume`; the lobby shows it.
+    #[func]
+    fn set_name(&mut self, name: GString) -> GString {
+        let name = name.to_string();
+        if name.is_empty() || name.len() > 32 {
+            return rejected("a name is 1 to 32 bytes".to_owned());
+        }
+        self.with_connection(|c| c.set_name(name))
     }
 
     /// Where this client's copy of the scenario is, for a server it didn't launch
@@ -133,6 +181,19 @@ impl PaxClient {
         }
     }
 
+    /// Ends the current session, if any, so nothing of it carries over into the next:
+    /// its connection first, then a server it launched, so that server can exit by
+    /// itself (`--exit-when-idle`); then its tables, map and scenario directory. The
+    /// one place every connect path (`launch`, `host_game`, `connect_to`,
+    /// `connect_secure`) clears per-session state.
+    fn end_session(&mut self) {
+        self.connection = None;
+        self.server = None;
+        self.welcome = None;
+        self.map = None;
+        self.scenario_dir = None;
+    }
+
     /// Starts a new session to `host:port`: nothing of the previous one carries over,
     /// including a launched server and its scenario directory (call
     /// `set_scenario_dir` after). Resolves the address the same way for every
@@ -140,11 +201,7 @@ impl PaxClient {
     /// for the caller.
     fn new_session(&mut self, host: &GString, port: i64) -> Result<std::net::SocketAddr, GString> {
         let Ok(port) = u16::try_from(port) else { return Err(rejected(format!("port {port} out of range"))) };
-        self.connection = None;
-        self.server = None;
-        self.welcome = None;
-        self.map = None;
-        self.scenario_dir = None;
+        self.end_session();
         match (host.to_string(), port).to_socket_addrs().map(|mut a| a.next()) {
             Ok(Some(addr)) => Ok(addr),
             Ok(None) => Err(rejected(format!("{host} has no address"))),

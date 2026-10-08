@@ -220,6 +220,10 @@ jobs:
           timeout 300 "$RUNNER_TEMP/godot" --headless --path client --import
       - name: Smoke test
         run: timeout 180 "$RUNNER_TEMP/godot" --headless --path client -- --smoke | tee smoke.log && grep -q "SMOKE OK" smoke.log
+      - name: Smoke test, hosting a multiplayer game
+        # M4-9: hosts a game over TLS the way a player would, through the lobby
+        # (client/smoke_host.gd, --smoke-host).
+        run: timeout 180 "$RUNNER_TEMP/godot" --headless --path client -- --smoke-host | tee smoke-host.log && grep -q "SMOKE OK (host)" smoke-host.log
 
   fuzz:
     # M3-10: coverage-guided fuzzing of the client frame reader, for a fixed budget.

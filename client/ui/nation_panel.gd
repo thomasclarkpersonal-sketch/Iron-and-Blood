@@ -83,7 +83,12 @@ func set_session(welcome: Dictionary) -> void:
 	_chooser.clear()
 	for key in welcome[PaxKeys.NATIONS]:
 		_chooser.add_item((key as String).capitalize())
-	var playing = welcome[PaxKeys.NATION]
+	set_playing(welcome[PaxKeys.NATION])
+
+
+## The nation this player commands (`null`: sandbox, which may choose any). In a
+## multiplayer game it comes from the lobby's claim, not the Welcome (M4-9).
+func set_playing(playing: Variant) -> void:
 	_nation = 0 if playing == null else int(playing)
 	_chooser.select(_nation)
 	_chooser.disabled = playing != null

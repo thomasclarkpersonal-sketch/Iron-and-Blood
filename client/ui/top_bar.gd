@@ -1,4 +1,5 @@
-## The top bar: the date, the speed controls (D23) and who is playing.
+## The top bar: the date, the speed controls (D23), who is playing, and who a
+## multiplayer game is waiting for (D24).
 extends PanelContainer
 
 const PaxKeys := preload("res://pax_keys.gd")
@@ -15,6 +16,9 @@ const SPEEDS := [PaxKeys.SPEED_PAUSED, PaxKeys.SPEED_SLOWEST, PaxKeys.SPEED_SLOW
 
 var _day: Label
 var _session: Label
+var _scenario := ""
+var _nations: PackedStringArray = []
+var _waiting: Label
 var _buttons: Array[Button] = []
 
 
@@ -45,6 +49,9 @@ func _init() -> void:
 		b.pressed.connect(func() -> void: speed_requested.emit(speed))
 		_buttons.append(b)
 		row.add_child(b)
+	_waiting = Label.new()
+	_waiting.add_theme_color_override("font_color", Color(1.0, 0.75, 0.4))
+	row.add_child(_waiting)
 	var spacer := Control.new()
 	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_child(spacer)
@@ -58,15 +65,32 @@ func _init() -> void:
 
 
 func set_session(welcome: Dictionary) -> void:
-	var nation = welcome[PaxKeys.NATION]
-	var playing := "sandbox" if nation == null else (welcome[PaxKeys.NATIONS] as PackedStringArray)[nation].capitalize()
-	_session.text = "%s · %s" % [welcome[PaxKeys.SCENARIO], playing]
+	_scenario = welcome[PaxKeys.SCENARIO]
+	_nations = welcome[PaxKeys.NATIONS]
+	set_playing(welcome[PaxKeys.NATION], welcome[PaxKeys.NATION] == null)
 	show_speed(welcome[PaxKeys.SPEED])
 	_day.text = "Day %d" % welcome[PaxKeys.DAY]
 
 
 func show_day(update: Dictionary) -> void:
 	_day.text = "Day %d" % update[PaxKeys.DAY]
+
+
+## Who this player plays: a nation, sandbox, or (in a lobby) none yet.
+func set_playing(nation: Variant, sandbox: bool) -> void:
+	var playing := "sandbox" if sandbox else ("no nation yet" if nation == null else _nations[nation].capitalize())
+	_session.text = "%s · %s" % [_scenario, playing]
+
+
+## The players a fairness pause waits for (D24); empty when none.
+func show_waiting(names: PackedStringArray) -> void:
+	_waiting.text = "" if names.is_empty() else "Waiting for %s" % ", ".join(names)
+
+
+## Only the host sets the speed in a multiplayer game; anyone may pause (D24).
+func set_host(host: bool) -> void:
+	for b in _buttons:
+		b.disabled = not host and b.get_meta("speed") != PaxKeys.SPEED_PAUSED
 
 
 func show_speed(speed: int) -> void:

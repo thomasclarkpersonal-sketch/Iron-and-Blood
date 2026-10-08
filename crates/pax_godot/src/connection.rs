@@ -54,6 +54,8 @@ pub struct Connection {
     reported: bool,
     /// Sent with `Hello` (D24, protocol 1.6); `None` for a server without one.
     password: Option<String>,
+    /// The player's name in `Hello`, which the lobby shows.
+    name: String,
 }
 
 impl Connection {
@@ -91,6 +93,7 @@ impl Connection {
             next_nonce: 1,
             closed: None,
             password: None,
+            name: "Iron and Blood (Godot)".to_owned(),
             reported: false,
         }
     }
@@ -192,15 +195,20 @@ impl Connection {
         self.password = password;
     }
 
+    /// The name the next `Hello` carries (the lobby shows it).
+    pub fn set_name(&mut self, name: String) {
+        self.name = name;
+    }
+
     pub fn hello(&mut self, nation: Option<u32>) {
-        let frame = encode::hello("Iron and Blood (Godot)", nation, 0, self.password.as_deref());
+        let frame = encode::hello(&self.name, nation, 0, self.password.as_deref());
         self.send(frame);
     }
 
     /// Reclaims the seat a dropped session kept (D24): `token` is its `Welcome`'s
     /// resume token.
     pub fn resume(&mut self, token: u64) {
-        let frame = encode::hello("Iron and Blood (Godot)", None, token, self.password.as_deref());
+        let frame = encode::hello(&self.name, None, token, self.password.as_deref());
         self.send(frame);
     }
 
@@ -261,35 +269,59 @@ impl Connection {
 #[derive(Debug)]
 pub struct LocalServer {
     child: Child,
+    /// Where this machine reaches it (loopback).
     pub addr: SocketAddr,
+    /// A hosted game's TLS certificate SHA-256, for the players the host invites
+    /// (M4-6); `None` in single player.
+    pub fingerprint: Option<String>,
 }
 
 impl LocalServer {
     /// Starts `server` on a free local port for `scenario`, saving into `saves`, and
-    /// waits (at most 20 s) for it to write its port.
+    /// waits (at most 20 s) for it to write its port: single player.
     pub fn launch(server: &Path, scenario: &Path, saves: &Path) -> Result<LocalServer, String> {
+        // Single player plays sandbox (any nation), which a server allows only with
+        // --sandbox (D24).
+        LocalServer::start(server, scenario, saves, &["--bind", "127.0.0.1:0", "--sandbox"], false)
+    }
+
+    /// Starts `server` as a player-hosted multiplayer game for `players` (M4-9):
+    /// reachable from other machines on a free port, over TLS with a fresh
+    /// certificate (D24, M4-6). Its fingerprint comes back for the host to share.
+    pub fn host(server: &Path, scenario: &Path, saves: &Path, players: u16) -> Result<LocalServer, String> {
+        let players = players.to_string();
+        LocalServer::start(
+            server,
+            scenario,
+            saves,
+            &["--bind", "0.0.0.0:0", "--players", &players, "--tls-self-signed"],
+            true,
+        )
+    }
+
+    fn start(server: &Path, scenario: &Path, saves: &Path, args: &[&str], tls: bool) -> Result<LocalServer, String> {
         let port_file = port_file_path();
+        let fingerprint_file = port_file.with_extension("fingerprint");
         let _ = std::fs::remove_file(&port_file);
-        let mut child = Command::new(server)
-            .arg("--scenario")
-            .arg(scenario)
-            // Single player plays sandbox (any nation), which a server allows only with
-            // --sandbox (D24).
-            .args(["--bind", "127.0.0.1:0", "--sandbox", "--exit-when-idle"])
-            .arg("--port-file")
-            .arg(&port_file)
-            .arg("--saves")
-            .arg(saves)
-            .stdin(Stdio::null())
-            .spawn()
-            .map_err(|e| format!("cannot start {}: {e}", server.display()))?;
+        let mut command = Command::new(server);
+        command.arg("--scenario").arg(scenario).args(args).arg("--exit-when-idle");
+        command.arg("--port-file").arg(&port_file).arg("--saves").arg(saves);
+        if tls {
+            command.arg("--fingerprint-file").arg(&fingerprint_file);
+        }
+        let mut child =
+            command.stdin(Stdio::null()).spawn().map_err(|e| format!("cannot start {}: {e}", server.display()))?;
         let deadline = Instant::now() + Duration::from_secs(20);
         loop {
+            // The server writes the fingerprint before the port.
             if let Ok(text) = std::fs::read_to_string(&port_file)
                 && let Ok(port) = text.trim().parse::<u16>()
             {
                 let _ = std::fs::remove_file(&port_file);
-                return Ok(LocalServer { child, addr: SocketAddr::from(([127, 0, 0, 1], port)) });
+                let fingerprint = tls.then(|| std::fs::read_to_string(&fingerprint_file).unwrap_or_default());
+                let _ = std::fs::remove_file(&fingerprint_file);
+                let fingerprint = fingerprint.map(|f| f.trim().to_owned());
+                return Ok(LocalServer { child, addr: SocketAddr::from(([127, 0, 0, 1], port)), fingerprint });
             }
             if let Ok(Some(status)) = child.try_wait() {
                 return Err(format!("the server exited before it was ready ({status})"));

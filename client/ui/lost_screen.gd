@@ -1,11 +1,14 @@
 ## The connection-lost screen (M3-8d): the reason the session ended (a `Goodbye`, a
 ## protocol error, a refusal or a closed socket), and what the player can do about
-## it: start a new game, or quit.
+## it: rejoin a multiplayer game with the resume token (M4-9), start a new game, or
+## quit.
 extends ColorRect
 
 signal restart_requested
+signal rejoin_requested
 
 var _reason: Label
+var _rejoin: Button
 
 
 func _init() -> void:
@@ -25,6 +28,11 @@ func _init() -> void:
 	_reason.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	column.add_child(_reason)
 	var buttons := HBoxContainer.new()
+	_rejoin = Button.new()
+	_rejoin.text = "Rejoin"
+	_rejoin.visible = false
+	_rejoin.pressed.connect(func() -> void: rejoin_requested.emit())
+	buttons.add_child(_rejoin)
 	var restart := Button.new()
 	restart.text = "Start a new game"
 	restart.pressed.connect(func() -> void: restart_requested.emit())
@@ -40,6 +48,8 @@ func _init() -> void:
 	visible = false
 
 
-func show_reason(reason: String) -> void:
+## `can_rejoin`: a multiplayer game whose seat waits for this client's token (D24).
+func show_reason(reason: String, can_rejoin := false) -> void:
 	_reason.text = reason
+	_rejoin.visible = can_rejoin
 	visible = true
