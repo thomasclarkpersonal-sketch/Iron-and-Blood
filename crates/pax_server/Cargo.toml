@@ -7,6 +7,11 @@ rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
 
+[features]
+# Exposes the request decoder to the cargo-fuzz target (fuzz/, M3-10), so it fuzzes
+# the code the server runs rather than a copy. Never enabled in a server build.
+fuzzing = []
+
 [dependencies]
 pax_engine.workspace = true
 pax_data.workspace = true

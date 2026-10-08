@@ -158,4 +158,4 @@ FlatBuffers stays compatible across versions only if changes follow these rules.
     - `pax_protocol/tests/frames.rs`: chunking, oversized and empty lengths, noise;
     - `pax_server/src/hostile.rs`: noise, flipped bytes and truncation for every request type through the request decoder, and thousands of well-formed requests with hostile values sent to the sim thread from several sessions, with ticks, saves and loads in between;
     - `pax_server/tests/hostile.rs`: concurrent TCP connections sending damaged frames before and after `Hello`;
-  - a coverage-guided `cargo fuzz` target, `fuzz/fuzz_targets/client_frames.rs`, which needs nightly and runs for 60 s on every pull request.
+  - a coverage-guided `cargo fuzz` target, `fuzz/fuzz_targets/client_frames.rs`, which runs exactly what a connection task runs: a `FrameDecoder` fed in fuzzed chunks, then the server's own request decoder (exposed by `pax_server`'s `fuzzing` feature, so there is no copy to drift). It needs nightly, and runs for 60 s on every pull request.

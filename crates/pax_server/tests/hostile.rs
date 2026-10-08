@@ -14,7 +14,9 @@ use std::time::{Duration, Instant};
 
 use common::*;
 
-/// xorshift64*: deterministic noise without a dependency.
+/// xorshift64*: deterministic noise without a dependency. The same generator is in
+/// `src/hostile.rs` and `tests/hostile.rs`, because a unit-test module can't share
+/// code with integration tests; keep the two in step (and never seed either with 0).
 struct Noise(u64);
 
 impl Noise {

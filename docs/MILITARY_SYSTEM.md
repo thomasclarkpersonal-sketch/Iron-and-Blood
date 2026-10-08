@@ -38,3 +38,12 @@ Casualties are permanent demographic losses.
 *   To pay for the spike in military goods, governments run deficits by selling treasury bonds (inside money, D5).
 *   If the war drags on, a government may **mint** money (an explicit, logged event that raises outside money, so prices rise through the market) or **default** (bond claims are written off; bondholders lose wealth, but no cash is destroyed).
 *   **War reparations:** a peace term can require the loser to pay a share of tax revenue to the victor. It is a treasury-to-treasury transfer: one debit, one credit.
+
+## 🗺️ Command and Operations (Anti-Micro)
+
+Victoria 2's strong economic-military connection was often hampered by excessive and tedious micromanagement during wars. To solve this, operational control shifts away from individual regiments, adapting to the historical era:
+
+*   **Army Templates:** Players can design "templates" for squads or armies, allowing you to recruit, fund, and form balanced compositions (e.g., specific ratios of infantry, artillery, and cavalry) with a single action, rather than queuing and merging dozens of individual units manually.
+*   **Era-Specific Combat Systems (Planned):** To reflect the historical evolution of warfare, the combat mechanics will transition over time:
+    *   **Early/Mid-Game (Traditional Stacks):** Conflicts prior to the 1900s (such as the Franco-Prussian War) will rely on traditional maneuver warfare and stacks of armies, emphasizing positional strategy and concentrated forces.
+    *   **Late-Game (Frontline System):** As technology advances into the 1900s and WW1-style trench warfare emerges, combat will shift to a macro-level **Frontline System**. Armies will be assigned to strategic fronts rather than moved province-by-province, reflecting the massive scale and reduced maneuverability of industrial warfare while alleviating micromanagement.
