@@ -84,6 +84,10 @@ const CHANGED_BY := "changed_by"
 const NONCE := "nonce"
 const NAME := "name"
 const NAMES := "names"
+const WIDTH := "width"
+const HEIGHT := "height"
+const IDS := "ids"
+const LABELS := "labels"
 
 ## Wire enum values (schemas/common.fbs).
 const MAP_MODE_NONE := 0

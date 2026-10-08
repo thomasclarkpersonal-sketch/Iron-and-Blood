@@ -21,8 +21,9 @@ Command-line options go after `--`:
 | `--scenario=DIR` | Scenario directory (default `../scenarios/two_states`) |
 | `--server=PATH` | `pax_server` binary (default `../target/debug/pax_server`, or `$PAX_SERVER`) |
 | `--nation=N` | Play nation `N` (default: sandbox) |
+| `--map-mode=N` | Start in map mode `N` (a `PaxKeys.MAP_MODE_*` value) |
 | `--screenshot=PATH` | Run to day 30, save a screenshot with the debug overlay, quit |
-| `--smoke` | Headless check: run to day 40, print `SMOKE OK …`, quit (CI runs this) |
+| `--smoke` | Headless check: select a province, switch to the Price map, run to day 40, check both views arrived, print `SMOKE OK …`, quit (CI runs this) |
 
 Examples:
 
@@ -31,6 +32,7 @@ godot --path client --rendering-driver opengl3 -- --screenshot=/tmp/client.png
 godot --headless --path client --import && godot --headless --path client -- --smoke
 ```
 
+- **The map:** wheel zooms, right- or middle-drag pans, a left click selects a province. The map files are read from the scenario directory and must hash to the server's `map_hash`.
 - **F3** toggles the debug overlay: day, `state_hash` and skipped days. A bug report quotes the hash (D23).
 - **Saves** go to Godot's user data directory, under `saves/`.
 - **After changing Rust code:** rebuild the bridge, then reload the project.
@@ -41,7 +43,7 @@ godot --headless --path client --import && godot --headless --path client -- --s
 | Path | What |
 |---|---|
 | `main.gd`, `main.tscn` | The app: start screen, session, routing events to the UI |
-| `ui/` | One script per UI part: `top_bar.gd`, `summary_panel.gd`, `debug_overlay.gd`, and `format.gd` for display formatting |
+| `ui/` | One script per UI part: `top_bar.gd`, `summary_panel.gd`, `debug_overlay.gd`; the map (`map_view.gd` with `map.gdshader`, `map_modes.gd`, `map_colors.gd`); `format.gd` for display formatting |
 | `pax_keys.gd` | Every Dictionary key and event tag the bridge uses, and every value GDScript passes back: wire enums (`MAP_MODE_*`, `SPEED_*`, `COMMAND_ERROR_*`, from the schema) and policy names. Generated from `crates/pax_godot/src/keys.rs`; don't edit it. The bridge rejects (and logs) any argument outside them, never coercing it |
 | `pax_godot.gdextension` | Where Godot finds the bridge library for each platform (`target/{debug,release}`) |
 

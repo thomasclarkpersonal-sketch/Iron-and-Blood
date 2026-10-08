@@ -130,6 +130,12 @@ keys! {
     // SaveResult, SaveList.
     NAME = "name",
     NAMES = "names",
+
+    // A loaded map (PaxClient.load_map): ERROR, or the ID texture and labels.
+    WIDTH = "width",
+    HEIGHT = "height",
+    IDS = "ids",
+    LABELS = "labels",
 }
 
 /// `LifeNeeds` → `LIFE_NEEDS`.

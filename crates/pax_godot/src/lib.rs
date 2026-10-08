@@ -16,6 +16,7 @@ pub mod connection;
 pub mod decode;
 pub mod encode;
 pub mod keys;
+pub mod map;
 pub mod rates;
 
 use std::path::Path;
@@ -233,6 +234,39 @@ impl PaxClient {
     #[func]
     fn load_game(&mut self, name: GString) -> GString {
         self.with_connection(|c| c.load_game(&name.to_string()))
+    }
+
+    /// The scenario's province map, ready to draw (see `map.rs`): checked against
+    /// this session's `provinces` and `map_hash` (from `Welcome`). Returns a
+    /// Dictionary with `PaxKeys.ERROR` (empty when it loaded) and, on success,
+    /// `WIDTH`, `HEIGHT`, `IDS` (the RGB8 province-ID texels) and `LABELS` (one
+    /// `Vector2i` anchor per province). A scenario without a map gives an empty
+    /// Dictionary apart from `ERROR`.
+    #[func]
+    fn load_map(scenario_dir: GString, provinces: PackedStringArray, map_hash: Variant) -> VarDictionary {
+        let mut d = VarDictionary::new();
+        let provinces: Vec<String> = provinces.as_slice().iter().map(GString::to_string).collect();
+        // The hash is an identifier carried bit-for-bit in Godot's signed int.
+        let expected = if map_hash.is_nil() { None } else { map_hash.try_to::<i64>().ok().map(|h| h as u64) };
+        match map::load(Path::new(&scenario_dir.to_string()), &provinces, expected) {
+            Ok(Some(m)) => {
+                d.set(keys::ERROR, &GString::new());
+                d.set(keys::WIDTH, i64::from(m.width));
+                d.set(keys::HEIGHT, i64::from(m.height));
+                d.set(keys::IDS, &PackedByteArray::from(m.ids.as_slice()));
+                let mut labels: Array<Vector2i> = Array::new();
+                for &[x, y] in &m.labels {
+                    labels.push(Vector2i::new(
+                        i32::try_from(x).unwrap_or(i32::MAX),
+                        i32::try_from(y).unwrap_or(i32::MAX),
+                    ));
+                }
+                d.set(keys::LABELS, &labels);
+            }
+            Ok(None) => d.set(keys::ERROR, &GString::new()),
+            Err(e) => d.set(keys::ERROR, &GString::from(&e)),
+        }
+        d
     }
 
     /// Asks for the saves; a `SaveList` answers. Returns an error message, or `""`.

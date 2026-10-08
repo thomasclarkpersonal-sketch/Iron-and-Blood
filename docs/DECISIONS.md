@@ -244,6 +244,7 @@ All parsing lives in `pax_data`, so the format can change without touching the e
   - **The UI** (map, panels, menus) is in GDScript.
   - **A Rust GDExtension bridge** (`pax_godot`, using godot-rust/gdext) owns the connection. It reads and writes frames, verifies messages, checks the protocol version, converts `Fixed` for display, and turns map values into shader arrays.
   - The bridge depends on `pax_protocol` only, **never on `pax_engine`**, so the client cannot simulate (D10).
+  - *Side-neutral crates* are the exception to "`pax_protocol` only" (M3-8b). They carry neither engine nor wire types, so both sides may link them: `pax_content` (the hash scheme) and `pax_map` (the province-map reader the server validates with and the client draws with). Neither lets the client simulate, and CI checks that neither depends on `pax_engine` or `pax_protocol`. Anything else the bridge links must still be `pax_protocol`.
 - **Fallback: C# (Godot .NET)** with the official FlatBuffers C# library, if the M3-0 spike shows gdext can't do the job. gdext is pre-1.0 (0.5.x), so the spike is the risk gate.
 - **M3-0 spike: passed (2026-10-08), so the fallback isn't needed.**
   - godot-rust **0.5.5** (`api-4-7`, pinned exactly) loads in **Godot 4.7.2**.

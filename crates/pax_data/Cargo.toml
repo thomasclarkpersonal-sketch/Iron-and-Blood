@@ -16,13 +16,15 @@ bench = []
 # Dependency-free: the content-hash scheme the client shares (D22). Never pax_protocol:
 # pax_server is the only crate that sees both engine and wire types (AGENTS.md section 2).
 pax_content.workspace = true
-# Province maps (M3-7): pure-Rust PNG decoding.
-png = "0.18"
+# Province maps (M3-7): the reader shared with the client.
+pax_map.workspace = true
 pax_engine.workspace = true
 serde.workspace = true
 toml.workspace = true
 
 [dev-dependencies]
+# The map tests paint their own images.
+png = "0.18"
 rayon.workspace = true
 
 [lints]

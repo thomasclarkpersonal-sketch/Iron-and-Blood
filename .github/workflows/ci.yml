@@ -72,6 +72,11 @@ jobs:
             echo "::error::pax_content must have no dependencies."
             exit 1
           fi
+          # The shared map reader is linked by both sides, so it carries neither side's types.
+          if deps pax_map | grep -qE '^(pax_engine|pax_protocol|flatbuffers) '; then
+            echo "::error::pax_map must not depend on the engine or the wire types."
+            exit 1
+          fi
       - run: cargo fmt --all --check
       - run: cargo clippy --all-targets --release -- -D warnings
       - name: Clippy the server's fuzzing surface (the nightly fuzz job isn't required)

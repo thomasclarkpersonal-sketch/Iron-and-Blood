@@ -346,6 +346,7 @@ version = "0.1.0"
 dependencies = [
  "pax_content",
  "pax_engine",
+ "pax_map",
  "png",
  "rayon",
  "serde",
@@ -365,7 +366,18 @@ version = "0.1.0"
 dependencies = [
  "flatbuffers",
  "godot",
+ "pax_map",
  "pax_protocol",
+]
+
+[[package]]
+name = "pax_map"
+version = "0.1.0"
+dependencies = [
+ "pax_content",
+ "png",
+ "serde",
+ "toml",
 ]
 
 [[package]]
