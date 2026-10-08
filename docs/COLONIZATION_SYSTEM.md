@@ -3,7 +3,10 @@
 Colonization in this engine is not simply painting the map; it is a profound economic and logistical endeavor. Expanding overseas stresses your naval supply chains and forces a critical decision regarding how you govern the new territory, directly impacting the global flow of wealth.
 
 > [!NOTE]
-> **Status: an M2+ design, not implemented.** Nothing here is in the engine yet; it describes intended behaviour. One part needs a decision first: under D19 as accepted, militancy rises with deprivation (`1 − life_needs`) and taxation and settles at an equilibrium. It doesn't compound, and a POP held exactly at subsistence (life needs met) isn't deprived. The colonial uprisings below (driven by disenfranchisement and wage suppression) need a future extension of D19, such as an institutional or relative-deprivation term, as a new `D#`.
+> **Status: an M2+ design, not implemented.** Nothing here is in the engine yet; it describes intended behaviour. Before it is built, it needs these decisions (new or amended `D#` entries):
+> - **D19 (militancy):** an extension for the uprisings below. Today militancy rises with deprivation (`1 − life_needs`) and taxation and settles at an equilibrium: it doesn't compound, and a POP held exactly at subsistence (life needs met) isn't deprived. Disenfranchisement and wage suppression need an institutional or relative-deprivation term.
+> - **D6 (wages and dividends):** how colonial institutions relate to the subsistence wage floor (`firms.subsistence_wage_multiple`, so "wages far below market value" can happen), and a cross-market ownership or share registry, so dividends can go to homeland owners or a treasury. That is a new money flow, with its conservation test (AGENTS.md §6). The "Foreign Investment mechanics" this doc mentions are part of this decision and aren't defined anywhere yet.
+> - **D20 and D14 (migration):** migration across markets, from the homeland or from neighbouring regions, with friction. D20 currently keeps migration within one market.
 
 ## 🌍 The Scramble and Logistics
 Before economic exploitation can begin, a territory must be claimed and physically integrated into your market.

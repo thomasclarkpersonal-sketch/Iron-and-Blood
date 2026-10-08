@@ -53,7 +53,7 @@ Casualties are permanent demographic losses.
 
 Victoria 2's strong economic-military connection was often hampered by excessive and tedious micromanagement during wars. To solve this, operational control shifts away from individual regiments, adapting to the historical era:
 
-*   **Army Templates:** Players can design "templates" for squads or armies, allowing you to recruit, fund, and form balanced compositions (e.g., specific ratios of infantry, artillery, and cavalry) with a single action, rather than queuing and merging dozens of individual units manually.
+*   **Army Templates (Planned):** Players can design "templates" for squads or armies, allowing you to recruit, fund, and form balanced compositions (e.g., specific ratios of infantry, artillery, and cavalry) with a single action, rather than queuing and merging dozens of individual units manually.
 *   **Era-Specific Combat Systems (Planned):** To reflect the historical evolution of warfare, the combat mechanics will transition over time:
     *   **Early/Mid-Game (Traditional Stacks):** Conflicts prior to the 1900s (such as the Franco-Prussian War) will rely on traditional maneuver warfare and stacks of armies, emphasizing positional strategy and concentrated forces.
     *   **Late-Game (Frontline System):** As technology advances into the 1900s and WW1-style trench warfare emerges, combat will shift to a macro-level **Frontline System**. Armies will be assigned to strategic fronts rather than moved province-by-province, reflecting the massive scale and reduced maneuverability of industrial warfare while alleviating micromanagement.

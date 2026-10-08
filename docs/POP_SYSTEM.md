@@ -20,7 +20,7 @@ POPs are rows in the `Pops` table ([BACKEND_SCHEMA.md](BACKEND_SCHEMA.md#pops)).
 ### 💼 Planned (M2+): Workforce Composition and Labor Laws
 
 > [!NOTE]
-> **Status: planned, not implemented.** Today a POP has one `size` (above), and D2, D7, D18 and D20 are defined on it. Before this is built it needs a decision (a new `D#`): how `size` relates to the columns below (for example `size = workforce_male + workforce_female + dependents`), which column D2's demand, D7's splits and merges, demographics and the D18/D20 labour pools each read, and how a law change moves people between columns under D7's largest-remainder rule.
+> **Status: planned, not implemented.** Today a POP has one `size` (above), and D2, D7, D18 and D20 are defined on it. Before this is built it needs a decision (a new `D#`): how `size` relates to the columns below (for example `size = workforce_male + workforce_female + dependents`), which column D2's demand, D7's splits and merges, demographics and the D18/D20 labour pools each read, and how a law change moves people between columns under D7's largest-remainder rule. It must also say whether mobilization ([MILITARY_SYSTEM.md](MILITARY_SYSTEM.md)) draws conscripts only from `workforce_male`, and how the split POP's cash is shared when conscripts leave (D7).
 
 The planned split of a POP's size:
 *   `workforce_male`: Adult men available for employment or conscription.
