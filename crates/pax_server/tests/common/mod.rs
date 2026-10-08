@@ -36,6 +36,13 @@ pub enum Got {
     Rejected(String),
     Goodbye(String),
     Pong(u64),
+    DayUpdate {
+        day: u64,
+        population: u64,
+        map_values: Option<usize>,
+        market: Option<u32>,
+        province: Option<u32>,
+    },
     Other(String),
     /// The server closed the connection.
     Closed,
@@ -153,6 +160,15 @@ fn decode(frame: &[u8]) -> Got {
     }
     if let Some(g) = msg.payload_as_goodbye() {
         return Got::Goodbye(g.reason().unwrap_or_default().to_owned());
+    }
+    if let Some(u) = msg.payload_as_day_update() {
+        return Got::DayUpdate {
+            day: u.day(),
+            population: u.world().map_or(0, |w| w.population()),
+            map_values: u.map().and_then(|m| m.values()).map(|v| v.len()),
+            market: u.market().map(|m| m.market()),
+            province: u.province().map(|p| p.province()),
+        };
     }
     if let Some(p) = msg.payload_as_pong() {
         return Got::Pong(p.nonce());

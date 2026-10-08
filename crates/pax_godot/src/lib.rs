@@ -100,7 +100,8 @@ fn to_dictionary(event: ServerEvent) -> VarDictionary {
         ServerEvent::DayUpdate(u) => {
             d.set("day", u.day as i64);
             d.set("skipped", i64::from(u.skipped));
-            d.set("state_hash", u.state_hash as i64);
+            // Bits kept as-is (an identifier); null between checkpoint days (D23).
+            d.set("state_hash", &u.state_hash.map_or(Variant::nil(), |h| Variant::from(h as i64)));
             d.set("map_mode", u.map_mode.map_or(0, |m| i64::from(m.0)));
             d.set("map_values", &u.map_values.into_iter().collect::<PackedFloat32Array>());
         }

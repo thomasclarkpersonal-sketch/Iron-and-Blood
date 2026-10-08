@@ -1,22 +1,25 @@
 //! The sim thread (D23): the only owner of the `World`.
 //!
 //! It handles session requests in arrival order and decides everything that needs game
-//! state. In M3-2 that's the handshake: `Welcome` or `Rejected`. Ticking, views,
-//! commands and saves arrive with M3-3 to M3-6.
+//! state: the handshake (`Welcome` or `Rejected`) and subscriptions with their views.
+//! Ticking, commands and saves arrive with M3-4 to M3-6.
 
 use std::collections::BTreeMap;
 use std::sync::mpsc::Receiver;
 
 use pax_data::Scenario;
+use pax_engine::DayReport;
 use pax_protocol::{PROTOCOL_MAJOR, PROTOCOL_MINOR, wire};
 use tracing::{debug, info};
 
 use crate::encode::{self, WelcomeInfo};
 use crate::net::{ConnHandle, Inbound, Outbound};
 use crate::request::Request;
+use crate::view::{self, DayViews, Subscription};
 
 struct Session {
     conn: ConnHandle,
+    subscription: Subscription,
     /// Set by `Welcome`. Until then the session may only say `Hello`: one choke
     /// point in [`Sim::handle`] drops anything else, so no request handler has to
     /// remember to check (a rejected session's queued requests never act).
@@ -41,17 +44,46 @@ pub(crate) struct Sim {
     /// Stop when the welcomed session leaves (the client launched this server).
     exit_when_idle: bool,
     speed: wire::Speed,
+    /// The report of the last day that ran; `None` before the first tick.
+    last_report: Option<DayReport>,
 }
 
 impl Sim {
     pub(crate) fn new(scenario: Scenario, exit_when_idle: bool) -> Self {
-        Sim { scenario, sessions: BTreeMap::new(), active: None, exit_when_idle, speed: wire::Speed::Paused }
+        Sim {
+            scenario,
+            sessions: BTreeMap::new(),
+            active: None,
+            exit_when_idle,
+            speed: wire::Speed::Paused,
+            last_report: None,
+        }
     }
 
     fn send(&self, session: u64, out: Outbound) {
         if let Some(s) = self.sessions.get(&session) {
             s.conn.send(out);
         }
+    }
+
+    /// A protocol error the sim thread detected: `Goodbye` with the reason, then close (D22).
+    fn goodbye(&self, session: u64, reason: &str) {
+        info!(session, reason, "closing session");
+        self.send(session, Outbound::Frame(encode::goodbye(reason)));
+        self.send(session, Outbound::Close);
+    }
+
+    /// Replaces the session's subscription and answers with a `DayUpdate` for the
+    /// current day, so a newly opened panel fills at once, even when paused (D22).
+    fn subscribe(&mut self, session: u64, requested: Subscription) {
+        let subscription = match requested.checked(&self.scenario.world) {
+            Ok(s) => s,
+            Err(reason) => return self.goodbye(session, &reason),
+        };
+        let Some(s) = self.sessions.get_mut(&session) else { return };
+        s.subscription = subscription;
+        let views = DayViews::new(&self.scenario.world, self.last_report.as_ref());
+        self.send(session, Outbound::Frame(view::day_update(&views, &subscription, self.speed, 0)));
     }
 
     fn reject(&self, session: u64, reason: &str) {
@@ -97,7 +129,7 @@ impl Sim {
     fn handle(&mut self, event: Inbound) -> bool {
         match event {
             Inbound::Connected { session, conn } => {
-                self.sessions.insert(session, Session { conn, seat: None });
+                self.sessions.insert(session, Session { conn, subscription: Subscription::default(), seat: None });
             }
             Inbound::Request { session, request: Request::Hello { major, minor, name, requested_nation, .. } } => {
                 self.hello(session, major, minor, name.as_deref(), requested_nation);
@@ -106,9 +138,12 @@ impl Sim {
             Inbound::Request { session, request } if !self.sessions.get(&session).is_some_and(|s| s.seat.is_some()) => {
                 debug!(session, ?request, "ignored: the session was not welcomed");
             }
-            Inbound::Request { session, request } => {
-                debug!(session, ?request, "not handled until M3-3 to M3-6");
-            }
+            Inbound::Request { session, request } => match request {
+                Request::Subscribe { map_mode, map_good, market, province } => {
+                    self.subscribe(session, Subscription { map_mode, map_good, market, province });
+                }
+                other => debug!(session, ?other, "not handled until M3-4 to M3-6"),
+            },
             Inbound::Closed { session } => {
                 self.sessions.remove(&session);
                 if self.active == Some(session) {

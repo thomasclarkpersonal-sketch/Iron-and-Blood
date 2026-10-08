@@ -71,7 +71,8 @@ pub struct WelcomeView {
 pub struct DayUpdateView {
     pub day: u64,
     pub skipped: u32,
-    pub state_hash: u64,
+    /// Present on checkpoint days only (D23).
+    pub state_hash: Option<u64>,
     pub map_mode: Option<wire::MapMode>,
     /// One display value per province, in `Welcome` order (checked).
     pub map_values: Vec<f32>,

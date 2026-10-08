@@ -86,7 +86,7 @@ fn day_update(provinces: usize) -> Vec<u8> {
     let map = MapView::create(&mut b, &MapViewArgs { mode: MapMode::Population, good: 0, values: Some(values) });
     let u = DayUpdate::create(
         &mut b,
-        &DayUpdateArgs { day: 1, speed: Speed::Normal, state_hash: 0x5EED, map: Some(map), ..Default::default() },
+        &DayUpdateArgs { day: 1, speed: Speed::Normal, state_hash: Some(0x5EED), map: Some(map), ..Default::default() },
     );
     let msg = ServerMessage::create(
         &mut b,
