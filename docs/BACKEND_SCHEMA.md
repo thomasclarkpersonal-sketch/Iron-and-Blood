@@ -132,16 +132,16 @@ All systems are plain functions over `&mut World`, called by `tick::step` in the
 
 ## 🔌 API Boundary (M3)
 
-`pax_server` will wrap the engine. It is server-authoritative (D10) and uses a binary protocol: FlatBuffers or Cap'n Proto, chosen at the start of M3.
+`pax_server` wraps the engine. It is server-authoritative (D10) and speaks size-prefixed FlatBuffers over TCP (D22). The wire format is in [NETWORK_PROTOCOL.md](NETWORK_PROTOCOL.md), and the pacing and save rules are in D23.
 
 > [!WARNING]
 > **Serialization overhead:** never use JSON for the per-tick state sync. Sending aggregated state for thousands of provinces each tick as JSON costs severe CPU time and bandwidth.
 
-**Server → client (state sync):**
-* Map state (ownership, occupation).
-* Aggregated statistics (population, GDP, prices).
-* The server never sends individual POP data unless the client requests to inspect a single province.
+**Server → client (views, not state, D22):**
+* Every day: world totals and the per-nation table (treasury, policy rates, population).
+* On subscription: one map mode (a value per province), one market's goods, one province's POPs, labour pools and producers.
+* The full POP and producer tables are never sent. POPs are identified by `(province, profession)`, never by row index (D7).
 
-**Client → server (commands):** applied at the start of the next tick, ordered by `(tick, player, sequence)`.
+**Client → server (commands):** applied at the start of the next tick, ordered by `(day, player, sequence)`. The server stamps all three (D22).
 * **Implemented** (`pax_engine::Command`, `tick::step_with`, D21): `SetIncomeTax`, `SetTransferRate`, `SetConsumptionRate { nation, rate: Fixed }`. Rates travel as `Fixed`'s raw `i64`, never as floats.
 * **Planned:** `SubsidizeFactory { producer, enabled }`, `MoveArmy { army, target_province }`.

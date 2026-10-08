@@ -54,6 +54,9 @@ New to the project? Start with **[Onboarding](docs/ONBOARDING.md)**: a codebase 
 
 * [Milestone 1](docs/MILESTONE_1.md): scope, acceptance criteria, team task list, M2 preview.
 * [Milestone 2](docs/MILESTONE_2.md): M2 status, decisions waiting on you, next tasks.
+* [Milestone 3](docs/MILESTONE_3.md): playable single player: `pax_server`, Godot client, saves.
+* [Milestone 4](docs/MILESTONE_4.md): multiplayer: lobby, authority, lag rules, hosting.
+* [Network protocol](docs/NETWORK_PROTOCOL.md): the wire format between server and client.
 * [System Architecture Overview](docs/ARCHITECTURE.md): engine design and the tick schedule.
 * [Backend Schema](docs/BACKEND_SCHEMA.md): workspace, SoA tables, systems.
 * [Data Format](docs/DATA_FORMAT.md): TOML definition and scenario files.
@@ -72,8 +75,8 @@ New to the project? Start with **[Onboarding](docs/ONBOARDING.md)**: a codebase 
 * **Simulation engine:** Rust, with a hand-rolled Struct-of-Arrays ECS (D8), decimal fixed-point math (D3) and rayon for parallel map-reduce.
 * **Data:** TOML (D9).
 * **Development environment:** WSL/Linux; CI also verifies determinism on Windows and macOS.
-* **Network:** server-authoritative with a binary protocol, in M3 (D10).
-* **Frontend:** Godot or Web, to be decided before M3 (D12). The engine is client-agnostic.
-* **Containerization:** Docker for `pax_server` deployment from M3. The headless M1/M2 tools need no container.
+* **Network:** server-authoritative; size-prefixed FlatBuffers over TCP (D10, D22). Single player in M3, multiplayer in M4. See [NETWORK_PROTOCOL.md](docs/NETWORK_PROTOCOL.md).
+* **Frontend:** Godot 4, with a GDScript UI and a Rust GDExtension bridge for the protocol (D12). The engine is client-agnostic.
+* **Containerization:** Docker for dedicated multiplayer servers in M4. Single player launches `pax_server` directly, and the headless tools need no container.
 
 > The PDFs in `Reference Books/` are copyrighted and git-ignored. Keep them local; do not commit or redistribute them.

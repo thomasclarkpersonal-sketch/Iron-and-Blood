@@ -1,0 +1,20 @@
+[package]
+name = "pax_server"
+description = "Authoritative game server: wraps the engine behind the FlatBuffers TCP protocol (D10, D22)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+pax_engine.workspace = true
+pax_data.workspace = true
+tokio = { version = "1.37", features = ["full"] }
+# Pinned exactly: generated code must match the flatc version that produced it (D22).
+flatbuffers = "=24.3.25"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+
+[lints]
+workspace = true

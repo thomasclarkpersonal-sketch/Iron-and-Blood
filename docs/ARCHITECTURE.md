@@ -6,7 +6,7 @@ This document describes the high-level software architecture of the simulation e
 
 ```mermaid
 flowchart TD
-    UI[Client: Godot or Web, D12] <-->|binary protocol, D10| Server(pax_server, M3)
+    UI[Godot client, D12] <-->|FlatBuffers over TCP, D22| Server(pax_server, M3)
     CLI[pax_cli: headless runner] --> Engine
     Data[(data/ + scenarios/ TOML)] --> Loader[pax_data: load + validate]
     Loader --> Engine

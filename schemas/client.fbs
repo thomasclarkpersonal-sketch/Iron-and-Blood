@@ -1,0 +1,86 @@
+// Client -> server messages (D22). See docs/NETWORK_PROTOCOL.md.
+
+include "common.fbs";
+
+namespace pax.net;
+
+/// First message on every connection. Anything else first is a protocol error.
+table Hello {
+  protocol_major: ushort;
+  protocol_minor: ushort;
+  /// Display name, at most 32 bytes of UTF-8.
+  client_name: string;
+  /// Nation to play, as an index into the Welcome's nation table, or -1.
+  /// M3: -1 means sandbox (the session may command every nation).
+  /// M4: ignored; nations are assigned in the lobby (D24).
+  requested_nation: int = -1;
+  /// M4: token from an earlier Welcome, to reclaim a dropped session. 0 = new session.
+  resume_token: ulong;
+}
+
+/// Ask for a command to be applied at the start of the next tick.
+/// The server answers every SubmitCommand with exactly one CommandResult.
+table SubmitCommand {
+  /// Chosen by the client and echoed in the CommandResult. It doesn't affect ordering.
+  client_seq: uint;
+  command: Command;
+}
+
+/// M3: always allowed. M4: host only; any player may pause (D24).
+table SetSpeed {
+  speed: Speed;
+}
+
+/// Replaces the session's whole subscription. The server answers with a DayUpdate
+/// for the current day, so a newly opened panel fills at once, even when paused.
+table Subscribe {
+  map_mode: MapMode;
+  /// Good index for MapMode.Price.
+  map_good: ushort;
+  /// Market whose detail to send, or -1.
+  market: int = -1;
+  /// Province whose POPs, labour and producers to send, or -1.
+  province: int = -1;
+}
+
+/// The client has finished processing the DayUpdate for `day` (flow control, D23).
+table Ack {
+  day: ulong;
+}
+
+/// Keep-alive, also used to measure round-trip time. Sent at least every 2 seconds.
+table Ping {
+  nonce: ulong;
+}
+
+/// M3: always allowed. M4: host only.
+table SaveGame {
+  /// File name stem: [A-Za-z0-9_-], 1 to 64 characters.
+  name: string;
+}
+
+/// M3: always allowed. M4: host only, from the lobby.
+table LoadGame {
+  name: string;
+}
+
+table ListSaves {}
+
+union ClientPayload {
+  Hello,
+  SubmitCommand,
+  SetSpeed,
+  Subscribe,
+  Ack,
+  Ping,
+  SaveGame,
+  LoadGame,
+  ListSaves,
+}
+
+table ClientMessage {
+  payload: ClientPayload;
+}
+
+root_type ClientMessage;
+file_identifier "PAXC";
