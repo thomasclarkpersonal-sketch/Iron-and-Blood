@@ -195,6 +195,6 @@ rate = 0.150000
   - the snapshot is missing or damaged, isn't of `day` with `snapshot_hash`, or its scenario tables differ from the scenario's.
 
   `LoadGame` doesn't replay, so beyond these checks it trusts the log.
-- **Replaying** (`pax_cli replay`, D23) makes the same checks, then re-applies the log, and refuses the save if any checkpoint, or the end state, differs.
+- **Replaying** (`pax_data::save::load_by_replay`, D23) makes the same checks, then re-applies the log, and refuses the save if any checkpoint, or the end state, differs.
 - Save names are 1 to 64 characters of `[A-Za-z0-9_-]`.
 - **Snapshots.** `<name>.world`, next to `<name>.toml`, is the binary world snapshot (format in `pax_data::snapshot`'s documentation). Its name always comes from the save's, never from the file. A save without `snapshot_hash` has no snapshot, and loads by replay.

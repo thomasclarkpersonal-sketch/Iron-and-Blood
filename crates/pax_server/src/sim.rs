@@ -281,7 +281,7 @@ impl Sim {
 
     /// Replaces the running game with a saved one (D23). `save::load` checks the
     /// content hash and the history's consistency, then reads the snapshot, without
-    /// replaying; `pax_cli replay` is the full check. The game then pauses and every
+    /// replaying; `save::load_by_replay` is the full check. The game then pauses and every
     /// session gets a new `Welcome`, because the scenario and its tables may differ
     /// (NETWORK_PROTOCOL §3). Commands queued for the next tick are discarded. On any
     /// error the running game is left untouched.
