@@ -34,7 +34,7 @@ use crate::net::{Inbound, Outbound};
 use crate::queue::CommandQueue;
 use crate::request::{Request, WireCommand};
 use crate::session::{Claim, HostRule, LobbyEntry, OnLeave, Refusal, Seat, Session, SessionTable, Vacated};
-use crate::view::{self, DayViews, Subscription};
+use crate::view::{self, DayViews, MapPart, Subscription};
 
 /// The lobby as players last saw it (`LobbyState` without a notice).
 #[derive(Debug, PartialEq)]
@@ -326,9 +326,11 @@ impl Sim {
         };
         let Some(s) = self.sessions.get_mut(session) else { return };
         s.subscription = subscription;
-        // The answer always carries the map, so a remote session's count restarts.
-        s.throttle.resubscribed();
-        s.conn.send(Outbound::Frame(view::day_update(&self.game.views(), &subscription, self.clock.speed(), 0, true)));
+        // The answer always carries the map. It counts as an update for a remote
+        // session's throttle, so the next day keeps its distance (D24, M4-7).
+        s.throttle.resubscribed(Instant::now());
+        let answer = view::day_update(&self.game.views(), &subscription, self.clock.speed(), 0, MapPart::Include);
+        s.conn.send(Outbound::Frame(answer));
     }
 
     fn command_result(&self, session: u64, client_seq: u32, error: wire::CommandError) {
@@ -813,12 +815,12 @@ impl Sim {
 /// Unless the session's throttle holds it until [`Sim::flush`] (a remote session,
 /// D24), with or without the map as the throttle says.
 fn send_update(s: &mut Session, views: &DayViews<'_>, speed: wire::Speed, now: Instant) {
-    if !s.throttle.may_send(now) {
+    if !s.throttle.admit(now) {
         return;
     }
     let skipped = s.window.sent(views.world.day);
-    let with_map = s.throttle.sent(now);
-    s.conn.send(Outbound::Frame(view::day_update(views, &s.subscription, speed, skipped, with_map)));
+    let map = s.throttle.sent(now);
+    s.conn.send(Outbound::Frame(view::day_update(views, &s.subscription, speed, skipped, map)));
 }
 
 /// The sim thread's loop: handle everything already waiting, tick if due, otherwise
@@ -1643,8 +1645,9 @@ mod tests {
                 }
             }
         }
-        // A day every 50 ms for two seconds.
-        for i in 1..=40u64 {
+        // A day every 50 ms for a little over two seconds. The Subscribe answer
+        // counted as an update, so the first day goes out a gap after it.
+        for i in 1..=42u64 {
             let now = start + Duration::from_millis(50 * i);
             sim.advance_at(now);
             read(&mut rx, &mut sim, now, &mut updates);
@@ -1655,10 +1658,10 @@ mod tests {
         assert_eq!(maps, [updates[4].0], "the map every fifth update: {updates:?}");
         assert!(updates.iter().skip(1).all(|u| u.1 > 0), "the days between are coalesced: {updates:?}");
         // The game stops here: the held last day still goes out when its time comes.
-        let at = sim.next_flush().expect("day 40 is held");
+        let at = sim.next_flush().expect("day 42 is held");
         sim.flush(at);
         read(&mut rx, &mut sim, at, &mut updates);
-        assert_eq!(updates.last().map(|u| u.0), Some(40), "{updates:?}");
+        assert_eq!(updates.last().map(|u| u.0), Some(42), "{updates:?}");
         assert_eq!(sim.next_flush(), None);
 
         // A seat that ends (a kick, a load without its nation) with a day held leaves

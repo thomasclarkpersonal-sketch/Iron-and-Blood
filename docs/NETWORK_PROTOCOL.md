@@ -137,7 +137,7 @@ sequenceDiagram
 - At most **3** `DayUpdate`s may be unacknowledged. When the window is full, the server stops sending to that client but keeps simulating. When an `Ack` frees the window, it sends only the latest day, with `skipped` set to the number of days skipped.
 - The simulation never waits for a client in single player. A slow client sees fewer updates; it never sees stale ones.
 - `ServerState`, `CommandResult` and replies bypass the window. They are small and must not wait behind updates.
-- **Remote sessions (D24, M4-7):** a session whose peer is not on the server's machine gets at most 4 updates a second (`--updates-per-second`); the days in between are coalesced (`skipped`), and a day held by the cap still goes out when its time comes, even if the game pauses meanwhile. Its `MapView` goes out with the answer to `Subscribe` and then with every 5th update (`--map-every`); the updates in between have no `map`, and the client keeps the colours it has. Local sessions (single player, or a player on the server's machine) get every update with the map.
+- **Remote sessions (D24, M4-7):** a session whose peer is not on the server's machine gets at most 4 updates a second (`--updates-per-second`), the answer to `Subscribe` included; the days in between are coalesced (`skipped`), and a day held by the cap still goes out when its time comes, even if the game pauses meanwhile. Its `MapView` goes out with the answer to `Subscribe` and then with every 5th update (`--map-every`); the updates in between have no `map`, and the client keeps the colours it has. Local sessions (single player, or a player on the server's machine) get every update with the map.
 
 ## 6. Single player: how the client runs the server
 

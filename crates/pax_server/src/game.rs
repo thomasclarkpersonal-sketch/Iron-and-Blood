@@ -213,7 +213,7 @@ mod tests {
             let start = std::time::Instant::now();
             for _ in 0..DAYS {
                 game.step(Vec::new());
-                let _ = view::day_update(&game.views(), &sub, wire::Speed::Fastest, 0, true);
+                let _ = view::day_update(&game.views(), &sub, wire::Speed::Fastest, 0, view::MapPart::Include);
             }
             let day_ms = per_day(start);
             let server_ms = day_ms - tick_ms - hash_ms;
@@ -249,8 +249,8 @@ mod tests {
                 .checked(game.world())
                 .unwrap();
         let views = game.views();
-        let with_map = view::day_update(&views, &sub, wire::Speed::Normal, 0, true).len() as f64;
-        let without = view::day_update(&views, &sub, wire::Speed::Normal, 0, false).len() as f64;
+        let with_map = view::day_update(&views, &sub, wire::Speed::Normal, 0, view::MapPart::Include).len() as f64;
+        let without = view::day_update(&views, &sub, wire::Speed::Normal, 0, view::MapPart::Omit).len() as f64;
         let per_update = (without * f64::from(map_every - 1) + with_map) / f64::from(map_every);
         let rate = |speed: wire::Speed| -> f64 {
             let days_per_second = match pax_protocol::pacing(speed) {
