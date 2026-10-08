@@ -164,9 +164,11 @@ mod tests {
     /// M3's definition of done (item 4): the server's day costs little beyond the
     /// tick, at D13's long-term scale on 8 threads. It reports the tick, the state hash
     /// (per day, D10/D22) and everything else the server adds (stats and one full
-    /// update). It asserts that the server's own work stays within 10% of the tick.
-    /// The hash is reported, not asserted: whether to hash every day is the open
-    /// decision in MILESTONE_3's risks. Run by hand:
+    /// update). It asserts that the server's own work stays within 10% of the tick:
+    /// the server's share only. Whether the tick itself fits D13's 100 ms is D13's
+    /// "Measured" column, and at `two_states` content it doesn't (MILESTONE_3, item 4).
+    /// The hash is reported, not asserted: the owner kept it per day, outside the
+    /// budget (MILESTONE_3's risks). Run by hand:
     /// `cargo test -p pax_server --release -- --ignored server_day_budget --nocapture`
     #[test]
     #[ignore]
