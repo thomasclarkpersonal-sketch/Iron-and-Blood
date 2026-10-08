@@ -29,6 +29,7 @@ mod queue;
 mod request;
 mod session;
 mod sim;
+mod throttle;
 mod view;
 mod window;
 

@@ -153,6 +153,7 @@ All systems are plain functions over `&mut World`, called by `tick::step` in the
 | `sim.rs` | The sim thread: the handshake and admission, subscriptions, command checks, speed, flow control, saves; D24's fairness pause and the lobby, sent when it differs from what players last saw |
 | `session.rs` | The session table (M4-1): one row per connection, with its subscription, window and seat (player id and nation); player ids, who holds a nation, the host (elected and succeeded by `HostRule`, M4-3), lobby claims and ready marks (M4-2), broadcasts; seats kept for players who left a started game, with their resume tokens (OS randomness), and stall marks for the fairness pause (M4-4) |
 | `game.rs` | `Game`: the world, its applied-command log and checkpoints, and the day's derived views (`Today`), all changed in one step |
+| `throttle.rs` | Bandwidth for remote sessions (D24, M4-7): at most 4 updates a second, the `MapView` every 5th |
 | `queue.rs`, `clock.rs`, `window.rs` | Command stamping `(player, sequence)`, the game clock (D23), the 3-update flow-control window |
 | `view.rs` | The views, built from `pax_engine::views` (the engine owns every rule a view applies) |
 

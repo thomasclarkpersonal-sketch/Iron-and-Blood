@@ -315,11 +315,19 @@ fn province_detail<'a>(
 }
 
 /// One session's `DayUpdate` frame for the current day.
-pub fn day_update(v: &DayViews<'_>, sub: &CheckedSubscription, speed: wire::Speed, skipped: u32) -> Vec<u8> {
+/// `with_map`: include the subscribed `MapView`. A remote session gets it only now
+/// and then (D24 bandwidth, M4-7); everyone else always.
+pub fn day_update(
+    v: &DayViews<'_>,
+    sub: &CheckedSubscription,
+    speed: wire::Speed,
+    skipped: u32,
+    with_map: bool,
+) -> Vec<u8> {
     let mut b = FlatBufferBuilder::new();
     let world = world_summary(&mut b, v);
     let nations = nation_table(&mut b, v);
-    let map = map_view(&mut b, v, sub.layer);
+    let map = if with_map { map_view(&mut b, v, sub.layer) } else { None };
     let market = sub.market.map(|m| market_detail(&mut b, v, m));
     let province = sub.province.map(|p| province_detail(&mut b, v, p));
     let update = wire::DayUpdate::create(
@@ -369,7 +377,7 @@ mod tests {
     }
 
     fn update(v: &DayViews<'_>, sub: Subscription) -> Vec<u8> {
-        day_update(v, &sub.checked(v.world).expect("a valid subscription"), wire::Speed::Normal, 3)
+        day_update(v, &sub.checked(v.world).expect("a valid subscription"), wire::Speed::Normal, 3, true)
     }
 
     fn stats_of(world: &World, report: Option<&DayReport>) -> ProvinceStats {
@@ -525,7 +533,7 @@ mod tests {
         let sub = Subscription { map_mode: wire::MapMode(200), ..Default::default() }.checked(&world).unwrap();
         let stats = stats_of(&world, None);
         let v = DayViews { world: &world, report: None, stats: &stats, state_hash: 0 };
-        let frame = day_update(&v, &sub, wire::Speed::Paused, 0);
+        let frame = day_update(&v, &sub, wire::Speed::Paused, 0, true);
         assert!(read_server_message(&frame).unwrap().payload_as_day_update().unwrap().map().is_none());
     }
 
@@ -557,7 +565,7 @@ mod tests {
         for _ in 0..runs {
             let stats = stats_of(&world, Some(&report));
             let views = DayViews { world: &world, report: Some(&report), stats: &stats, state_hash };
-            bytes = day_update(&views, &sub, wire::Speed::Normal, 0).len();
+            bytes = day_update(&views, &sub, wire::Speed::Normal, 0, true).len();
         }
         let ms = start.elapsed().as_secs_f64() * 1e3 / runs as f64;
         println!(

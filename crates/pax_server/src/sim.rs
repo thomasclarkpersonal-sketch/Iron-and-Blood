@@ -303,7 +303,9 @@ impl Sim {
         };
         let Some(s) = self.sessions.get_mut(session) else { return };
         s.subscription = subscription;
-        s.conn.send(Outbound::Frame(view::day_update(&self.game.views(), &subscription, self.clock.speed(), 0)));
+        // The answer always carries the map, so a remote session's count restarts.
+        s.throttle.resubscribed();
+        s.conn.send(Outbound::Frame(view::day_update(&self.game.views(), &subscription, self.clock.speed(), 0, true)));
     }
 
     fn command_result(&self, session: u64, client_seq: u32, error: wire::CommandError) {
@@ -435,9 +437,14 @@ impl Sim {
     /// The session processed the update for `day`: everything up to it leaves the
     /// window. If days ran while the window was full, the latest day goes out now.
     fn ack(&mut self, session: u64, day: u64) {
+        self.ack_at(session, day, Instant::now());
+    }
+
+    /// [`Self::ack`] at `now`, the time the throttle sees (tests pass their own).
+    fn ack_at(&mut self, session: u64, day: u64, now: Instant) {
         let Some(s) = self.sessions.get_mut(session) else { return };
         if s.window.ack(day) {
-            send_update(s, &self.game.views(), self.clock.speed());
+            send_update(s, &self.game.views(), self.clock.speed(), now);
         }
     }
 
@@ -453,6 +460,11 @@ impl Sim {
     /// Ticks, then sends each welcomed session the new day if its window has room
     /// (D23). The views are built once and shared by all sessions.
     fn advance(&mut self) {
+        self.advance_at(Instant::now());
+    }
+
+    /// [`Self::advance`] at `now`, the time the throttle sees (tests pass their own).
+    fn advance_at(&mut self, now: Instant) {
         self.tick();
         let due: Vec<u64> =
             self.sessions.welcomed_mut().filter_map(|(id, s)| s.window.day_ran().then_some(id)).collect();
@@ -461,8 +473,33 @@ impl Sim {
             let views = self.game.views();
             for id in due {
                 if let Some(s) = self.sessions.get_mut(id) {
-                    send_update(s, &views, self.clock.speed());
+                    send_update(s, &views, self.clock.speed(), now);
                 }
+            }
+        }
+    }
+
+    /// When the next update a throttle held may go out (D24, M4-7); `None` if none
+    /// is owed.
+    pub(crate) fn next_flush(&self) -> Option<Instant> {
+        self.sessions.all().filter(|s| s.window.owed()).filter_map(|s| s.throttle.ready_at()).min()
+    }
+
+    /// Sends every held update whose time has come: the latest day, which a pause or a
+    /// slow speed would otherwise keep from a remote session.
+    pub(crate) fn flush(&mut self, now: Instant) {
+        let due: Vec<u64> = self
+            .sessions
+            .welcomed_mut()
+            .filter_map(|(id, s)| (s.window.owed() && s.throttle.ready_at().is_some_and(|at| at <= now)).then_some(id))
+            .collect();
+        if due.is_empty() {
+            return;
+        }
+        let views = self.game.views();
+        for id in due {
+            if let Some(s) = self.sessions.get_mut(id) {
+                send_update(s, &views, self.clock.speed(), now);
             }
         }
     }
@@ -743,9 +780,15 @@ impl Sim {
 }
 
 /// Sends `s` an update for the current day and puts it in the session's window.
-fn send_update(s: &mut Session, views: &DayViews<'_>, speed: wire::Speed) {
+/// Unless the session's throttle holds it until [`Sim::flush`] (a remote session,
+/// D24), with or without the map as the throttle says.
+fn send_update(s: &mut Session, views: &DayViews<'_>, speed: wire::Speed, now: Instant) {
+    if !s.throttle.may_send(now) {
+        return;
+    }
     let skipped = s.window.sent(views.world.day);
-    s.conn.send(Outbound::Frame(view::day_update(views, &s.subscription, speed, skipped)));
+    let with_map = s.throttle.sent(now);
+    s.conn.send(Outbound::Frame(view::day_update(views, &s.subscription, speed, skipped, with_map)));
 }
 
 /// The sim thread's loop: handle everything already waiting, tick if due, otherwise
@@ -756,23 +799,33 @@ pub(crate) fn run(sim: &mut Sim, inbound: Receiver<Inbound>) {
         let event = match inbound.try_recv() {
             Ok(event) => event,
             Err(TryRecvError::Disconnected) => break,
-            // Nothing waiting: tick if due, otherwise sleep until an event or the tick.
-            Err(TryRecvError::Empty) => match sim.clock.due() {
-                Some(due) if Instant::now() >= due => {
+            // Nothing waiting: send held updates and tick if due, otherwise sleep until
+            // an event, the tick or the next held update (M4-7).
+            Err(TryRecvError::Empty) => {
+                let now = Instant::now();
+                let flush = sim.next_flush();
+                if flush.is_some_and(|at| at <= now) {
+                    sim.flush(now);
+                    continue;
+                }
+                let due = sim.clock.due();
+                if due.is_some_and(|due| now >= due) {
                     sim.advance();
                     sim.clock.ticked(Instant::now());
                     continue;
                 }
-                Some(due) => match inbound.recv_deadline(due) {
-                    Ok(event) => event,
-                    Err(RecvTimeoutError::Timeout) => continue,
-                    Err(RecvTimeoutError::Disconnected) => break,
-                },
-                None => match inbound.recv() {
-                    Ok(event) => event,
-                    Err(_) => break,
-                },
-            },
+                match [due, flush].into_iter().flatten().min() {
+                    Some(deadline) => match inbound.recv_deadline(deadline) {
+                        Ok(event) => event,
+                        Err(RecvTimeoutError::Timeout) => continue,
+                        Err(RecvTimeoutError::Disconnected) => break,
+                    },
+                    None => match inbound.recv() {
+                        Ok(event) => event,
+                        Err(_) => break,
+                    },
+                }
+            }
         };
         if !sim.handle(event) {
             break;
@@ -1490,6 +1543,62 @@ mod tests {
         sim.handle(Inbound::Request { session: 1, request: Request::Kick { player: 1 } });
         assert_eq!(rejoin(&mut sim, 6, token), [Sent::Rejected, Sent::Close], "the kick dropped the kept seat");
         assert_eq!(join(&mut sim, 7, Some(1)).1, [Sent::Welcome { player: 1 }]);
+    }
+
+    /// M4-7: a remote session gets at most four updates a second, the days between
+    /// coalesced, with the map every fifth update (counting from the Subscribe
+    /// answer, which carries it); a day held by the cap still goes out after a pause.
+    #[test]
+    fn a_remote_session_is_throttled_and_gets_the_last_day() {
+        use std::time::Duration;
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two_states");
+        let saves = test_saves_dir();
+        let mut config = crate::Config::local(&dir);
+        config.saves_dir = saves.0.clone();
+        let mut sim = Sim::new(pax_data::load_scenario(&dir).unwrap(), &config);
+        let (conn, mut rx) = ConnHandle::for_test_remote();
+        sim.handle(Inbound::Connected { session: SESSION, conn });
+        let hello =
+            Request::Hello { major: PROTOCOL_MAJOR, minor: 0, name: None, requested_nation: None, resume_token: 0 };
+        sim.handle(Inbound::Request { session: SESSION, request: hello });
+        sim.handle(Inbound::Request {
+            session: SESSION,
+            request: Request::Subscribe {
+                map_mode: wire::MapMode::Population,
+                map_good: 0,
+                market: None,
+                province: None,
+            },
+        });
+        while rx.try_recv().is_ok() {}
+        // (day, skipped, carries the map) of each update, acknowledging each at once.
+        let mut updates = Vec::new();
+        let start = Instant::now();
+        fn read(rx: &mut Receiver<Outbound>, sim: &mut Sim, now: Instant, updates: &mut Vec<(u64, u32, bool)>) {
+            while let Ok(Outbound::Frame(f)) = rx.try_recv() {
+                if let Some(u) = read_server_message(&f).unwrap().payload_as_day_update() {
+                    updates.push((u.day(), u.skipped(), u.map().is_some()));
+                    sim.ack_at(SESSION, u.day(), now);
+                }
+            }
+        }
+        // A day every 50 ms for two seconds.
+        for i in 1..=40u64 {
+            let now = start + Duration::from_millis(50 * i);
+            sim.advance_at(now);
+            read(&mut rx, &mut sim, now, &mut updates);
+        }
+        assert_eq!(updates.len(), 8, "four a second: {updates:?}");
+        let maps: Vec<u64> = updates.iter().filter(|u| u.2).map(|u| u.0).collect();
+        // The Subscribe answer carried the map, so the next one is the fifth update.
+        assert_eq!(maps, [updates[4].0], "the map every fifth update: {updates:?}");
+        assert!(updates.iter().skip(1).all(|u| u.1 > 0), "the days between are coalesced: {updates:?}");
+        // The game stops here: the held last day still goes out when its time comes.
+        let at = sim.next_flush().expect("day 40 is held");
+        sim.flush(at);
+        read(&mut rx, &mut sim, at, &mut updates);
+        assert_eq!(updates.last().map(|u| u.0), Some(40), "{updates:?}");
+        assert_eq!(sim.next_flush(), None);
     }
 
     /// A single-player server has no lobby and never sends LobbyState: lobby

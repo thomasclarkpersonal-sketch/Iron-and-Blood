@@ -19,6 +19,7 @@ use std::collections::BTreeMap;
 use std::num::NonZeroU64;
 
 use crate::net::{ConnHandle, Outbound};
+use crate::throttle::Throttle;
 use crate::view::CheckedSubscription;
 use crate::window::UpdateWindow;
 
@@ -32,6 +33,8 @@ pub(crate) struct Session {
     seat: Option<Seat>,
     /// Which days' updates it is sent (D23 flow control).
     pub window: UpdateWindow,
+    /// How often, and with the map or not (D24 bandwidth, M4-7; remote sessions only).
+    pub throttle: Throttle,
     /// The name the client gave in `Hello`, for the lobby. Display only.
     name: String,
     /// Marked ready in the lobby (M4-2). Cleared whenever the claim changes.
@@ -182,7 +185,9 @@ impl SessionTable {
 
     /// A new connection, not yet welcomed.
     pub(crate) fn connect(&mut self, id: u64, conn: ConnHandle) {
+        let throttle = Throttle::new(conn.remote);
         let row = Session {
+            throttle,
             conn,
             subscription: CheckedSubscription::default(),
             seat: None,

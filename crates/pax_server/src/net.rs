@@ -68,6 +68,8 @@ pub(crate) enum Outbound {
 pub(crate) struct ConnHandle {
     out: mpsc::Sender<Outbound>,
     kill: Arc<Notify>,
+    /// The peer is not on this machine: its updates are throttled (D24, M4-7).
+    pub remote: bool,
 }
 
 impl ConnHandle {
@@ -86,7 +88,14 @@ impl ConnHandle {
     /// A handle whose frames the test reads from the returned receiver.
     pub(crate) fn for_test() -> (ConnHandle, mpsc::Receiver<Outbound>) {
         let (out, rx) = mpsc::channel(OUTBOUND_QUEUE);
-        (ConnHandle { out, kill: Arc::new(Notify::new()) }, rx)
+        (ConnHandle { out, kill: Arc::new(Notify::new()), remote: false }, rx)
+    }
+
+    /// As [`Self::for_test`], for a peer on another machine.
+    pub(crate) fn for_test_remote() -> (ConnHandle, mpsc::Receiver<Outbound>) {
+        let (mut conn, rx) = ConnHandle::for_test();
+        conn.remote = true;
+        (conn, rx)
     }
 }
 
@@ -189,7 +198,8 @@ pub(crate) async fn accept_loop(listener: TcpListener, sim: flume::Sender<Inboun
                 info!(session, %peer, "connection");
                 // Small, latency-sensitive messages: don't wait to coalesce them.
                 let _ = stream.set_nodelay(true);
-                tokio::spawn(connection(stream, session, sim.clone(), timing));
+                let remote = !peer.ip().is_loopback();
+                tokio::spawn(connection(stream, session, sim.clone(), timing, remote));
             }
             Err(e) => {
                 // Usually transient (e.g. out of file descriptors): back off briefly.
@@ -200,12 +210,12 @@ pub(crate) async fn accept_loop(listener: TcpListener, sim: flume::Sender<Inboun
     }
 }
 
-async fn connection(stream: TcpStream, session: u64, sim: flume::Sender<Inbound>, timing: Timing) {
+async fn connection(stream: TcpStream, session: u64, sim: flume::Sender<Inbound>, timing: Timing, remote: bool) {
     let idle = timing.idle;
     let (mut rd, mut wr) = stream.into_split();
     let (out_tx, mut out_rx) = mpsc::channel::<Outbound>(OUTBOUND_QUEUE);
     let kill = Arc::new(Notify::new());
-    let conn = ConnHandle { out: out_tx.clone(), kill: kill.clone() };
+    let conn = ConnHandle { out: out_tx.clone(), kill: kill.clone(), remote };
     // `send_async` waits, in FIFO order and without blocking the runtime, while the
     // sim thread's queue is full; it fails only once the sim thread has stopped.
     if sim.send_async(Inbound::Connected { session, conn }).await.is_err() {

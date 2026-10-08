@@ -391,6 +391,36 @@ pub fn until_started(c: &mut Client) {
     }
 }
 
+/// Reads until the server answers a save, acknowledging updates on the way, and
+/// returns its error (empty on success). Fails after 10 s.
+pub fn until_saved(c: &mut Client) -> String {
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        assert!(std::time::Instant::now() < deadline, "the save was never answered");
+        match c.next() {
+            Got::SaveResult { error, .. } => return error,
+            Got::DayUpdate { day, .. } => c.ack(day),
+            Got::Closed => panic!("the server closed the connection"),
+            _ => {}
+        }
+    }
+}
+
+/// Reads until the lobby is open again (a load sends everyone back to it, M4-5),
+/// acknowledging updates on the way. Fails after 10 s.
+pub fn until_lobby_reopened(c: &mut Client) {
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        assert!(std::time::Instant::now() < deadline, "the lobby never reopened");
+        match c.next() {
+            Got::Lobby { started: false, .. } => return,
+            Got::DayUpdate { day, .. } => c.ack(day),
+            Got::Closed => panic!("the server closed the connection"),
+            _ => {}
+        }
+    }
+}
+
 /// A started two-player game on `config` (M4-2): the host, holding nation 0, is
 /// seated first (the first player is host, D24), the guest holds nation 1, both get
 /// ready, and the host starts. The one copy of the lobby handshake the TCP tests use.
