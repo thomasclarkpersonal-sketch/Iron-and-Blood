@@ -71,14 +71,67 @@ fn parse<T: serde::de::DeserializeOwned>(name: &str, text: &str) -> Result<T, Lo
     toml::from_str(text).map_err(|e| LoadError::single(format!("{name}: {e}")))
 }
 
+/// The four definition files' text, as read from a definitions directory.
+struct DefTexts {
+    goods: String,
+    professions: String,
+    production: String,
+    rules: String,
+}
+
+impl DefTexts {
+    fn read(dir: &Path) -> Result<Self, LoadError> {
+        Ok(DefTexts {
+            goods: read(&dir.join("goods.toml"))?,
+            professions: read(&dir.join("professions.toml"))?,
+            production: read(&dir.join("production.toml"))?,
+            rules: read(&dir.join("rules.toml"))?,
+        })
+    }
+
+    fn parse(&self) -> Result<Defs, LoadError> {
+        parse_defs(&DefSources {
+            goods: &self.goods,
+            professions: &self.professions,
+            production: &self.production,
+            rules: &self.rules,
+        })
+    }
+
+    fn hash_into(&self, h: &mut ContentHash) {
+        h.file("goods.toml", &self.goods);
+        h.file("professions.toml", &self.professions);
+        h.file("production.toml", &self.production);
+        h.file("rules.toml", &self.rules);
+    }
+}
+
+/// Identifies a scenario's content: FNV-1a over every file the loader reads, each
+/// keyed by its role (not its path, so moving a directory changes nothing).
+///
+/// The server sends it in `Welcome` (D22), and the client compares it with its own
+/// copy, so labels and map assets can't silently disagree with the server's data. It
+/// identifies content only; it is not simulation state.
+struct ContentHash(pax_engine::hash::StateHasher);
+
+impl ContentHash {
+    fn new() -> Self {
+        ContentHash(pax_engine::hash::StateHasher::default())
+    }
+
+    /// Length-prefixed, so ("ab", "c") and ("a", "bc") hash differently.
+    fn file(&mut self, role: &str, text: &str) {
+        for part in [role, text] {
+            self.0.u64(part.len() as u64);
+            self.0.bytes(part.as_bytes());
+        }
+    }
+}
+
 /// Loads `goods.toml`, `professions.toml`, `production.toml` and `rules.toml`
 /// from a definitions directory.
 pub fn load_defs(dir: &Path) -> Result<Defs, LoadError> {
-    let goods = read(&dir.join("goods.toml"))?;
-    let professions = read(&dir.join("professions.toml"))?;
-    let production = read(&dir.join("production.toml"))?;
-    let rules = read(&dir.join("rules.toml"))?;
-    parse_defs(&DefSources { goods: &goods, professions: &professions, production: &production, rules: &rules })
+    DefTexts::read(dir)?.parse()
 }
 
 /// A loaded scenario: its display name, the initial world and its command log.
@@ -87,6 +140,9 @@ pub struct Scenario {
     pub world: World,
     /// Commands to apply during the run (empty if the scenario has none).
     pub commands: CommandLog,
+    /// FNV-1a over the scenario, definition and command files, each keyed by its role.
+    /// Sent to clients in `Welcome` (D22) so their labels and map match this data.
+    pub content_hash: u64,
 }
 
 /// Commands keyed by the day at whose start they apply (D21). Within a day,
@@ -156,13 +212,20 @@ pub fn load_scenario(dir: &Path) -> Result<Scenario, LoadError> {
     let text = read(&dir.join("scenario.toml"))?;
     let scenario: ScenarioFile = parse("scenario.toml", &text)?;
     let defs_dir: PathBuf = dir.join(&scenario.data);
-    let defs = load_defs(&defs_dir)?;
-    let world = build_world(Arc::new(defs), &scenario)?;
+    let def_texts = DefTexts::read(&defs_dir)?;
+    let mut hash = ContentHash::new();
+    hash.file("scenario.toml", &text);
+    def_texts.hash_into(&mut hash);
+    let world = build_world(Arc::new(def_texts.parse()?), &scenario)?;
     let commands = match &scenario.commands {
-        Some(file) => parse_commands(&world, &read(&dir.join(file))?)?,
+        Some(file) => {
+            let commands = read(&dir.join(file))?;
+            hash.file("commands", &commands);
+            parse_commands(&world, &commands)?
+        }
         None => CommandLog::default(),
     };
-    Ok(Scenario { name: scenario.name, world, commands })
+    Ok(Scenario { name: scenario.name, world, commands, content_hash: hash.0.finish() })
 }
 
 /// Parses a scenario from text against already-loaded definitions.

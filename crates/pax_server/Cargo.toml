@@ -1,15 +1,20 @@
 [package]
 name = "pax_server"
-description = "Authoritative game server: wraps the engine behind the FlatBuffers TCP protocol (D10, D22)."
+description = "Authoritative game server: wraps the engine behind the FlatBuffers TCP protocol (D10, D22, D23)."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
 
-# Only what the stub uses. The engine, data loader, protocol and tokio arrive with
-# M3-2, when the server does something with them.
 [dependencies]
+pax_engine.workspace = true
+pax_data.workspace = true
+pax_protocol.workspace = true
+# Must match pax_protocol's pin: messages are built here with the generated code.
+flatbuffers = "=24.3.25"
+# Networking only. The simulation runs on its own thread, never on the async runtime (D23).
+tokio = { version = "1.37", features = ["rt-multi-thread", "net", "io-util", "sync", "time", "macros"] }
 tracing = "0.1"
 tracing-subscriber = "0.3"
 

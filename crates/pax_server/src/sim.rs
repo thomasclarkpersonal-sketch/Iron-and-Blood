@@ -1,0 +1,119 @@
+//! The sim thread (D23): the only owner of the `World`.
+//!
+//! It handles session requests in arrival order and decides everything that needs game
+//! state. In M3-2 that's the handshake: `Welcome` or `Rejected`. Ticking, views,
+//! commands and saves arrive with M3-3 to M3-6.
+
+use std::collections::BTreeMap;
+use std::sync::mpsc::Receiver;
+
+use pax_data::Scenario;
+use pax_protocol::{PROTOCOL_MAJOR, PROTOCOL_MINOR, wire};
+use tokio::sync::mpsc::UnboundedSender;
+use tracing::{debug, info};
+
+use crate::encode::{self, WelcomeInfo};
+use crate::net::{Inbound, Outbound};
+use crate::request::Request;
+
+struct Session {
+    out: UnboundedSender<Outbound>,
+}
+
+pub(crate) struct Sim {
+    scenario: Scenario,
+    sessions: BTreeMap<u64, Session>,
+    /// The single welcomed session (M3 is single player, D10).
+    active: Option<u64>,
+    /// Stop when the welcomed session leaves (the client launched this server).
+    exit_when_idle: bool,
+    speed: wire::Speed,
+}
+
+impl Sim {
+    pub(crate) fn new(scenario: Scenario, exit_when_idle: bool) -> Self {
+        Sim { scenario, sessions: BTreeMap::new(), active: None, exit_when_idle, speed: wire::Speed::Paused }
+    }
+
+    fn send(&self, session: u64, out: Outbound) {
+        if let Some(s) = self.sessions.get(&session) {
+            // A closed connection drops its receiver; there's nothing left to tell it.
+            let _ = s.out.send(out);
+        }
+    }
+
+    fn reject(&self, session: u64, reason: &str) {
+        info!(session, reason, "rejected");
+        self.send(session, Outbound::Frame(encode::rejected(reason)));
+        self.send(session, Outbound::Close);
+    }
+
+    fn hello(&mut self, session: u64, major: u16, minor: u16, name: &str, requested_nation: Option<u32>) {
+        let nations = self.scenario.world.nations.key.len();
+        if major != PROTOCOL_MAJOR {
+            let reason = format!(
+                "protocol {major}.{minor} is not supported; this server speaks {PROTOCOL_MAJOR}.{PROTOCOL_MINOR}"
+            );
+            return self.reject(session, &reason);
+        }
+        if self.active.is_some() {
+            return self.reject(session, "server full: a single-player server accepts one client");
+        }
+        if let Some(n) = requested_nation
+            && n as usize >= nations
+        {
+            return self.reject(session, &format!("unknown nation {n}: the scenario has {nations}"));
+        }
+        self.active = Some(session);
+        info!(session, name, ?requested_nation, "welcomed");
+        let info = WelcomeInfo {
+            player: 0,
+            resume_token: 0, // resuming a dropped session is M4 (D24)
+            nation: requested_nation,
+            scenario: &self.scenario.name,
+            content_hash: self.scenario.content_hash,
+            speed: self.speed,
+        };
+        self.send(session, Outbound::Frame(encode::welcome(&self.scenario.world, &info)));
+    }
+
+    /// Handles one inbound event. Returns `false` when the server should stop.
+    fn handle(&mut self, event: Inbound) -> bool {
+        match event {
+            Inbound::Connected { session, out } => {
+                self.sessions.insert(session, Session { out });
+            }
+            Inbound::Request { session, request } => match request {
+                Request::Hello { major, minor, name, requested_nation, .. } => {
+                    self.hello(session, major, minor, &name, requested_nation);
+                }
+                other => debug!(session, ?other, "not handled until M3-3 to M3-6"),
+            },
+            Inbound::Closed { session } => {
+                self.sessions.remove(&session);
+                if self.active == Some(session) {
+                    self.active = None;
+                    if self.exit_when_idle {
+                        info!("the client left; exiting (--exit-when-idle)");
+                        return false;
+                    }
+                }
+            }
+            Inbound::Shutdown => return false,
+        }
+        true
+    }
+}
+
+pub(crate) fn run(mut sim: Sim, inbound: Receiver<Inbound>) {
+    while let Ok(event) = inbound.recv() {
+        if !sim.handle(event) {
+            break;
+        }
+    }
+    // Close every remaining connection (e.g. a rejected client that stayed connected).
+    for session in sim.sessions.values() {
+        let _ = session.out.send(Outbound::Frame(encode::goodbye("the server is shutting down")));
+        let _ = session.out.send(Outbound::Close);
+    }
+}

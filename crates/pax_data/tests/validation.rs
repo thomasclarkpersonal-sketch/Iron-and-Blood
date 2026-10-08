@@ -139,3 +139,15 @@ fn consumption_commands_need_a_basket_at_load() {
     let err = pax_data::parse_commands(&world, text).expect_err("must fail");
     assert!(err.messages[0].contains("has no consumption basket"), "{err}");
 }
+
+/// `Welcome.content_hash` (D22) must identify content: stable across loads, and
+/// different whenever any loaded file differs.
+#[test]
+fn content_hash_is_stable_and_content_sensitive() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two_states");
+    let a = pax_data::load_scenario(&dir).unwrap().content_hash;
+    let b = pax_data::load_scenario(&dir).unwrap().content_hash;
+    assert_eq!(a, b);
+    let mini = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/mini_valley");
+    assert_ne!(a, pax_data::load_scenario(&mini).unwrap().content_hash);
+}

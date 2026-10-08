@@ -17,7 +17,7 @@ Binding design decisions live in [docs/DECISIONS.md](docs/DECISIONS.md) (cited a
   - `pax_engine`: fixed-point math, world state, tick systems. No IO.
   - `pax_data`: parsing and validating TOML data files into a `World` (D9); golden-hash file IO.
   - `pax_cli`: headless runner (run, record/verify golden hashes, benchmark).
-  - `pax_server` *(M3, stub until M3-2)*: the authoritative game server and API boundary (D10, D22, D23).
+  - `pax_server`: the authoritative game server and API boundary (D10, D22, D23). One sim thread owns the `World`; tokio runs the network only. It is the only crate that sees both engine and wire types.
   - `pax_protocol`: generated FlatBuffers code (`scripts/gen-protocol.sh`; never edit it by hand) and framing for the wire protocol (D22). No engine dependency.
   - `pax_godot`: the Godot GDExtension bridge; the client's side of the protocol (D12). Depends on `pax_protocol` only, never on `pax_engine` (CI checks this).
   - `client/`: the Godot 4 project. GDScript for the UI only; anything about the protocol belongs in `pax_godot`.
