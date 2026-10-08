@@ -43,7 +43,6 @@ fn secret(flag: &str, path: Option<String>) -> Result<Secret, String> {
     Ok(Secret::new(password))
 }
 
-/// Parses the arguments after the program name.
 /// Files the server writes once it listens.
 #[derive(Debug, Default, PartialEq)]
 struct Outputs {
@@ -53,6 +52,7 @@ struct Outputs {
     fingerprint_file: Option<PathBuf>,
 }
 
+/// Parses the arguments after the program name.
 fn parse_args(args: impl IntoIterator<Item = String>) -> Result<(Config, Outputs), String> {
     let mut it = args.into_iter();
     let mut scenario = None;
@@ -176,20 +176,19 @@ fn main() -> ExitCode {
         // Players pin this to join (D24, M4-6); the host shares it with them.
         println!("TLS certificate SHA-256: {fingerprint}");
     }
-    let written = outputs
-        .fingerprint_file
-        .as_ref()
-        .zip(server.fingerprint())
-        .map_or(Ok(()), |(path, fingerprint)| write_atomically(path, fingerprint))
-        .map_err(|e| format!("could not write the fingerprint file: {e}"))
-        .and_then(|()| {
-            outputs.port_file.as_ref().map_or(Ok(()), |path| {
-                write_atomically(path, &server.local_addr().port().to_string())
-                    .map_err(|e| format!("could not write the port file {}: {e}", path.display()))
-            })
-        });
-    if let Err(e) = written {
-        error!("{e}");
+    // The order matters: a launcher waits for the port file, then reads the
+    // fingerprint (NETWORK_PROTOCOL §6), so the fingerprint is written first.
+    if let (Some(path), Some(fingerprint)) = (&outputs.fingerprint_file, server.fingerprint())
+        && let Err(e) = write_atomically(path, fingerprint)
+    {
+        error!("could not write the fingerprint file {}: {e}", path.display());
+        let _ = server.shutdown();
+        return ExitCode::FAILURE;
+    }
+    if let Some(path) = &outputs.port_file
+        && let Err(e) = write_atomically(path, &server.local_addr().port().to_string())
+    {
+        error!("could not write the port file {}: {e}", path.display());
         let _ = server.shutdown();
         return ExitCode::FAILURE;
     }

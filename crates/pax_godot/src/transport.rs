@@ -34,6 +34,11 @@ pub fn normalise(fingerprint: &str) -> Option<String> {
     (hex.len() == 64 && hex.bytes().all(|b| b.is_ascii_hexdigit())).then_some(hex)
 }
 
+/// The name sent as SNI. It only fills SNI, and matches what the server's
+/// self-signed certificate names (`pax_server::tls::SERVER_NAME`): trust comes from
+/// the pinned fingerprint, never from the name.
+const SERVER_NAME: &str = "pax-server";
+
 #[derive(Debug)]
 pub enum Transport {
     Plain(TcpStream),
@@ -43,7 +48,7 @@ pub enum Transport {
 impl Transport {
     /// TLS over `socket`, trusting only the certificate whose SHA-256 is `pinned`
     /// (normalised, see [`normalise`]).
-    pub fn tls(socket: TcpStream, pinned: String) -> io::Result<Transport> {
+    pub(crate) fn tls(socket: TcpStream, pinned: String) -> io::Result<Transport> {
         let provider = Arc::new(rustls::crypto::ring::default_provider());
         let config = rustls::ClientConfig::builder_with_provider(provider.clone())
             .with_safe_default_protocol_versions()
@@ -51,10 +56,7 @@ impl Transport {
             .dangerous()
             .with_custom_certificate_verifier(Arc::new(Pinned { pinned, provider }))
             .with_no_client_auth();
-        // The name only fills SNI, and matches what the server's self-signed
-        // certificate names (`pax_server::tls`): trust comes from the pinned
-        // fingerprint, never from the name.
-        let name = ServerName::try_from("pax-server").expect("a valid DNS name");
+        let name = ServerName::try_from(SERVER_NAME).expect("a valid DNS name");
         let tls = ClientConnection::new(Arc::new(config), name).map_err(io::Error::other)?;
         Ok(Transport::Tls { tls: Box::new(tls), socket })
     }
