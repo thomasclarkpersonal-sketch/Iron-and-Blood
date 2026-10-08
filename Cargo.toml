@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/pax_engine", "crates/pax_data", "crates/pax_cli", "crates/pax_server", "crates/pax_protocol", "crates/pax_godot"]
+members = ["crates/pax_engine", "crates/pax_data", "crates/pax_cli", "crates/pax_server", "crates/pax_protocol", "crates/pax_godot", "crates/pax_content"]
 
 [workspace.package]
 version = "0.1.0"
@@ -13,6 +13,7 @@ publish = false
 pax_engine = { path = "crates/pax_engine" }
 pax_data = { path = "crates/pax_data" }
 pax_protocol = { path = "crates/pax_protocol" }
+pax_content = { path = "crates/pax_content" }
 rayon = "1.12"
 serde = { version = "1", features = ["derive"] }
 toml = "1.1"

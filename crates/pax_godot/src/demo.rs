@@ -54,6 +54,7 @@ fn welcome(provinces: usize) -> Vec<u8> {
             province_market: Some(province_market),
             markets: Some(markets),
             nations: Some(nations),
+            map_hash: None,
         },
     );
     let scenario = b.create_string("m3_spike_demo");

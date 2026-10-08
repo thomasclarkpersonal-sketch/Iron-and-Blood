@@ -41,14 +41,28 @@ jobs:
           fi
       - name: Every crate applies the workspace lints
         run: python3 scripts/check_lints.py
-      - name: Client crates never depend on the engine (D10, D12)
+      - name: Crate boundaries (D10, D12, AGENTS.md section 2)
         run: |
+          deps() { cargo tree -p "$1" -e normal --prefix none | tail -n +2; }
+          # Clients must not be able to simulate.
           for crate in pax_protocol pax_godot; do
-            if cargo tree -p "$crate" -e normal --prefix none | grep -q '^pax_engine '; then
+            if deps "$crate" | grep -q '^pax_engine '; then
               echo "::error::$crate depends on pax_engine. Clients must not be able to simulate (D10, D12)."
               exit 1
             fi
           done
+          # pax_server is the only crate that sees both engine and wire types.
+          for crate in pax_data pax_cli; do
+            if deps "$crate" | grep -qE '^(pax_protocol|flatbuffers) '; then
+              echo "::error::$crate links wire types; only pax_server may see both engine and wire (AGENTS.md section 2)."
+              exit 1
+            fi
+          done
+          # The shared content hash carries nobody's types.
+          if [ -n "$(deps pax_content)" ]; then
+            echo "::error::pax_content must have no dependencies."
+            exit 1
+          fi
       - run: cargo fmt --all --check
       - run: cargo clippy --all-targets --release -- -D warnings
       - name: Clippy the bridge's demo bindings (the M3-0 spike scene uses them)

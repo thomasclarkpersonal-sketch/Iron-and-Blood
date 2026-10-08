@@ -32,6 +32,7 @@ pub enum Got {
         provinces: Vec<String>,
         nations: Vec<String>,
         content_hash: u64,
+        map_hash: Option<u64>,
     },
     Rejected(String),
     Goodbye(String),
@@ -187,6 +188,7 @@ fn decode(frame: &[u8]) -> Got {
                 .map(|n| n.iter().map(|n| n.key().unwrap_or_default().to_owned()).collect())
                 .unwrap_or_default(),
             content_hash: w.content_hash(),
+            map_hash: defs.map_hash(),
         };
     }
     if let Some(r) = msg.payload_as_rejected() {

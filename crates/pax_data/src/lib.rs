@@ -13,11 +13,13 @@
 //! platform-dependent values (DECISIONS.md D3).
 
 pub mod golden;
+pub mod map;
 mod schema;
 
 #[cfg(feature = "bench")]
 pub mod bench;
 
+use pax_content::ContentHash;
 use std::collections::BTreeMap;
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -102,32 +104,10 @@ impl DefTexts {
     }
 
     fn hash_into(&self, h: &mut ContentHash) {
-        h.file("goods.toml", &self.goods);
-        h.file("professions.toml", &self.professions);
-        h.file("production.toml", &self.production);
-        h.file("rules.toml", &self.rules);
-    }
-}
-
-/// Identifies a scenario's content: FNV-1a over every file the loader reads, each
-/// keyed by its role (not its path, so moving a directory changes nothing).
-///
-/// The server sends it in `Welcome` (D22), and the client compares it with its own
-/// copy, so labels and map assets can't silently disagree with the server's data. It
-/// identifies content only; it is not simulation state.
-struct ContentHash(pax_engine::hash::StateHasher);
-
-impl ContentHash {
-    fn new() -> Self {
-        ContentHash(pax_engine::hash::StateHasher::default())
-    }
-
-    /// Length-prefixed, so ("ab", "c") and ("a", "bc") hash differently.
-    fn file(&mut self, role: &str, text: &str) {
-        for part in [role, text] {
-            self.0.u64(part.len() as u64);
-            self.0.bytes(part.as_bytes());
-        }
+        h.file("goods.toml", self.goods.as_bytes());
+        h.file("professions.toml", self.professions.as_bytes());
+        h.file("production.toml", self.production.as_bytes());
+        h.file("rules.toml", self.rules.as_bytes());
     }
 }
 
@@ -143,9 +123,13 @@ pub struct Scenario {
     pub world: World,
     /// Commands to apply during the run (empty if the scenario has none).
     pub commands: CommandLog,
-    /// FNV-1a over the scenario, definition and command files, each keyed by its role.
-    /// Sent to clients in `Welcome` (D22) so their labels and map match this data.
+    /// Identifies the scenario's content: `pax_content`'s hash over every file
+    /// the loader reads, each keyed by its role (not its path, so moving a directory
+    /// changes nothing). It goes in `Welcome` and in saves (D22, D23). It identifies
+    /// content only; it is not simulation state.
     pub content_hash: u64,
+    /// The province map, if the scenario names one (`map = "…"`, M3-7).
+    pub map: Option<map::MapData>,
 }
 
 /// Commands keyed by the day at whose start they apply (D21). Within a day,
@@ -216,19 +200,27 @@ pub fn load_scenario(dir: &Path) -> Result<Scenario, LoadError> {
     let scenario: ScenarioFile = parse("scenario.toml", &text)?;
     let defs_dir: PathBuf = dir.join(&scenario.data);
     let def_texts = DefTexts::read(&defs_dir)?;
-    let mut hash = ContentHash::new();
-    hash.file("scenario.toml", &text);
+    let mut hash = ContentHash::default();
+    hash.file("scenario.toml", text.as_bytes());
     def_texts.hash_into(&mut hash);
     let world = build_world(Arc::new(def_texts.parse()?), &scenario)?;
     let commands = match &scenario.commands {
         Some(file) => {
             let commands = read(&dir.join(file))?;
-            hash.file("commands", &commands);
+            hash.file("commands", commands.as_bytes());
             parse_commands(&world, &commands)?
         }
         None => CommandLog::default(),
     };
-    Ok(Scenario { name: scenario.name, world, commands, content_hash: hash.0.finish() })
+    let map = match &scenario.map {
+        Some(map_dir) => {
+            let (map, files) = map::load(&dir.join(map_dir), &world)?;
+            files.hash_into(&mut hash);
+            Some(map)
+        }
+        None => None,
+    };
+    Ok(Scenario { name: scenario.name, world, commands, content_hash: hash.finish(), map })
 }
 
 /// Parses a scenario from text against already-loaded definitions.

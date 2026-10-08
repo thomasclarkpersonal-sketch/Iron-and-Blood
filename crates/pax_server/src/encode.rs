@@ -17,7 +17,11 @@ fn finish(
 }
 
 /// The session's index tables: every id in the protocol indexes one of these (D22).
-fn static_data<'a>(b: &mut FlatBufferBuilder<'a>, world: &World) -> flatbuffers::WIPOffset<wire::StaticData<'a>> {
+fn static_data<'a>(
+    b: &mut FlatBufferBuilder<'a>,
+    world: &World,
+    map_hash: Option<u64>,
+) -> flatbuffers::WIPOffset<wire::StaticData<'a>> {
     let defs = &world.defs;
     let geo = &world.geography;
     let mut keys = |keys: Vec<&str>| {
@@ -53,6 +57,7 @@ fn static_data<'a>(b: &mut FlatBufferBuilder<'a>, world: &World) -> flatbuffers:
             province_market: Some(province_market),
             markets: Some(markets),
             nations: Some(nations),
+            map_hash,
         },
     )
 }
@@ -65,12 +70,14 @@ pub struct WelcomeInfo<'s> {
     pub nation: Option<u32>,
     pub scenario: &'s str,
     pub content_hash: u64,
+    /// The scenario's map files' hash (`StaticData.map_hash`), if it has a map.
+    pub map_hash: Option<u64>,
     pub speed: wire::Speed,
 }
 
 pub fn welcome(world: &World, info: &WelcomeInfo<'_>) -> Vec<u8> {
     let mut b = FlatBufferBuilder::new();
-    let defs = static_data(&mut b, world);
+    let defs = static_data(&mut b, world, info.map_hash);
     let scenario = b.create_string(info.scenario);
     let w = wire::Welcome::create(
         &mut b,

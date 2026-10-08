@@ -13,7 +13,7 @@ Binding rules: D10, D12, D22, D23 in [DECISIONS.md](DECISIONS.md). The wire form
 | 1 | **Client (D12):** Rust GDExtension bridge + GDScript UI; C# fallback if the M3-0 spike fails | ✅ Accepted | M3-8 |
 | 2 | Wire protocol and sessions (D22), FlatBuffers kept (D10) | ✅ Accepted | M3-1 onwards |
 | 3 | Server loop: pacing, flow control, saves (D23) | ✅ Accepted | M3-2, M3-5, M3-6 |
-| 4 | Map data format (part of M3-7) | 📝 Proposed below | M3-7, M3-8 |
+| 4 | Map data format (part of M3-7) | ✅ Done (below) | M3-8 |
 
 ## Relation to Milestone 2
 
@@ -61,22 +61,24 @@ flowchart LR
 | M3-4 ✅ | **Commands over the wire:** decode → permission (sandbox in M3) → `World::validate` → stamp → queue → `step_with`; `CommandResult`; command log of applied commands | M3-2 | Tests: rejected commands change nothing and aren't logged; order within a day is stamp order |
 | M3-5 ✅ | **Pacing:** speeds 1–5 and pause (D23); `ServerState`; flow control (3-update window, coalescing with `skipped`) | M3-3 | Test with a client that never acks: the sim keeps running and the client gets the latest day after acking |
 | M3-6 | **Saves:** `SaveGame`/`LoadGame`/`ListSaves`; save = scenario + content hash + command log + hash checkpoints (D23); load = replay, then verify checkpoints | M3-4 | Measure load time at D13 long-term scale. **If a 20-year save loads in more than 30 s, add binary checkpoints** (D10's open item) before M3 ends |
-| M3-7 | **Map data:** province map image + definition file (format below); `pax_data` validates it against the scenario; a map for `two_states` | — | Can start immediately, in parallel with M3-1 |
+| M3-7 ✅ | **Map data:** province map image + definition file (format below); `pax_data` validates it against the scenario; a map for `two_states` | — | Can start immediately, in parallel with M3-1 |
 | M3-8 | **Godot client:** launches the server (NETWORK_PROTOCOL §6); map with map modes (political, population, unemployment, life needs, militancy, price of a good); top bar (date, speed, pause); nation panel with the three policy sliders; market panel; province panel; save/load menu; connection-lost screen; debug overlay showing `state_hash` | M3-0, M3-3 to M3-7 | Map rendering: one province-ID texture plus a small per-province colour lookup texture updated from `MapView` (a shader), so a map-mode change rewrites one small texture |
 | M3-9 | **Session replay test:** a scripted headless Rust client plays a session (commands on several days, speed changes, a save), then `pax_cli run` with the save's log must reproduce the server's final `state_hash` | M3-6 | Runs in CI. It is the determinism gate for the server |
 | M3-10 | **Hostile input:** fuzz the frame reader and message handling; the server closes the session and never panics | M3-2 | `cargo fuzz` target, run in CI for a fixed budget |
 | M3-11 | **Docs:** ARCHITECTURE (crates, processes), BACKEND_SCHEMA (API boundary), DATA_FORMAT (map files, save files), ONBOARDING (how to run the server and client), this file's status | all | Same PR as the code, per AGENTS.md §8 |
 
-### Map data format (proposed for M3-7)
+### Map data format (done in M3-7)
+
+Provinces belong to scenarios, so maps do too: a scenario names its map directory (`map = "map"` in `scenario.toml`), and `scenarios/two_states/map/` is the first one. The format is in [DATA_FORMAT.md](DATA_FORMAT.md#province-map-map-m3-7).
 
 | File | Content |
 |---|---|
-| `data/map/provinces.png` | Every province is one unique RGB colour. Lossless, no anti-aliasing |
-| `data/map/provinces.toml` | `[[province]] key = "...", color = [r, g, b], label = [x, y]`, one entry per province key in the scenario |
+| `provinces.png` | Every province painted in one unique colour (8-bit RGB or RGBA, no anti-aliasing), on an optional background colour (sea) |
+| `provinces.toml` | `background = [r, g, b]`; per province `key`, `color = [r, g, b]`, `label = [x, y]` |
 
-- `pax_data` checks it at load: every scenario province has exactly one colour, no colour is used twice, and every colour in the image is listed.
-- The engine never reads the image. Adjacency, needed later for military movement and migration across markets, is **pre-computed** from the image by a tool and stored in `data/map/adjacency.toml` (AGENTS.md §5). It is not computed during the tick.
-- The content hash in `Welcome` covers these files, so client and server always agree on the map.
+- **Validation:** `pax_data` checks the map at load. Every scenario province must be listed once with a unique colour, every pixel must be a listed colour or the background, and every province must own at least one pixel with its label on its own pixels.
+- **The engine never reads the image.** Adjacency, needed later for military movement and migration across markets, will be **pre-computed** from the image by a tool (AGENTS.md §5), never computed during the tick.
+- **Map hash:** `StaticData.map_hash` is `pax_content::map_hash` of the two files (a dependency-free crate both sides link), so the client can check its own copy of the map with the server's exact function. `Welcome.content_hash` covers every file, maps included (D22).
 
 ## Definition of done
 
