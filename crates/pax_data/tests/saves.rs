@@ -134,3 +134,19 @@ fn a_save_cannot_name_its_snapshot_file() {
     std::fs::write(&path, text.replace("snapshot_hash", "snapshot = \"/etc/passwd\"\nsnapshot_hash")).unwrap();
     assert!(error(load(&path)).contains("snapshot"), "an unknown field is refused");
 }
+
+/// Saving over an existing save that then fails (here the TOML can't be written)
+/// leaves the old save loadable, and no temporary files behind.
+#[test]
+fn a_failed_overwrite_keeps_the_previous_save() {
+    let dir = TempDir::new("save-overwrite");
+    let path = dir.0.join("g.toml");
+    let (s0, save0) = played(3);
+    save0.write(&path, &s0.world).unwrap();
+    let (s1, save1) = played(5);
+    std::fs::create_dir(path.with_extension("toml.tmp")).unwrap(); // the TOML write will fail
+    assert!(save1.write(&path, &s1.world).is_err());
+    std::fs::remove_dir(path.with_extension("toml.tmp")).unwrap();
+    assert!(!path.with_extension("world.tmp").exists(), "the snapshot's temporary file is removed");
+    assert_eq!(load(&path).unwrap().scenario.world.state_hash(), s0.world.state_hash());
+}

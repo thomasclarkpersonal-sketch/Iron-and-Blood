@@ -192,7 +192,7 @@ rate = 0.150000
   - any command is invalid by the engine's rule (`World::validate`, D21), out of day order, or not before `day`;
   - the checkpoints aren't exactly the checkpoint days up to `day`;
   - `day` is a checkpoint day and its checkpoint differs from `snapshot_hash`;
-  - the snapshot is missing or damaged, isn't of `day` with `snapshot_hash`, or its scenario tables differ from the scenario's.
+  - the snapshot is missing or damaged, isn't of `day` with `snapshot_hash`, its scenario tables differ from the scenario's, or it breaks the engine's table rules (`World::check_tables`).
 
   `LoadGame` doesn't replay, so beyond these checks it trusts the log.
 - **Replaying** (`pax_data::save::load_by_replay`, D23) makes the same checks, then re-applies the log, and refuses the save if any checkpoint, or the end state, differs.

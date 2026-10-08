@@ -3,8 +3,9 @@
 //!
 //! [`Game`] owns the world, which is read-only from outside. Every method that
 //! changes the world appends what applied to the log, records the D23 checkpoints
-//! and rebuilds [`Today`] in the same step. So a world change that isn't logged, or that leaves the views stale,
-//! can't be written (AGENTS.md §1, D7). Saves are built from this log (D23).
+//! and rebuilds [`Today`] in the same step. So a world change that isn't logged, or
+//! that leaves the views stale, can't be written (AGENTS.md §1, D7). Saves are built
+//! from this log (D23).
 
 use pax_data::save::{CHECKPOINT_DAYS, Checkpoint, SaveData, SavedCommand};
 use pax_data::{DayStep, Scenario};

@@ -135,18 +135,31 @@ impl SaveData {
         out
     }
 
-    /// Writes `<name>.world` (the snapshot of `world`, which must be on `self.day`),
-    /// then `<name>.toml` with its hash. Both writes are atomic, and the TOML is
-    /// written last, so a reader never sees a save whose snapshot isn't complete.
+    /// Writes `<name>.world` (the snapshot of `world`, which must be on `self.day`)
+    /// and `<name>.toml` with its hash.
+    ///
+    /// Both files are written in full to temporary names before either replaces
+    /// anything. So a failed write, such as a full disk, leaves an existing save of
+    /// that name intact, and its temporary files are removed. Only then are they
+    /// renamed into place, snapshot first. A reader can see the new snapshot next to
+    /// the old TOML only if the second rename fails, and that load is refused (the
+    /// hashes differ), never silently wrong.
     pub fn write(&self, path: &Path, world: &World) -> std::io::Result<()> {
         assert_eq!(world.day, self.day, "a save's snapshot is of the saved day");
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir)?;
         }
-        let hash = crate::snapshot::write(&snapshot_path(path), world, self.content_hash)?;
-        let tmp = path.with_extension("toml.tmp");
-        std::fs::write(&tmp, self.to_toml(world, Some(hash)))?;
-        std::fs::rename(&tmp, path)
+        let snapshot = snapshot_path(path);
+        let (snapshot_tmp, toml_tmp) = (path.with_extension("world.tmp"), path.with_extension("toml.tmp"));
+        let written = crate::snapshot::write(&snapshot_tmp, world, self.content_hash)
+            .and_then(|hash| std::fs::write(&toml_tmp, self.to_toml(world, Some(hash))));
+        if let Err(e) = written {
+            let _ = std::fs::remove_file(&snapshot_tmp);
+            let _ = std::fs::remove_file(&toml_tmp);
+            return Err(e);
+        }
+        std::fs::rename(&snapshot_tmp, &snapshot)?;
+        std::fs::rename(&toml_tmp, path)
     }
 }
 
@@ -289,13 +302,13 @@ fn load_with(path: &Path, replay: bool) -> Result<LoadedSave, LoadError> {
 
     let snapshot = snapshot_hash.map(|hash| (snapshot_path(path), hash));
     if !replay && let Some((snapshot_path, hash)) = &snapshot {
-        let world = crate::snapshot::read(snapshot_path, &scenario.world, content_hash)?;
-        if world.day != file.day || world.state_hash() != *hash {
+        // `read` verified the world against the hash it recorded: no second pass.
+        let (world, verified) = crate::snapshot::read(snapshot_path, &scenario.world, content_hash)?;
+        if world.day != file.day || verified != *hash {
             return Err(LoadError::single(format!(
-                "{} is not this save's snapshot (day {}, hash {:#018x}; the save expects day {} and {hash:#018x})",
+                "{} is not this save's snapshot (day {}, hash {verified:#018x}; the save expects day {} and {hash:#018x})",
                 snapshot_path.display(),
                 world.day,
-                world.state_hash(),
                 file.day
             )));
         }

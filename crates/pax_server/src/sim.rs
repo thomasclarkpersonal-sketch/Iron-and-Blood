@@ -265,8 +265,18 @@ impl Sim {
         self.send(session, Outbound::Frame(encode::save_result(&label, &error)));
     }
 
+    /// The saves in the saves directory. A missing directory means no saves yet; any
+    /// other IO error is logged (`SaveList` has no error field) and lists none.
     fn list_saves(&self, session: u64) {
-        let mut names: Vec<String> = std::fs::read_dir(&self.saves_dir)
+        let entries = match std::fs::read_dir(&self.saves_dir) {
+            Ok(entries) => Some(entries),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+            Err(e) => {
+                tracing::warn!(dir = %self.saves_dir.display(), error = %e, "cannot list saves");
+                None
+            }
+        };
+        let mut names: Vec<String> = entries
             .into_iter()
             .flatten()
             .filter_map(|entry| {
@@ -782,7 +792,8 @@ mod tests {
         let before = sim.game.world().state_hash();
         request(&mut sim, Request::LoadGame { name: Some("t".into()) });
         match drain(&mut rx).as_slice() {
-            [Sent::Saved { error, .. }] => assert!(error.contains("hash"), "{error}"),
+            // Caught by the engine's table rules (the basket no longer sums to 1).
+            [Sent::Saved { error, .. }] => assert!(error.contains("table rule"), "{error}"),
             other => panic!("{other:?}"),
         }
         assert_eq!(sim.game.world().state_hash(), before);

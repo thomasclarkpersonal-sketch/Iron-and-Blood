@@ -216,6 +216,7 @@ All parsing lives in `pax_data`, so the format can change without touching the e
   - The FlatBuffers schema was already written, compiled and measured.
 - **Binary save format** (decided in M3-6b, as D23 scheduled once replay proved too slow): a versioned, little-endian, column-by-column dump of the `World` (`pax_data::snapshot`, magic `PAXW`).
   - It is written next to each save, and loading reads it instead of replaying.
+  - Restoring it runs the engine's table rules (`World::check_tables`), so a crafted file can't put the engine in an impossible state.
   - It stores no definitions; those come from the scenario, whose content hash must match.
   - A loaded snapshot must reproduce the state hash it recorded, so it can only restore exactly what was written.
   - The writer names every column of every table, so a new column fails to compile until the format carries it.
@@ -433,7 +434,8 @@ The state → national → sphere → global roll-up in the old ECONOMY_SYSTEM w
 - **Load time:** replay runs at tick speed, about 35 ms per day at the D13 long-term scale, so roughly 4 minutes for a 20-year game. That is over the 30-second limit, so each save also writes a binary snapshot of the saved day (D10, M3-6b).
   - Loading reads the snapshot. Measured at 990k POP rows / 3,000 markets: 40 MB, written in 83 ms, loaded and verified in 51 ms, at any game length.
   - The snapshot is always `<name>.world` next to `<name>.toml`, derived from the save's own name and never read from the file, so a save can't point the loader at another file. The TOML records only its `snapshot_hash`.
-  - The snapshot's scenario tables (geography, nation keys, seed) must equal the scenario's, and every id column must refer to an existing row. A crafted file is refused, never trusted.
+  - The snapshot's scenario tables (geography, nation keys, seed) must equal the scenario's, and the restored world must pass the engine's table rules (`World::check_tables`: lengths, ids, signs, rates; BACKEND_SCHEMA). The state hash is no defence against a crafted file, because its author can recompute it, so the rules are what refuse one.
+  - Saving over an existing save writes both new files to temporary names first. A failed save (a full disk, say) leaves the old one loadable.
   - A missing or damaged snapshot is an error, never a silent fallback to replay.
 
 ## D24. Multiplayer authority

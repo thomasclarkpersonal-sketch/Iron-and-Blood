@@ -104,6 +104,9 @@ fn step_systems(world: &mut World) -> DayReport {
 
     let money_after = world.total_money();
     assert_eq!(money_before, money_after, "money not conserved on day {}", world.day);
+    // Every system keeps the table invariants a restored world is checked against
+    // (`World::check_tables`). Debug builds prove it on every day of every test.
+    debug_assert_eq!(world.check_tables(), Ok(()), "a table invariant broke on day {}", world.day);
     let day = world.day;
     world.day += 1;
     DayReport {
