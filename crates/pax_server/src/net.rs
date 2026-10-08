@@ -193,10 +193,11 @@ impl std::fmt::Display for ReadError {
 /// that never finishes one can't hold a task forever.
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// How many connection tasks are running. When the server stops, the sim queues a
-/// `Goodbye` and `Close` for every session; `Server::wait` waits (briefly) for this
-/// to reach zero, so those tasks write it before the runtime is dropped, which
-/// would otherwise cancel them with the `Goodbye` unsent.
+/// How many sessions' connection tasks are running (a TLS connection counts once
+/// its handshake succeeded). When the server stops, the sim queues a `Goodbye` and
+/// `Close` for every session; `Server::wait` stops accepting, then waits (at most
+/// 1 s) for this to reach zero, so those tasks write it before the runtime is
+/// dropped, which would otherwise cancel them with the `Goodbye` unsent.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct OpenConnections(Arc<std::sync::atomic::AtomicUsize>);
 
@@ -241,21 +242,24 @@ pub(crate) async fn accept_loop(
                 // `to_canonical`: on a dual-stack socket, a local IPv4 client is ::ffff:127.0.0.1.
                 let remote = !peer.ip().to_canonical().is_loopback();
                 let sim = sim.clone();
-                let guard = open.open();
+                // Counted once it is a session, which a Goodbye can reach: a pending
+                // or failed TLS handshake never holds up a shutdown.
                 match tls.clone() {
                     None => {
                         info!(session, %peer, "connection");
+                        let guard = open.open();
                         tokio::spawn(async move {
                             let _guard = guard;
                             connection(stream, session, sim, timing, remote).await
                         });
                     }
                     Some(acceptor) => {
+                        let open = open.clone();
                         tokio::spawn(async move {
-                            let _guard = guard;
                             match tokio::time::timeout(HANDSHAKE_TIMEOUT, acceptor.accept(stream)).await {
                                 Ok(Ok(stream)) => {
                                     info!(session, %peer, "connection");
+                                    let _guard = open.open();
                                     connection(stream, session, sim, timing, remote).await
                                 }
                                 // A port probe, such as the Docker health check (M4-8),
