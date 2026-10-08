@@ -28,7 +28,7 @@ Following Samuelson (1954), shipping is modelled as an "iceberg": a fraction `τ
 *   Trade flows from A to B only when `p_B·(1 − τ_AB) − tariff_AB > p_A` (D14).
 
 > [!TIP]
-> **Pathfinding performance:** never run Dijkstra or A* during the tick. Pre-compute the friction matrix `τ` between all market nodes when the game loads, and rebuild only the affected rows when infrastructure changes. Route lookups during the tick are then O(1) (AGENTS.md §5).
+> **Pathfinding performance:** never run Dijkstra or A* during the tick. Pre-compute the friction matrix `τ` between all market nodes when the game loads, and rebuild only the affected rows when infrastructure changes. Route lookups during the tick are then O(1) (AGENTS.md §5). Military supply lines (M2+, [MILITARY_SYSTEM.md](MILITARY_SYSTEM.md)) follow the same rule: their connectivity is rebuilt on discrete events (control changes, blockades, infrastructure), never per tick.
 
 ### Infrastructure types
 Infrastructure lowers `τ` on the links it serves and raises their capacity (the maximum flow per day).

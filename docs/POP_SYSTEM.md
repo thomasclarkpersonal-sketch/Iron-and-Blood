@@ -17,6 +17,22 @@ POPs are rows in the `Pops` table ([BACKEND_SCHEMA.md](BACKEND_SCHEMA.md#pops)).
 *   **Life needs:** subsistence satisfaction `[0, 1]` from the last market day.
 *   *M2:* **Literacy** (promotion chance, research), **Militancy** (likelihood of rebelling) and **Consciousness** (demand for reforms). All are `Fixed`, never floats (D3).
 
+### 💼 Planned (M2+): Workforce Composition and Labor Laws
+
+> [!NOTE]
+> **Status: planned, not implemented.** Today a POP has one `size` (above), and D2, D7, D18 and D20 are defined on it. Before this is built it needs a decision (a new `D#`): how `size` relates to the columns below (for example `size = workforce_male + workforce_female + dependents`), which column D2's demand, D7's splits and merges, demographics and the D18/D20 labour pools each read, and how a law change moves people between columns under D7's largest-remainder rule. It must also say whether mobilization ([MILITARY_SYSTEM.md](MILITARY_SYSTEM.md)) draws conscripts only from `workforce_male`, and how the split POP's cash is shared when conscripts leave (D7).
+
+The planned split of a POP's size:
+*   `workforce_male`: Adult men available for employment or conscription.
+*   `workforce_female`: Adult women available for employment (varies heavily by social laws).
+*   `dependents`: Children, elderly, and non-working spouses. Dependents consume goods but do not work.
+
+To maintain strict performance budgets (D13), we do not track separate POPs for children or working women. Instead, social dynamics are handled via **Effective Workforce** calculations based on national laws:
+
+*   **Child Labor:** If legal, factories are permitted to hire a percentage of the `dependents` column. This artificially boosts the nation's industrial throughput and the POP's household income. However, during the demographic tick, working children incur a massive penalty to the POP's **Literacy** growth and a slight increase in dependent mortality. 
+*   **The Reform Shock:** Passing "Compulsory Schooling" or outlawing child labor instantly removes those dependents from the effective workforce. This creates a fascinating historical dilemma: reforming labor laws causes a sudden, painful economic crash (labor shortages and lower household income) in exchange for the long-term technological dominance driven by high literacy.
+*   **Women in the Workforce:** Similar to WW1 mobilization, laws can gradually shift people from the `dependents` pool into the `workforce_female` pool, unlocking massive industrial reserves when male workers are conscripted to the frontlines.
+
 ## 🔄 POP Lifecycle
 
 ```mermaid
