@@ -66,32 +66,13 @@ var overlay: DebugOverlay
 var save_menu: SaveMenu
 var lost: LostScreen
 
-## Where a multiplayer game is (M4-9): how to reach it again to rejoin with the resume
-## token (D24), and the name and password this player gave.
-class JoinTarget:
-	var host: String
-	var port: int
-	var fingerprint: String
-	var password: String
-	var name: String
-
-	func _init(host_: String, port_: int, fingerprint_: String, password_: String, name_: String) -> void:
-		host = host_
-		port = port_
-		fingerprint = fingerprint_
-		password = password_
-		name = name_
-
-
 ## Whether this connection has had its first Welcome (a later one is a load).
 var _session_started := false
 ## The --smoke or --smoke-host run, or `null`.
 var _smoke: SmokeScript = null
-## A multiplayer session (hosted or joined), and how to reach it again to rejoin with
-## the resume token (D24).
+## A multiplayer session (hosted or joined). How to reach it again, and the resume
+## token, live in the bridge (`PaxClient.rejoin`, D24).
 var _multiplayer := false
-var _join: JoinTarget = null
-var _resume_token := 0
 ## The latest LOBBY_STATE: who is host, and the names `waiting_for` refers to.
 var _last_lobby: Dictionary = {}
 ## The province panel's province, or `null` for none (D22: no sentinels).
@@ -132,7 +113,6 @@ func _unhandled_input(event: InputEvent) -> void:
 		overlay.visible = not overlay.visible
 
 
-## A new session's UI, whatever kind it is.
 ## Starts a session's UI. `rejoining`: the same client reconnects (its hosted game,
 ## if any, lives in it, so it must not be replaced); otherwise a fresh client, and
 ## freeing the old one ends whatever it ran.
@@ -172,63 +152,35 @@ func _start() -> void:
 func _host(players: int, name: String) -> void:
 	_begin(true)
 	_smoke = SmokeHost.new(self) if _flag("--smoke-host") else null
-	var error := client.host_game(_server_path(), _scenario_dir(), OS.get_user_data_dir().path_join("saves"), players)
+	var saves := OS.get_user_data_dir().path_join("saves")
+	var error := client.host_game(_server_path(), _scenario_dir(), saves, players, name)
 	if error != "":
 		return _back_to_start(error)
-	var hosted := client.hosted()
-	_join = JoinTarget.new("127.0.0.1", hosted[PaxKeys.PORT], hosted[PaxKeys.FINGERPRINT], "", name)
-	lobby.set_hosting(hosted)
+	lobby.set_hosting(client.hosted())
 	_hello(null)
 
 
 ## Joins a game elsewhere (M4-9) over TLS, pinned to the fingerprint the host shared.
 func _join_game(host: String, port: int, fingerprint: String, password: String, name: String) -> void:
 	_begin(true)
-	_join = JoinTarget.new(host, port, fingerprint, password, name)
-	var error := _connect_join()
+	# The map comes from this client's own copy of the scenario (D12).
+	var error := client.join_game(host, port, fingerprint, password, name, _scenario_dir())
 	if error != "":
 		return _back_to_start(error)
 	_hello(null)
 
 
-## Connects with the saved join details, ready for a hello or a resume.
-func _connect_join() -> String:
-	var error := client.connect_secure(_join.host, _join.port, _join.fingerprint)
-	if error != "":
-		return error
-	# The map comes from this client's own copy of the scenario (D12).
-	client.set_scenario_dir(_scenario_dir())
-	if _join.password != "":
-		client.set_password(_join.password)
-	return ""
-
-
 func _hello(nation: Variant) -> void:
-	var error := _send_name()
-	if error == "":
-		error = client.hello(nation)
+	var error := client.hello(nation)
 	if error != "":
 		_connection_lost(error)
 
 
-## The player's name for the next hello or resume, if they gave one; an error, or "".
-func _send_name() -> String:
-	if _join == null or _join.name == "":
-		return ""
-	return client.set_name(_join.name)
-
-
-## Rejoins a multiplayer game after a drop: the same server, with the resume token
-## that reclaims the seat and its nation (D24).
+## Rejoins a multiplayer game after a drop: the bridge reconnects the way it first
+## joined and sends the resume token, which reclaims the seat and its nation (D24).
 func _rejoin() -> void:
-	var token := _resume_token
 	_begin(true, true)
-	var error := _connect_join()
-	if error != "":
-		return _connection_lost(error)
-	error = _send_name()
-	if error == "":
-		error = client.resume(token)
+	var error := client.rejoin()
 	if error != "":
 		_connection_lost(error)
 
@@ -255,7 +207,6 @@ func _handle(event: Dictionary) -> void:
 			if reload:
 				# A load replaced the game (D23): its tables may differ, so start afresh.
 				_reset_session()
-			_resume_token = welcome[PaxKeys.RESUME_TOKEN]
 			if _multiplayer:
 				lobby.set_session(welcome)
 			top_bar.set_session(welcome)
@@ -415,7 +366,7 @@ func select_province(province: int) -> void:
 func _connection_lost(reason: String) -> void:
 	# A multiplayer seat waits for its resume token (D24): the player can rejoin.
 	var hosting := client != null and not client.hosted().is_empty()
-	lost.show_reason(reason, _multiplayer and _resume_token != 0, hosting)
+	lost.show_reason(reason, _multiplayer and client != null and client.can_rejoin(), hosting)
 	save_menu.visible = false
 	lobby.visible = false
 	var shot := _arg("--screenshot=")

@@ -280,9 +280,38 @@ pub struct LocalServer {
     child: Child,
     /// Where this machine reaches it (loopback).
     pub addr: SocketAddr,
-    /// A hosted game's TLS certificate SHA-256, normalised, for the players the host
-    /// invites (M4-6): always there for [`Self::host`], `None` for [`Self::launch`].
-    pub fingerprint: Option<String>,
+}
+
+/// A game this client hosts (M4-9): the server, and its TLS certificate's SHA-256
+/// (normalised), which the host shares with the players it invites (M4-6).
+#[derive(Debug)]
+pub struct HostedServer {
+    pub server: LocalServer,
+    pub fingerprint: String,
+}
+
+/// How to reach a multiplayer game over TLS (D24, M4-6, M4-9): its address, the
+/// pinned fingerprint, and what the player gave. The bridge keeps the last one, so
+/// a rejoin replays the whole handshake in Rust, the same way as the first time.
+#[derive(Clone, Debug)]
+pub struct JoinTarget {
+    pub addr: SocketAddr,
+    pub fingerprint: String,
+    pub password: Option<String>,
+    pub name: Option<String>,
+}
+
+impl JoinTarget {
+    /// Connects over TLS pinned to the fingerprint, with the password and the name
+    /// set for the next `hello` or `resume`.
+    pub fn connect(&self, timeout: Duration) -> std::io::Result<Connection> {
+        let mut c = Connection::connect_tls(self.addr, timeout, &self.fingerprint)?;
+        c.set_password(self.password.clone());
+        if let Some(name) = &self.name {
+            c.set_name(name.clone());
+        }
+        Ok(c)
+    }
 }
 
 impl LocalServer {
@@ -291,20 +320,32 @@ impl LocalServer {
     pub fn launch(server: &Path, scenario: &Path, saves: &Path) -> Result<LocalServer, String> {
         // Single player plays sandbox (any nation), which a server allows only with
         // --sandbox (D24).
-        LocalServer::start(server, scenario, saves, &["--bind", "127.0.0.1:0", "--sandbox"], Tls::None)
+        let (server, _) =
+            LocalServer::start(server, scenario, saves, &["--bind", "127.0.0.1:0", "--sandbox"], Tls::None)?;
+        Ok(server)
     }
 
     /// Starts `server` as a player-hosted multiplayer game for `players` (M4-9):
     /// reachable from other machines on a free port, over TLS with a fresh
     /// certificate (D24, M4-6). Its fingerprint comes back for the host to share.
-    pub fn host(server: &Path, scenario: &Path, saves: &Path, players: u16) -> Result<LocalServer, String> {
+    pub fn host(server: &Path, scenario: &Path, saves: &Path, players: u16) -> Result<HostedServer, String> {
         let players = players.to_string();
-        LocalServer::start(server, scenario, saves, &["--bind", "0.0.0.0:0", "--players", &players], Tls::SelfSigned)
+        let args = ["--bind", "0.0.0.0:0", "--players", &players];
+        let (server, fingerprint) = LocalServer::start(server, scenario, saves, &args, Tls::SelfSigned)?;
+        let fingerprint = fingerprint.expect("start reads a TLS server's fingerprint or fails");
+        Ok(HostedServer { server, fingerprint })
     }
 
     /// `tls` decides both the server's TLS flags and whether a fingerprint is read
     /// back: one switch, so the two can't disagree.
-    fn start(server: &Path, scenario: &Path, saves: &Path, args: &[&str], tls: Tls) -> Result<LocalServer, String> {
+    /// Returns the server and, with TLS, its fingerprint.
+    fn start(
+        server: &Path,
+        scenario: &Path,
+        saves: &Path,
+        args: &[&str],
+        tls: Tls,
+    ) -> Result<(LocalServer, Option<String>), String> {
         let port_file = port_file_path();
         let fingerprint_file = port_file.with_extension("fingerprint");
         let _ = std::fs::remove_file(&port_file);
@@ -343,7 +384,7 @@ impl LocalServer {
                         fingerprint
                     }
                 };
-                return Ok(LocalServer { child, addr: SocketAddr::from(([127, 0, 0, 1], port)), fingerprint });
+                return Ok((LocalServer { child, addr: SocketAddr::from(([127, 0, 0, 1], port)) }, fingerprint));
             }
             if let Ok(Some(status)) = child.try_wait() {
                 return Err(format!("the server exited before it was ready ({status})"));

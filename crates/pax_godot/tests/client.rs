@@ -10,7 +10,7 @@ use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use pax_godot::connection::{Connection, LocalServer};
+use pax_godot::connection::{Connection, JoinTarget, LocalServer};
 use pax_godot::decode::{SaveRequest, ServerEvent};
 use pax_godot::encode::Policy;
 use pax_protocol::wire::{CommandError, MapMode, Speed};
@@ -271,4 +271,57 @@ fn a_session_over_tls_pinned_to_the_servers_certificate() {
     };
     assert!(reason.contains("not the one its fingerprint names"), "{reason}");
     assert!(Connection::connect_tls(addr, Duration::from_secs(5), "not hex").is_err());
+}
+
+/// M4-9: a dropped player rejoins the way it first joined (`JoinTarget`, which
+/// `PaxClient.rejoin` replays): the same pinned TLS and name, and the resume token
+/// from its `Welcome`, reclaim its seat and nation in the started game (D24).
+#[test]
+fn a_dropped_player_rejoins_with_its_join_target() {
+    let dir = TempDir::new("rejoin");
+    let server = tls_server(&dir);
+    let addr = std::net::SocketAddr::from(([127, 0, 0, 1], server.port));
+    let target = |name: &str| JoinTarget {
+        addr,
+        fingerprint: server.fingerprint.clone(),
+        password: None,
+        name: Some(name.to_owned()),
+    };
+    let welcome = |c: &mut Tester| {
+        let ServerEvent::Welcome(w) = c.wait_for(|e| matches!(e, ServerEvent::Welcome(_))) else { unreachable!() };
+        w
+    };
+    // The host first (the first player is host, D24), then the guest.
+    let mut host = Tester::new(target("ada").connect(Duration::from_secs(5)).unwrap());
+    host.hello(Some(0));
+    welcome(&mut host);
+    let guest_target = target("bo");
+    let mut guest = Tester::new(guest_target.connect(Duration::from_secs(5)).unwrap());
+    guest.hello(Some(1));
+    let w = welcome(&mut guest);
+    let (player, token) = (w.player, w.resume_token);
+    assert_ne!(token, 0, "a multiplayer Welcome carries a resume token");
+    host.set_ready(true);
+    guest.set_ready(true);
+    host.wait_for(|e| {
+        matches!(e, ServerEvent::LobbyState { players, .. }
+            if players.len() == 2 && players.iter().all(|p| p.ready)
+                && players.iter().any(|p| p.name == "bo"))
+    });
+    host.start_game();
+    guest.wait_for(|e| matches!(e, ServerEvent::LobbyState { started: true, .. }));
+
+    // The guest drops; its seat waits for the token.
+    drop(guest);
+    host.wait_for(|e| {
+        matches!(e, ServerEvent::LobbyState { players, .. } if players.iter().any(|p| p.player == player && p.away))
+    });
+    let mut back = Tester::new(guest_target.connect(Duration::from_secs(5)).unwrap());
+    back.resume(token);
+    let w = welcome(&mut back);
+    assert_eq!((w.player, w.nation), (player, Some(1)), "the same seat and nation");
+    host.wait_for(|e| {
+        matches!(e, ServerEvent::LobbyState { players, .. }
+            if players.iter().any(|p| p.player == player && !p.away && p.name == "bo"))
+    });
 }
