@@ -2,6 +2,10 @@
 // Rules for every change: docs/NETWORK_PROTOCOL.md, "Schema evolution".
 // In short: add fields only at the end of a table, deprecate instead of
 // deleting, add union members only at the end, never renumber an enum.
+//
+// Ids are `uint` indices into the Welcome's StaticData (player ids are `ushort`).
+// "None" is an absent optional scalar (`field: uint = null`), never a sentinel
+// such as -1.
 
 namespace pax.net;
 

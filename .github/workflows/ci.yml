@@ -31,6 +31,14 @@ jobs:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+      - name: Generated protocol code is up to date (D22)
+        run: |
+          scripts/gen-protocol.sh
+          if [ -n "$(git status --porcelain -- crates/pax_protocol/src/generated)" ]; then
+            git status --short -- crates/pax_protocol/src/generated
+            echo "::error::crates/pax_protocol/src/generated is out of date with schemas/. Run scripts/gen-protocol.sh and commit the result."
+            exit 1
+          fi
       - run: cargo fmt --all --check
       - run: cargo clippy --all-targets --release -- -D warnings
       - name: Rustdoc (no broken links)

@@ -27,8 +27,8 @@ M4 builds on [Milestone 3](MILESTONE_3.md) without replacing it: the same server
 ## Design (D24, proposed)
 
 **Authority.** A session commands at most one nation.
-- The server checks every command's `nation` against the session's nation before `World::validate`, and a mismatch gets `NotPermitted`. Rule validity (D21) and permission are separate checks, in that order.
-- Sandbox mode (`requested_nation = -1`) is refused unless the server runs with `--sandbox`.
+- The server checks every command's `nation` against the session's nation before `World::validate`, and a mismatch gets `NotPermitted`. Permission and rule validity (D21) are separate checks, in that order.
+- Sandbox mode (`Hello` without `requested_nation`) is refused unless the server runs with `--sandbox`.
 
 **Command order.** Commands apply at the start of the next tick in `(day, player, sequence)` order, all three stamped by the server (D10, D22).
 - Today no two players' commands interact, since each changes only its own nation, so the order within a day doesn't affect fairness.

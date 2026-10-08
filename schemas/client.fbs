@@ -10,10 +10,10 @@ table Hello {
   protocol_minor: ushort;
   /// Display name, at most 32 bytes of UTF-8.
   client_name: string;
-  /// Nation to play, as an index into the Welcome's nation table, or -1.
-  /// M3: -1 means sandbox (the session may command every nation).
+  /// Nation to play, as an index into the Welcome's nation table.
+  /// Absent: sandbox, so the session may command every nation (M3 only).
   /// M4: ignored; nations are assigned in the lobby (D24).
-  requested_nation: int = -1;
+  requested_nation: uint = null;
   /// M4: token from an earlier Welcome, to reclaim a dropped session. 0 = new session.
   resume_token: ulong;
 }
@@ -37,10 +37,10 @@ table Subscribe {
   map_mode: MapMode;
   /// Good index for MapMode.Price.
   map_good: ushort;
-  /// Market whose detail to send, or -1.
-  market: int = -1;
-  /// Province whose POPs, labour and producers to send, or -1.
-  province: int = -1;
+  /// Market whose detail to send; absent for none.
+  market: uint = null;
+  /// Province whose POPs, labour and producers to send; absent for none.
+  province: uint = null;
 }
 
 /// The client has finished processing the DayUpdate for `day` (flow control, D23).
