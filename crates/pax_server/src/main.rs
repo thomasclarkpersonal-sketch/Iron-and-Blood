@@ -72,10 +72,8 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> Result<(Config, Option<
     config.scenario = scenario.ok_or("missing --scenario DIR")?;
     // D24's lag rules replace D22's 10 s timeout in multiplayer only.
     if config.max_players > 1 {
-        // `Config::multiplayer` holds the defaults; the flags override them.
-        let defaults = Config::multiplayer(PathBuf::new(), config.max_players);
-        config.idle_timeout = drop_after.unwrap_or(defaults.idle_timeout);
-        config.pause_after = pause_after.or(defaults.pause_after);
+        config.idle_timeout = drop_after.unwrap_or(pax_server::DROP_AFTER);
+        config.pause_after = Some(pause_after.unwrap_or(pax_server::PAUSE_AFTER));
     } else if pause_after.is_some() || drop_after.is_some() {
         return Err("--pause-after and --drop-after are multiplayer settings (--players above 1)".to_owned());
     }
