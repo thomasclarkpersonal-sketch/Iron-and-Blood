@@ -21,23 +21,10 @@ use crate::net::{ConnHandle, Inbound, Outbound};
 use crate::request::{self, Request, WireCommand};
 use crate::sim::Sim;
 
-/// xorshift64*: deterministic noise without a dependency. The same generator is in
-/// `src/hostile.rs` and `tests/hostile.rs`, because a unit-test module can't share
-/// code with integration tests; keep the two in step (and never seed either with 0).
-struct Noise(u64);
+use crate::noise::Noise;
 
+/// What a hostile client would send, on top of the shared generator.
 impl Noise {
-    fn next(&mut self) -> u64 {
-        self.0 ^= self.0 >> 12;
-        self.0 ^= self.0 << 25;
-        self.0 ^= self.0 >> 27;
-        self.0.wrapping_mul(0x2545_F491_4F6C_DD1D)
-    }
-
-    fn below(&mut self, n: u64) -> u64 {
-        self.next() % n
-    }
-
     fn chance(&mut self, one_in: u64) -> bool {
         self.below(one_in) == 0
     }
@@ -124,7 +111,7 @@ fn the_request_decoder_survives_noise_flipped_bytes_and_truncation() {
     for f in &valid {
         assert!(request::decode(f).is_ok(), "the unmodified frames decode");
     }
-    let mut noise = Noise(0x9E37_79B9_7F4A_7C15);
+    let mut noise = Noise::new(0x9E37_79B9_7F4A_7C15);
     let mut decoded = 0;
     for round in 0..40_000u64 {
         let base = &valid[(round % valid.len() as u64) as usize];
@@ -215,7 +202,7 @@ fn the_sim_thread_survives_hostile_requests() {
     config.saves_dir = saves.clone();
     let mut sim = Sim::new(pax_data::load_scenario(&dir).unwrap(), &config);
     let mut receivers: Vec<Receiver<Outbound>> = Vec::new();
-    let mut noise = Noise(0xC0FF_EE00_DEAD_BEEF);
+    let mut noise = Noise::new(0xC0FF_EE00_DEAD_BEEF);
     // Sessions as `net` produces them: a fresh id, `Connected` first, `Closed` last.
     // Within that, anything goes: `net` normally stops a repeated or missing `Hello`,
     // but the sim thread is tested without relying on it.
@@ -231,12 +218,12 @@ fn the_sim_thread_survives_hostile_requests() {
                 next_session += 1;
             }
             1 if !open.is_empty() => {
-                let session = open.swap_remove(noise.below(open.len() as u64) as usize);
+                let session = open.swap_remove(noise.index(open.len()));
                 sim.handle(Inbound::Closed { session });
             }
             2..=5 => sim.tick(),
             _ if !open.is_empty() => {
-                let session = open[noise.below(open.len() as u64) as usize];
+                let session = open[noise.index(open.len())];
                 let request = hostile_request(&mut noise);
                 sim.handle(Inbound::Request { session, request });
             }

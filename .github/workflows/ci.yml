@@ -44,9 +44,10 @@ jobs:
       - name: Crate boundaries (D10, D12, AGENTS.md section 2)
         run: |
           deps() { cargo tree -p "$1" -e normal --prefix none | tail -n +2; }
-          # Clients must not be able to simulate.
+          # Clients must not be able to simulate, not even in their tests (D12): dev
+          # edges count too.
           for crate in pax_protocol pax_godot; do
-            if deps "$crate" | grep -q '^pax_engine '; then
+            if cargo tree -p "$crate" -e normal,dev --prefix none | tail -n +2 | grep -q '^pax_engine '; then
               echo "::error::$crate depends on pax_engine. Clients must not be able to simulate (D10, D12)."
               exit 1
             fi
@@ -73,8 +74,8 @@ jobs:
           fi
       - run: cargo fmt --all --check
       - run: cargo clippy --all-targets --release -- -D warnings
-      - name: Clippy the bridge's demo bindings (the M3-0 spike scene uses them)
-        run: cargo clippy -p pax_godot --features demo --all-targets --release -- -D warnings
+      - name: Clippy the server's fuzzing surface (the nightly fuzz job isn't required)
+        run: cargo clippy -p pax_server --features fuzzing --all-targets --release -- -D warnings
       - name: Rustdoc (no broken links)
         run: cargo doc --no-deps
         env:
@@ -169,6 +170,43 @@ jobs:
           cli=target/release/pax_cli
           if [ -f "$cli.exe" ]; then cli="$cli.exe"; fi
           PAX_CLI="$cli" PAX_CLI_REQUIRED=1 cargo test --release -p pax_server --test session_replay
+
+  client-smoke:
+    # M3-8: the real client, headless. It launches pax_server through the bridge,
+    # plays to day 40 at full speed and quits; any script error, protocol error or
+    # lost connection fails it (client/main.gd, --smoke).
+    name: Client smoke test (headless Godot)
+    runs-on: ubuntu-latest
+    env:
+      GODOT_VERSION: 4.7.2
+      GODOT_SHA256: cadd3204e728a35d3f13adb7fd0d7902636b79f6b95c40c265eb73b6c35329e4
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - uses: Swatinem/rust-cache@v2
+      - name: Build the bridge and the server
+        run: cargo build -p pax_godot -p pax_server
+      - name: Bridge tests against the real server binary (launcher included)
+        run: PAX_SERVER=target/debug/pax_server cargo test -p pax_godot
+      - name: Install Godot ${{ env.GODOT_VERSION }}
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/godot.zip" \
+            "https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable/Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip"
+          echo "${GODOT_SHA256}  $RUNNER_TEMP/godot.zip" | sha256sum -c -
+          unzip -q "$RUNNER_TEMP/godot.zip" -d "$RUNNER_TEMP"
+          mv "$RUNNER_TEMP/Godot_v${GODOT_VERSION}-stable_linux.x86_64" "$RUNNER_TEMP/godot"
+      - name: Import the project
+        # The extension is listed before the first import, so Godot loads it at
+        # startup. Registered mid-scan instead (a fresh project), unloading it at the
+        # import's exit aborts (Godot 4.7.2 + godot-rust 0.5.5; client/README.md).
+        run: |
+          mkdir -p client/.godot
+          echo "res://pax_godot.gdextension" > client/.godot/extension_list.cfg
+          timeout 300 "$RUNNER_TEMP/godot" --headless --path client --import
+      - name: Smoke test
+        run: timeout 180 "$RUNNER_TEMP/godot" --headless --path client -- --smoke | tee smoke.log && grep -q "SMOKE OK" smoke.log
 
   fuzz:
     # M3-10: coverage-guided fuzzing of the client frame reader, for a fixed budget.

@@ -75,6 +75,16 @@ pub const PROTOCOL_MAJOR: u16 = 1;
 /// Protocol minor version: bumped for compatible additions (NETWORK_PROTOCOL §8).
 pub const PROTOCOL_MINOR: u16 = 0;
 
+/// How long the server waits for any message before it ends a silent session (D22).
+/// Clients send a `Ping` well within it; the client's bridge derives its keep-alive
+/// from this, so the two can't drift apart.
+pub const IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// The scale of `wire::Fixed`: its `raw` is the value × `FIXED_ONE` (D3), the same as
+/// `pax_engine::Fixed`. `pax_server`'s tests pin the two together; the client converts
+/// only through this.
+pub const FIXED_ONE: i64 = 1_000_000;
+
 /// Largest client→server frame body, in bytes. Client messages are commands and
 /// controls, so 64 KiB is generous; a bigger frame is a protocol error (D22).
 pub const MAX_CLIENT_FRAME: usize = 64 * 1024;

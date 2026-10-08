@@ -22,18 +22,21 @@ mod game;
 #[cfg(test)]
 mod hostile;
 mod net;
+#[cfg(test)]
+mod noise;
 mod queue;
 mod request;
 mod sim;
 mod view;
 mod window;
 
-/// The request decoder, for the cargo-fuzz target only (`fuzz/`, M3-10): it fuzzes
-/// exactly what a connection task runs on every frame.
+/// A connection task's input side, for the cargo-fuzz target only (`fuzz/`, M3-10):
+/// it fuzzes exactly what a connection runs on its socket's bytes.
 #[cfg(feature = "fuzzing")]
 #[doc(hidden)]
 pub mod fuzzing {
-    pub use crate::request::{Request, RequestError, decode};
+    pub use crate::net::RequestReader;
+    pub use crate::request::Request;
 }
 
 use std::net::SocketAddr;
@@ -64,7 +67,7 @@ impl Config {
         Config {
             scenario: scenario.into(),
             bind: SocketAddr::from(([127, 0, 0, 1], 0)),
-            idle_timeout: Duration::from_secs(10),
+            idle_timeout: pax_protocol::IDLE_TIMEOUT,
             exit_when_idle: false,
             saves_dir: PathBuf::from("saves"),
         }

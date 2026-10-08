@@ -13,11 +13,6 @@ crate-type = ["cdylib", "rlib"]
 
 # Depends on the protocol only, never on pax_engine: the client must not be able to
 # simulate (D10, D12). CI checks this with `cargo tree`.
-[features]
-# The M3-0 spike's demo data (PaxDemo), until pax_server sends real frames. Off in
-# release clients: build the spike with `cargo build -p pax_godot --features demo`.
-demo = []
-
 [dependencies]
 pax_protocol.workspace = true
 flatbuffers.workspace = true

@@ -61,14 +61,40 @@ impl Cmd {
     }
 
     /// The flags the command takes, as in `USAGE`.
-    fn flags(self) -> &'static [&'static str] {
+    fn flags(self) -> &'static [Flag] {
         match self {
-            Cmd::Run => &["--days", "--every", "--market"],
-            Cmd::Record => &["--days"],
-            Cmd::Verify | Cmd::Replay => &["--threads"],
-            Cmd::Bench => &["--days", "--scale", "--regions", "--threads"],
-            Cmd::Report => &["--days", "--every"],
+            Cmd::Run => &[Flag::Days, Flag::Every, Flag::Market],
+            Cmd::Record => &[Flag::Days],
+            Cmd::Verify | Cmd::Replay => &[Flag::Threads],
+            Cmd::Bench => &[Flag::Days, Flag::Scale, Flag::Regions, Flag::Threads],
+            Cmd::Report => &[Flag::Days, Flag::Every],
         }
+    }
+}
+
+/// The flags, parsed once: `Cmd::flags` and `parse_args` both match over this type,
+/// so a flag can't be listed for a command without a parser, or the reverse.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Flag {
+    Days,
+    Every,
+    Scale,
+    Regions,
+    Market,
+    Threads,
+}
+
+impl Flag {
+    fn parse(name: &str) -> Option<Flag> {
+        Some(match name {
+            "--days" => Flag::Days,
+            "--every" => Flag::Every,
+            "--scale" => Flag::Scale,
+            "--regions" => Flag::Regions,
+            "--market" => Flag::Market,
+            "--threads" => Flag::Threads,
+            _ => return None,
+        })
     }
 }
 
@@ -90,21 +116,20 @@ fn parse_args() -> Result<Args, String> {
     let command = Cmd::parse(&name)?;
     let target = PathBuf::from(it.next().ok_or("missing scenario directory (or save file, for replay)")?);
     let mut args = Args { command, target, days: None, every: 30, scale: 1, regions: 1, market: None, threads: None };
-    while let Some(flag) = it.next() {
+    while let Some(text) = it.next() {
         // A flag a command doesn't use is an error, never silently ignored.
-        if !command.flags().contains(&flag.as_str()) {
-            return Err(format!("unknown flag {flag} for {name}"));
-        }
-        let value = it.next().ok_or(format!("{flag} needs a value"))?;
-        let num = |v: &str| v.parse::<u64>().map_err(|_| format!("{flag}: '{v}' is not a number"));
-        match flag.as_str() {
-            "--days" => args.days = Some(num(&value)?),
-            "--every" => args.every = num(&value)?.max(1),
-            "--scale" => args.scale = num(&value)?.max(1) as u32,
-            "--regions" => args.regions = num(&value)?.max(1) as u32,
-            "--market" => args.market = Some(value),
-            "--threads" => args.threads = Some(num(&value)?.max(1) as usize),
-            _ => unreachable!("every flag in Cmd::flags is parsed here"),
+        let flag = Flag::parse(&text)
+            .filter(|f| command.flags().contains(f))
+            .ok_or_else(|| format!("unknown flag {text} for {name}"))?;
+        let value = it.next().ok_or(format!("{text} needs a value"))?;
+        let num = |v: &str| v.parse::<u64>().map_err(|_| format!("{text}: '{v}' is not a number"));
+        match flag {
+            Flag::Days => args.days = Some(num(&value)?),
+            Flag::Every => args.every = num(&value)?.max(1),
+            Flag::Scale => args.scale = num(&value)?.max(1) as u32,
+            Flag::Regions => args.regions = num(&value)?.max(1) as u32,
+            Flag::Market => args.market = Some(value),
+            Flag::Threads => args.threads = Some(num(&value)?.max(1) as usize),
         }
     }
     Ok(args)

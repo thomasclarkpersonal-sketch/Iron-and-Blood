@@ -98,6 +98,43 @@ pub(crate) enum Inbound {
     Crash,
 }
 
+/// The synchronous half of a connection: bytes in, requests out, with the
+/// framing-level session rules (`Hello` first, and only once). The connection task
+/// feeds it the socket; the cargo-fuzz target (`fuzz/`) feeds it fuzzed bytes, so it
+/// fuzzes exactly this code.
+#[derive(Debug)]
+pub struct RequestReader {
+    decoder: FrameDecoder,
+    greeted: bool,
+}
+
+impl Default for RequestReader {
+    fn default() -> Self {
+        RequestReader { decoder: FrameDecoder::new(Direction::ClientToServer), greeted: false }
+    }
+}
+
+impl RequestReader {
+    /// Bytes as they arrived, in any chunking.
+    pub fn push(&mut self, bytes: &[u8]) {
+        self.decoder.push(bytes);
+    }
+
+    /// The next request; `Ok(None)` until more bytes arrive. An error is a protocol
+    /// error that ends the session with `Goodbye` (D22), and its text is the reason.
+    pub fn next_request(&mut self) -> Result<Option<Request>, String> {
+        let Some(frame) = self.decoder.next_frame().map_err(|e| e.to_string())? else { return Ok(None) };
+        let request = request::decode(&frame).map_err(|e| e.to_string())?;
+        match (&request, self.greeted) {
+            (Request::Hello { .. }, false) => self.greeted = true,
+            (Request::Hello { .. }, true) => return Err("Hello sent twice".to_owned()),
+            (_, false) => return Err("the first message must be Hello".to_owned()),
+            (_, true) => {}
+        }
+        Ok(Some(request))
+    }
+}
+
 pub(crate) async fn accept_loop(listener: TcpListener, sim: flume::Sender<Inbound>, idle: Duration) {
     let mut next_session = 1u64;
     loop {
@@ -151,9 +188,8 @@ async fn connection(stream: TcpStream, session: u64, sim: flume::Sender<Inbound>
         }
     });
 
-    let mut decoder = FrameDecoder::new(Direction::ClientToServer);
+    let mut reader = RequestReader::default();
     let mut buf = vec![0u8; 16 * 1024];
-    let mut greeted = false;
     let goodbye: Option<String> = 'read: loop {
         let n = tokio::select! {
             _ = writer_done.notified() => break 'read None,
@@ -164,23 +200,13 @@ async fn connection(stream: TcpStream, session: u64, sim: flume::Sender<Inbound>
                 Ok(Ok(n)) => n,
             },
         };
-        decoder.push(&buf[..n]);
+        reader.push(&buf[..n]);
         loop {
-            let frame = match decoder.next_frame() {
-                Ok(Some(frame)) => frame,
+            let request = match reader.next_request() {
+                Ok(Some(request)) => request,
                 Ok(None) => break,
-                Err(e) => break 'read Some(e.to_string()),
+                Err(reason) => break 'read Some(reason),
             };
-            let request = match request::decode(&frame) {
-                Ok(request) => request,
-                Err(e) => break 'read Some(e.to_string()),
-            };
-            match (&request, greeted) {
-                (Request::Hello { .. }, false) => greeted = true,
-                (Request::Hello { .. }, true) => break 'read Some("Hello sent twice".to_owned()),
-                (_, false) => break 'read Some("the first message must be Hello".to_owned()),
-                (_, true) => {}
-            }
             if let Request::Ping { nonce } = request {
                 if out_tx.try_send(Outbound::Frame(encode::pong(nonce))).is_err() {
                     break 'read Some("the client is not reading its messages".to_owned());

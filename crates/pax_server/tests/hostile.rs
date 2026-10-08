@@ -12,31 +12,14 @@ use std::io::Write;
 use std::net::TcpStream;
 use std::time::{Duration, Instant};
 
+use common::noise::Noise;
 use common::*;
-
-/// xorshift64*: deterministic noise without a dependency. The same generator is in
-/// `src/hostile.rs` and `tests/hostile.rs`, because a unit-test module can't share
-/// code with integration tests; keep the two in step (and never seed either with 0).
-struct Noise(u64);
-
-impl Noise {
-    fn next(&mut self) -> u64 {
-        self.0 ^= self.0 >> 12;
-        self.0 ^= self.0 << 25;
-        self.0 ^= self.0 >> 27;
-        self.0.wrapping_mul(0x2545_F491_4F6C_DD1D)
-    }
-
-    fn below(&mut self, n: usize) -> usize {
-        (self.next() % n as u64) as usize
-    }
-}
 
 /// A frame from `valid` with a few bytes after the length prefix changed.
 fn damaged(noise: &mut Noise, valid: &[Vec<u8>]) -> Vec<u8> {
-    let mut f = valid[noise.below(valid.len())].clone();
-    for _ in 0..1 + noise.below(3) {
-        let at = 4 + noise.below(f.len() - 4);
+    let mut f = valid[noise.index(valid.len())].clone();
+    for _ in 0..1 + noise.index(3) {
+        let at = 4 + noise.index(f.len() - 4);
         f[at] = noise.next() as u8;
     }
     f
@@ -46,15 +29,15 @@ fn damaged(noise: &mut Noise, valid: &[Vec<u8>]) -> Vec<u8> {
 /// frame split mid-way, and then it vanishes without reading anything.
 fn attack(addr: std::net::SocketAddr, seed: u64) {
     let valid = [hello_frame(pax_protocol::PROTOCOL_MAJOR, None), ping_frame(seed)];
-    let mut noise = Noise(seed);
+    let mut noise = Noise::new(seed);
     let Ok(mut stream) = TcpStream::connect(addr) else { return };
     let mut bytes = Vec::new();
-    if noise.below(2) == 0 {
+    if noise.index(2) == 0 {
         bytes.extend_from_slice(&valid[0]);
     }
-    for _ in 0..1 + noise.below(6) {
-        match noise.below(4) {
-            0 => bytes.extend((0..noise.below(64)).map(|_| noise.next() as u8)),
+    for _ in 0..1 + noise.index(6) {
+        match noise.index(4) {
+            0 => bytes.extend((0..noise.index(64)).map(|_| noise.next() as u8)),
             1 => bytes.extend_from_slice(&valid[1]),
             _ => bytes.extend(damaged(&mut noise, &valid)),
         }
@@ -62,7 +45,7 @@ fn attack(addr: std::net::SocketAddr, seed: u64) {
     // Writes may fail once the server has said Goodbye and closed: that's the point.
     let mut at = 0;
     while at < bytes.len() {
-        let end = (at + 1 + noise.below(48)).min(bytes.len());
+        let end = (at + 1 + noise.index(48)).min(bytes.len());
         if stream.write_all(&bytes[at..end]).is_err() {
             return;
         }
