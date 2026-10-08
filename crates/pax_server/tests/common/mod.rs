@@ -161,6 +161,12 @@ impl Client {
         self.send(&mut b, ClientPayload::ListSaves, l.as_union_value());
     }
 
+    pub fn kick(&mut self, player: u16) {
+        let mut b = FlatBufferBuilder::new();
+        let k = Kick::create(&mut b, &KickArgs { player });
+        self.send(&mut b, ClientPayload::Kick, k.as_union_value());
+    }
+
     pub fn ping(&mut self, nonce: u64) {
         let mut b = FlatBufferBuilder::new();
         let p = Ping::create(&mut b, &PingArgs { nonce });

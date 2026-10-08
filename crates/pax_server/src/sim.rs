@@ -11,7 +11,8 @@
 //! * saves and loads (D23).
 //!
 //! Its sessions are rows in a [`SessionTable`]: up to `Config::max_players` play at
-//! once, each with a distinct player id and nation (M4-1, D24).
+//! once, each with a distinct player id and nation (M4-1, D24). One of them is the
+//! host, who alone sets the speed (anyone may pause), saves, loads and kicks (M4-3).
 
 use flume::{Receiver, RecvTimeoutError, TryRecvError};
 use std::path::{Path, PathBuf};
@@ -42,6 +43,10 @@ pub(crate) struct Sim {
     sessions: SessionTable,
     /// How many sessions may play at once (`Config::max_players`).
     max_players: usize,
+    /// Whether sessions without a nation are accepted (`Config::sandbox`, D24).
+    sandbox: bool,
+    /// The host's client name on a dedicated server (`Config::admin`, D24).
+    admin: Option<String>,
     /// Stop when the last player leaves (the client launched this server).
     exit_when_idle: bool,
     /// The speed and the next tick. [`Sim::set_clock`] changes the speed and announces
@@ -59,6 +64,8 @@ impl Sim {
             saves_dir: config.saves_dir.clone(),
             sessions: SessionTable::default(),
             max_players: usize::from(config.max_players),
+            sandbox: config.sandbox,
+            admin: config.admin.clone(),
             exit_when_idle: config.exit_when_idle,
             clock: Clock::Paused,
             queue: CommandQueue::default(),
@@ -97,6 +104,9 @@ impl Sim {
             };
             return self.reject(session, &reason);
         }
+        if requested_nation.is_none() && !self.sandbox {
+            return self.reject(session, "this server has no sandbox (it runs without --sandbox): ask for a nation");
+        }
         if let Some(n) = requested_nation {
             if n as usize >= nations {
                 return self.reject(session, &format!("unknown nation {n}: the scenario has {nations}"));
@@ -113,6 +123,15 @@ impl Sim {
         let s = self.sessions.get_mut(session).expect("Connected precedes every request of a session");
         s.seat = Some(seat);
         info!(session, name, player = seat.player, ?requested_nation, "welcomed");
+        // The host (D24): the admin by name on a dedicated server, else the first player.
+        let host = match &self.admin {
+            Some(admin) => name == Some(admin.as_str()),
+            None => true,
+        };
+        if host && self.sessions.host().is_none() {
+            self.sessions.set_host(session);
+            info!(session, player = seat.player, "host");
+        }
         self.welcome(session, seat);
     }
 
@@ -161,12 +180,16 @@ impl Sim {
     /// A session asked for a new speed. A speed newer than this server is ignored, as
     /// D22 requires of unknown enum values: the clock is unchanged, and the session is
     /// told the current state so it can resynchronise.
+    ///
+    /// Only the host changes the speed, but any player may pause (D24). A refused
+    /// change gets the same resynchronising `ServerState`.
     fn set_speed(&mut self, session: u64, speed: wire::Speed) {
         let Some(seat) = self.sessions.seat(session) else { return };
-        match Clock::at(speed, Instant::now()) {
+        let permitted = speed == wire::Speed::Paused || self.sessions.is_host(session);
+        match Clock::at(speed, Instant::now()).filter(|_| permitted) {
             Some(clock) => self.set_clock(clock, seat.player),
             None => {
-                debug!(session, speed = speed.0, "ignored: unknown speed");
+                debug!(session, speed = speed.0, permitted, "ignored: an unknown speed, or not the host");
                 let frame = encode::server_state(self.game.world().day, self.clock.speed(), seat.player);
                 self.send(session, Outbound::Frame(frame));
             }
@@ -233,6 +256,9 @@ impl Sim {
     /// queued for the next tick haven't applied yet, so they aren't saved.
     fn save_game(&self, session: u64, name: Option<String>) {
         let label = name.clone().unwrap_or_default();
+        if !self.sessions.is_host(session) {
+            return self.send(session, Outbound::Frame(encode::save_result(&label, NOT_HOST_SAVE)));
+        }
         let world = self.game.world();
         let result = self.save_path(name.as_deref()).and_then(|path| {
             let data = self.game.save_data(&self.scenario_dir);
@@ -275,6 +301,9 @@ impl Sim {
     /// error the running game is left untouched.
     fn load_game(&mut self, session: u64, name: Option<String>) {
         let label = name.clone().unwrap_or_default();
+        if !self.sessions.is_host(session) {
+            return self.send(session, Outbound::Frame(encode::save_result(&label, NOT_HOST_LOAD)));
+        }
         let loaded = self.save_path(name.as_deref()).and_then(|path| load_from(&path));
         let loaded = match loaded {
             Ok(loaded) => loaded,
@@ -303,6 +332,45 @@ impl Sim {
             s.window = UpdateWindow::default();
             self.welcome(id, seat);
         }
+    }
+
+    /// The host ends another player's session (D24). Anything else is ignored: a
+    /// non-host's kick, the host kicking itself, a player who isn't connected.
+    fn kick(&mut self, session: u64, player: u16) {
+        let target = self.sessions.session_of(player).filter(|&t| t != session);
+        let Some(target) = target.filter(|_| self.sessions.is_host(session)) else {
+            return debug!(session, player, "ignored kick");
+        };
+        info!(session, target, player, "kicked by the host");
+        self.goodbye(target, "kicked by the host");
+        // Unseated now, so whatever it still sends is dropped; its row goes when its
+        // connection closes. The host stays, so the game goes on.
+        if let Some(seat) = self.sessions.unseat(target) {
+            self.player_left(target, seat, false);
+        }
+    }
+
+    /// A player stopped playing: left, or was kicked. When the host leaves a
+    /// player-hosted server, the remaining player with the lowest id becomes host;
+    /// on a dedicated server, the host's role waits for the admin to return (D24).
+    /// When the last player leaves, nobody is watching, so the clock stops (D23).
+    /// Returns `false` when the server should stop.
+    fn player_left(&mut self, session: u64, seat: Seat, was_host: bool) -> bool {
+        if self.sessions.players() == 0 {
+            info!(session, player = seat.player, "the last player left");
+            self.set_clock(Clock::Paused, seat.player);
+            if self.exit_when_idle {
+                info!("the client left; exiting (--exit-when-idle)");
+                return false;
+            }
+        } else if was_host
+            && self.admin.is_none()
+            && let Some(next) = self.sessions.lowest_player()
+        {
+            self.sessions.set_host(next);
+            info!(session = next, "the host left; the host is now this session");
+        }
+        true
     }
 
     fn welcome(&self, session: u64, seat: Seat) {
@@ -350,22 +418,15 @@ impl Sim {
                 Request::SaveGame { name } => self.save_game(session, name),
                 Request::LoadGame { name } => self.load_game(session, name),
                 Request::ListSaves => self.list_saves(session),
+                Request::Kick { player } => self.kick(session, player),
                 // Hello is handled before the admission choke point; Ping by the network task.
                 Request::Hello { .. } | Request::Ping { .. } => {}
             },
             Inbound::Closed { session } => {
-                let seat = self.sessions.remove(session).and_then(|s| s.seat);
-                // The others play on (D24). When the last player leaves, nobody is
-                // watching: stop the clock (D23 never runs a game unobserved).
-                if let Some(seat) = seat
-                    && self.sessions.players() == 0
-                {
-                    info!(session, player = seat.player, "the last player left");
-                    self.set_clock(Clock::Paused, seat.player);
-                    if self.exit_when_idle {
-                        info!("the client left; exiting (--exit-when-idle)");
-                        return false;
-                    }
+                let was_host = self.sessions.is_host(session);
+                // The others play on (D24); see `player_left`.
+                if let Some(seat) = self.sessions.remove(session).and_then(|s| s.seat) {
+                    return self.player_left(session, seat, was_host);
                 }
             }
             Inbound::Shutdown => return false,
@@ -375,6 +436,10 @@ impl Sim {
         true
     }
 }
+
+/// What a non-host is told when it asks to save or load (D24).
+const NOT_HOST_SAVE: &str = "only the host can save the game";
+const NOT_HOST_LOAD: &str = "only the host can load a game";
 
 /// Loads a save, as a message for the client on failure.
 fn load_from(path: &Path) -> Result<save::LoadedSave, String> {
@@ -713,9 +778,9 @@ mod tests {
         let (mut a, _) = join(&mut sim, 1, Some(0));
         let (mut b, _) = join(&mut sim, 2, Some(1));
         let speed = Request::SetSpeed { speed: wire::Speed::Fast };
-        sim.handle(Inbound::Request { session: 2, request: speed });
-        assert_eq!(drain(&mut a), [Sent::State(wire::Speed::Fast, 1)], "player 1 set it");
-        assert_eq!(drain(&mut b), [Sent::State(wire::Speed::Fast, 1)]);
+        sim.handle(Inbound::Request { session: 1, request: speed });
+        assert_eq!(drain(&mut a), [Sent::State(wire::Speed::Fast, 0)], "player 0 set it");
+        assert_eq!(drain(&mut b), [Sent::State(wire::Speed::Fast, 0)]);
         for _ in 0..4 {
             sim.advance();
         }
@@ -745,6 +810,111 @@ mod tests {
         let a_sent = drain(&mut a);
         assert!(matches!(a_sent.as_slice(), [Sent::Saved { .. }, Sent::Welcome { player: 0 }]), "{a_sent:?}");
         assert_eq!(drain(&mut b), [Sent::Welcome { player: 1 }]);
+    }
+
+    fn speed(sim: &mut Sim, session: u64, speed: wire::Speed) {
+        sim.handle(Inbound::Request { session, request: Request::SetSpeed { speed } });
+    }
+
+    /// M4-3: the first player is host. Only the host sets the speed, but anyone
+    /// may pause; only the host saves and loads.
+    #[test]
+    fn only_the_host_sets_the_speed_saves_and_loads_but_anyone_may_pause() {
+        let (mut sim, _saves) = multiplayer(2);
+        let (mut host, _) = join(&mut sim, 1, Some(0));
+        let (mut guest, _) = join(&mut sim, 2, Some(1));
+        speed(&mut sim, 2, wire::Speed::Fast);
+        assert_eq!(drain(&mut guest), [Sent::State(wire::Speed::Paused, 1)], "refused: told the unchanged speed");
+        assert_eq!(drain(&mut host), [], "nothing changed for anyone else");
+        speed(&mut sim, 1, wire::Speed::Fast);
+        assert_eq!(drain(&mut guest), [Sent::State(wire::Speed::Fast, 0)]);
+        drain(&mut host);
+        speed(&mut sim, 2, wire::Speed::Paused);
+        assert_eq!(drain(&mut host), [Sent::State(wire::Speed::Paused, 1)], "any player may pause");
+        drain(&mut guest);
+        for request in [Request::SaveGame { name: Some("g".into()) }, Request::LoadGame { name: Some("g".into()) }] {
+            sim.handle(Inbound::Request { session: 2, request });
+        }
+        let errors: Vec<String> = drain(&mut guest)
+            .into_iter()
+            .map(|s| match s {
+                Sent::Saved { error, .. } => error,
+                other => panic!("{other:?}"),
+            })
+            .collect();
+        assert_eq!(errors, [NOT_HOST_SAVE, NOT_HOST_LOAD]);
+        assert!(!sim.saves_dir.exists(), "a guest's save writes nothing");
+    }
+
+    /// The host leaving hands the role to the lowest remaining player id.
+    #[test]
+    fn the_host_role_passes_to_the_lowest_player_when_the_host_leaves() {
+        let (mut sim, _saves) = multiplayer(3);
+        let (_h, _) = join(&mut sim, 1, Some(0));
+        let (mut b, _) = join(&mut sim, 2, Some(1));
+        let (_c, _) = join(&mut sim, 3, None);
+        sim.handle(Inbound::Closed { session: 1 });
+        assert_eq!(sim.sessions.host(), Some(2), "player 1 is now the lowest");
+        speed(&mut sim, 2, wire::Speed::Fast);
+        assert_eq!(drain(&mut b), [Sent::State(wire::Speed::Fast, 1)]);
+    }
+
+    /// On a dedicated server the admin is host by name, whenever they join.
+    #[test]
+    fn an_admin_name_makes_that_player_the_host() {
+        let (mut sim, _saves) = multiplayer(2);
+        sim.admin = Some("ada".into());
+        let (_a, _) = join(&mut sim, 1, Some(0));
+        assert_eq!(sim.sessions.host(), None, "the first player isn't host on a dedicated server");
+        let (conn, mut rx) = ConnHandle::for_test();
+        sim.handle(Inbound::Connected { session: 2, conn });
+        let hello = Request::Hello {
+            major: PROTOCOL_MAJOR,
+            minor: 0,
+            name: Some("ada".into()),
+            requested_nation: Some(1),
+            resume_token: 0,
+        };
+        sim.handle(Inbound::Request { session: 2, request: hello });
+        assert_eq!(drain(&mut rx), [Sent::Welcome { player: 1 }]);
+        assert_eq!(sim.sessions.host(), Some(2));
+        // The admin leaving doesn't hand the role to someone else.
+        sim.handle(Inbound::Closed { session: 2 });
+        assert_eq!(sim.sessions.host(), None);
+    }
+
+    /// The host kicks a player: it gets a Goodbye, and whatever it still sends is
+    /// dropped. Anyone else's kick is ignored.
+    #[test]
+    fn the_host_kicks_and_nobody_else_can() {
+        let (mut sim, _saves) = multiplayer(3);
+        let (mut host, _) = join(&mut sim, 1, Some(0));
+        let (mut b, _) = join(&mut sim, 2, Some(1));
+        let (mut c, _) = join(&mut sim, 3, None);
+        sim.handle(Inbound::Request { session: 3, request: Request::Kick { player: 1 } });
+        sim.handle(Inbound::Request { session: 1, request: Request::Kick { player: 0 } });
+        assert_eq!((drain(&mut b), drain(&mut host)), (vec![], vec![]), "a guest can't kick, nor the host itself");
+        sim.handle(Inbound::Request { session: 1, request: Request::Kick { player: 1 } });
+        assert_eq!(drain(&mut b), [Sent::Goodbye("kicked by the host".into()), Sent::Close]);
+        submit(&mut sim, 1, tax(1, 100_000));
+        sim.handle(Inbound::Request {
+            session: 2,
+            request: Request::SubmitCommand { client_seq: 9, command: tax(1, 1) },
+        });
+        assert_eq!(drain(&mut b), [], "a kicked session can't act");
+        // Its nation is free again, and so is its player id.
+        sim.handle(Inbound::Closed { session: 2 });
+        let (_d, sent) = join(&mut sim, 4, Some(1));
+        assert_eq!(sent, [Sent::Welcome { player: 1 }]);
+        drain(&mut c);
+    }
+
+    #[test]
+    fn sandbox_needs_the_sandbox_flag() {
+        let (mut sim, _saves) = multiplayer(2);
+        sim.sandbox = false;
+        assert_eq!(join(&mut sim, 1, None).1, [Sent::Rejected, Sent::Close]);
+        assert_eq!(join(&mut sim, 2, Some(0)).1, [Sent::Welcome { player: 0 }]);
     }
 
     /// D11 pins the server's day to the harness's: with no players, `Sim::tick`

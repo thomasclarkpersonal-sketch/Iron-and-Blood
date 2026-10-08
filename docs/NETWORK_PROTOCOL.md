@@ -67,13 +67,14 @@ sequenceDiagram
 
 | Message | Purpose | Reply |
 |---|---|---|
-| `Hello` | Open the session; request a nation (absent = sandbox, M3 only) | `Welcome` or `Rejected` |
+| `Hello` | Open the session; request a nation (absent = sandbox, only on a server run with `--sandbox`, D24) | `Welcome` or `Rejected` |
 | `SubmitCommand` | One engine command (`SetIncomeTax`, `SetTransferRate`, `SetConsumptionRate`) with a client-chosen `client_seq` | exactly one `CommandResult` |
-| `SetSpeed` | Pause, or set speed 1–5. A speed the server doesn't know is ignored: the reply is the unchanged `ServerState` (D22) | `ServerState` |
+| `SetSpeed` | Pause, or set speed 1–5. Any player may pause; only the host sets a speed (D24). A refused change, or a speed the server doesn't know (D22), gets the unchanged `ServerState`, to the asker only | `ServerState` |
 | `Subscribe` | Choose the map mode, market panel and province panel | a `DayUpdate` for the current day |
 | `Ack` | Finished processing the `DayUpdate` for `day` | — |
 | `Ping` | Keep-alive and round-trip measurement | `Pong` |
-| `SaveGame`, `LoadGame`, `ListSaves` | Saves (D23) | `SaveResult`, `Welcome`, `SaveList` |
+| `SaveGame`, `LoadGame`, `ListSaves` | Saves (D23). Only the host saves and loads (D24); anyone else gets a `SaveResult` with the error. Anyone may list | `SaveResult`, `Welcome`, `SaveList` |
+| `Kick` | Host only (D24, protocol 1.3): end the session of player `player`, which gets `Goodbye: kicked by the host`. Ignored from anyone else, for the host itself, or for a player who isn't connected | — |
 
 ### Server → client (`ServerPayload`)
 
@@ -124,11 +125,13 @@ sequenceDiagram
 
 ## 6. Single player: how the client runs the server
 
-- The client launches `pax_server` as a child process: `pax_server --scenario <dir> --bind 127.0.0.1:0 --port-file <tmp> --exit-when-idle`. The server binds a free port and writes it to the port file (atomically, so a polling client never reads half a number). The client then connects.
+- The client launches `pax_server` as a child process: `pax_server --scenario <dir> --bind 127.0.0.1:0 --port-file <tmp> --sandbox --exit-when-idle`. Single player plays sandbox, which a server allows only with `--sandbox` (D24). The server binds a free port and writes it to the port file (atomically, so a polling client never reads half a number). The client then connects.
 - When the client exits, it closes the connection, and `--exit-when-idle` makes the server shut down once its player has gone.
 - The client's bridge (`pax_godot::connection`) does this, and also what every client owes the server: it acknowledges each `DayUpdate` on the poll after the one that delivered it (§5), and sends a `Ping` after a fifth of `IDLE_TIMEOUT` (2 s) without sending anything. It also pairs each `SaveResult` and load `Welcome` with the request it answers, oldest first, because the server answers save requests in order. A `Welcome` nothing asked for is another player's load (§3), and replaces the session's tables all the same.
 - There is no Docker and no separate install: the server binary ships next to the client.
-- **Several players (M4-1):** run the server yourself, for example `pax_server --scenario <dir> --bind 0.0.0.0:7777 --players 3`, and have each client connect to it. The lobby (M4-2), the host's controls (M4-3) and the lag rules (M4-4) are still to come, and so is TLS (M4-6): until then, bind a multiplayer server only on a trusted network.
+- **Several players (M4-1, M4-3):** run the server yourself, for example `pax_server --scenario <dir> --bind 0.0.0.0:7777 --players 3`, and have each client connect to it.
+  - **The host** is the first player to join. When the host leaves, the remaining player with the lowest id becomes host. On a dedicated server, `--admin NAME` makes the client named `NAME` the host instead, whenever it joins; while it is away there is no host (D24).
+  - The lobby (M4-2) and the lag rules (M4-4) are still to come, and so are TLS and a server password (M4-6). Until then, bind a multiplayer server only on a trusted network: a client name is not proof of identity.
 
 ## 7. Conversions and units
 
@@ -150,7 +153,7 @@ FlatBuffers stays compatible across versions only if changes follow these rules.
 - **Never delete** a field; mark it `(deprecated)`.
 - **Add union members and enum values only at the end.** Never renumber them. Receivers must ignore an unknown union member or enum value, not crash on it.
 - A change that breaks these rules bumps `protocol_major`. A compatible addition bumps `protocol_minor`.
-- A receiver treats a field added in a later minor version as *no data* when it is absent, never as an error: a newer client must still read an older server. History: 1.1 (M3) added `StaticData.map_dir`; 1.2 (M3) added `NationTable.militancy`.
+- A receiver treats a field added in a later minor version as *no data* when it is absent, never as an error: a newer client must still read an older server. History: 1.1 (M3) added `StaticData.map_dir`; 1.2 (M3) added `NationTable.militancy`; 1.3 (M4-3) added the `Kick` request.
 - Rust code is generated with **flatc 24.3.25**, matching the `flatbuffers` crate version, into the `pax_protocol` crate. It is checked in, and CI regenerates it and fails on any difference. Mismatched compiler and runtime versions produce code that doesn't compile.
 
 ## 9. Testing

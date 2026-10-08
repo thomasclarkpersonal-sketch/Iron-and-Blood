@@ -1,4 +1,4 @@
-//! Several players on one server, over real TCP (M4-1, D24).
+//! Several players on one server, over real TCP (M4-1, M4-3, D24).
 
 mod common;
 
@@ -61,10 +61,12 @@ fn two_players_each_with_their_own_nation_view_and_permissions() {
     b.set_income_tax(2, 1, 150_000);
     assert!(matches!(b.next(), Got::CommandResult { client_seq: 2, error: CommandError::None, .. }));
 
-    // B starts the clock: both hear it, with who did it.
+    // Only the host (A, the first player) starts the clock; B is told the speed is unchanged.
     b.set_speed(Speed::Fastest);
+    assert!(matches!(next_non_update(&mut b), Got::ServerState { speed: Speed::Paused, .. }));
+    a.set_speed(Speed::Fastest);
     for c in [&mut a, &mut b] {
-        assert_eq!(next_non_update(c), Got::ServerState { day: 0, speed: Speed::Fastest, changed_by: 1 });
+        assert_eq!(next_non_update(c), Got::ServerState { day: 0, speed: Speed::Fastest, changed_by: 0 });
     }
     let (Got::DayUpdate { province: pa, .. }, Got::DayUpdate { province: pb, tax_rates, .. }) =
         (next_update(&mut a), next_update(&mut b))
@@ -74,8 +76,13 @@ fn two_players_each_with_their_own_nation_view_and_permissions() {
     assert_eq!((pa, pb), (Some(0), None), "each update carries its own player's panels");
     assert_eq!(tax_rates[1], 150_000, "B's command applied");
 
-    // B leaves; A's game goes on.
-    drop(b);
+    // A guest can't save.
+    b.save_game("mine");
+    assert!(matches!(next_non_update(&mut b), Got::SaveResult { error, .. } if error.contains("only the host")));
+    // The host kicks B; A's game goes on.
+    a.kick(1);
+    assert_eq!(next_non_update(&mut b), Got::Goodbye("kicked by the host".into()));
+    assert_eq!(next_non_update(&mut b), Got::Closed);
     let day = match next_update(&mut a) {
         Got::DayUpdate { day, .. } => day,
         _ => unreachable!(),

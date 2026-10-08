@@ -9,102 +9,103 @@ use core::mem;
 use core::cmp::Ordering;
 use self::flatbuffers::{EndianScalar, Follow};
 use super::*;
-pub enum SetSpeedOffset {}
+pub enum KickOffset {}
 #[derive(Copy, Clone, PartialEq)]
 
-/// Host only, except that any player may pause (D24). A refused change is answered
-/// with ServerState, the speed unchanged.
-pub struct SetSpeed<'a> {
+/// Host only (D24): end another player's session, which gets a Goodbye saying it was
+/// kicked. Added in protocol 1.3. Ignored from anyone else, for the host itself, and
+/// for a player who isn't connected.
+pub struct Kick<'a> {
   pub _tab: flatbuffers::Table<'a>,
 }
 
-impl<'a> flatbuffers::Follow<'a> for SetSpeed<'a> {
-  type Inner = SetSpeed<'a>;
+impl<'a> flatbuffers::Follow<'a> for Kick<'a> {
+  type Inner = Kick<'a>;
   #[inline]
   unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
     Self { _tab: flatbuffers::Table::new(buf, loc) }
   }
 }
 
-impl<'a> SetSpeed<'a> {
-  pub const VT_SPEED: flatbuffers::VOffsetT = 4;
+impl<'a> Kick<'a> {
+  pub const VT_PLAYER: flatbuffers::VOffsetT = 4;
 
   #[inline]
   pub unsafe fn init_from_table(table: flatbuffers::Table<'a>) -> Self {
-    SetSpeed { _tab: table }
+    Kick { _tab: table }
   }
   #[allow(unused_mut)]
   pub fn create<'bldr: 'args, 'args: 'mut_bldr, 'mut_bldr, A: flatbuffers::Allocator + 'bldr>(
     _fbb: &'mut_bldr mut flatbuffers::FlatBufferBuilder<'bldr, A>,
-    args: &'args SetSpeedArgs
-  ) -> flatbuffers::WIPOffset<SetSpeed<'bldr>> {
-    let mut builder = SetSpeedBuilder::new(_fbb);
-    builder.add_speed(args.speed);
+    args: &'args KickArgs
+  ) -> flatbuffers::WIPOffset<Kick<'bldr>> {
+    let mut builder = KickBuilder::new(_fbb);
+    builder.add_player(args.player);
     builder.finish()
   }
 
 
   #[inline]
-  pub fn speed(&self) -> Speed {
+  pub fn player(&self) -> u16 {
     // Safety:
     // Created from valid Table for this object
     // which contains a valid value in this slot
-    unsafe { self._tab.get::<Speed>(SetSpeed::VT_SPEED, Some(Speed::Paused)).unwrap()}
+    unsafe { self._tab.get::<u16>(Kick::VT_PLAYER, Some(0)).unwrap()}
   }
 }
 
-impl flatbuffers::Verifiable for SetSpeed<'_> {
+impl flatbuffers::Verifiable for Kick<'_> {
   #[inline]
   fn run_verifier(
     v: &mut flatbuffers::Verifier, pos: usize
   ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
     use self::flatbuffers::Verifiable;
     v.visit_table(pos)?
-     .visit_field::<Speed>("speed", Self::VT_SPEED, false)?
+     .visit_field::<u16>("player", Self::VT_PLAYER, false)?
      .finish();
     Ok(())
   }
 }
-pub struct SetSpeedArgs {
-    pub speed: Speed,
+pub struct KickArgs {
+    pub player: u16,
 }
-impl<'a> Default for SetSpeedArgs {
+impl<'a> Default for KickArgs {
   #[inline]
   fn default() -> Self {
-    SetSpeedArgs {
-      speed: Speed::Paused,
+    KickArgs {
+      player: 0,
     }
   }
 }
 
-pub struct SetSpeedBuilder<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> {
+pub struct KickBuilder<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> {
   fbb_: &'b mut flatbuffers::FlatBufferBuilder<'a, A>,
   start_: flatbuffers::WIPOffset<flatbuffers::TableUnfinishedWIPOffset>,
 }
-impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> SetSpeedBuilder<'a, 'b, A> {
+impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> KickBuilder<'a, 'b, A> {
   #[inline]
-  pub fn add_speed(&mut self, speed: Speed) {
-    self.fbb_.push_slot::<Speed>(SetSpeed::VT_SPEED, speed, Speed::Paused);
+  pub fn add_player(&mut self, player: u16) {
+    self.fbb_.push_slot::<u16>(Kick::VT_PLAYER, player, 0);
   }
   #[inline]
-  pub fn new(_fbb: &'b mut flatbuffers::FlatBufferBuilder<'a, A>) -> SetSpeedBuilder<'a, 'b, A> {
+  pub fn new(_fbb: &'b mut flatbuffers::FlatBufferBuilder<'a, A>) -> KickBuilder<'a, 'b, A> {
     let start = _fbb.start_table();
-    SetSpeedBuilder {
+    KickBuilder {
       fbb_: _fbb,
       start_: start,
     }
   }
   #[inline]
-  pub fn finish(self) -> flatbuffers::WIPOffset<SetSpeed<'a>> {
+  pub fn finish(self) -> flatbuffers::WIPOffset<Kick<'a>> {
     let o = self.fbb_.end_table(self.start_);
     flatbuffers::WIPOffset::new(o.value())
   }
 }
 
-impl core::fmt::Debug for SetSpeed<'_> {
+impl core::fmt::Debug for Kick<'_> {
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-    let mut ds = f.debug_struct("SetSpeed");
-      ds.field("speed", &self.speed());
+    let mut ds = f.debug_struct("Kick");
+      ds.field("player", &self.player());
       ds.finish()
   }
 }

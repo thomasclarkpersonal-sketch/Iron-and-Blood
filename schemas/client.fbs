@@ -11,8 +11,9 @@ table Hello {
   /// Display name, at most 32 bytes of UTF-8.
   client_name: string;
   /// Nation to play, as an index into the Welcome's nation table.
-  /// Absent: sandbox, so the session may command every nation (M3 only).
-  /// M4: ignored; nations are assigned in the lobby (D24).
+  /// Absent: sandbox, so the session may command every nation. Only a server run
+  /// with --sandbox accepts it (D24); single player launches its server that way.
+  /// M4-2: nations are claimed in the lobby instead (D24).
   requested_nation: uint = null;
   /// M4: token from an earlier Welcome, to reclaim a dropped session. 0 = new session.
   resume_token: ulong;
@@ -26,7 +27,8 @@ table SubmitCommand {
   command: Command;
 }
 
-/// M3: always allowed. M4: host only; any player may pause (D24).
+/// Host only, except that any player may pause (D24). A refused change is answered
+/// with ServerState, the speed unchanged.
 table SetSpeed {
   speed: Speed;
 }
@@ -53,18 +55,26 @@ table Ping {
   nonce: ulong;
 }
 
-/// M3: always allowed. M4: host only.
+/// Host only (D24); anyone else gets a SaveResult with the error.
 table SaveGame {
   /// File name stem: [A-Za-z0-9_-], 1 to 64 characters.
   name: string;
 }
 
-/// M3: always allowed. M4: host only, from the lobby.
+/// Host only (D24); anyone else gets a SaveResult with the error. M4-5 moves
+/// loading into the lobby.
 table LoadGame {
   name: string;
 }
 
 table ListSaves {}
+
+/// Host only (D24): end another player's session, which gets a Goodbye saying it was
+/// kicked. Added in protocol 1.3. Ignored from anyone else, for the host itself, and
+/// for a player who isn't connected.
+table Kick {
+  player: ushort;
+}
 
 union ClientPayload {
   Hello,
@@ -76,6 +86,7 @@ union ClientPayload {
   SaveGame,
   LoadGame,
   ListSaves,
+  Kick,
 }
 
 table ClientMessage {

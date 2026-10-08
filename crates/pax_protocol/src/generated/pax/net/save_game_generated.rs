@@ -12,7 +12,7 @@ use super::*;
 pub enum SaveGameOffset {}
 #[derive(Copy, Clone, PartialEq)]
 
-/// M3: always allowed. M4: host only.
+/// Host only (D24); anyone else gets a SaveResult with the error.
 pub struct SaveGame<'a> {
   pub _tab: flatbuffers::Table<'a>,
 }
