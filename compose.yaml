@@ -6,8 +6,9 @@ services:
     image: iron-and-blood/pax-server
     ports:
       - "7777:7777"
+    # Every setting has a default in docker/entrypoint.sh (the list); set only what
+    # you change, e.g. PAX_PLAYERS: "6".
     environment:
-      PAX_PLAYERS: "4"
       PAX_SCENARIO: scenarios/two_states
       # A server password (D24): uncomment, and the `password` secret below.
       # PAX_PASSWORD_FILE: /run/secrets/pax_password

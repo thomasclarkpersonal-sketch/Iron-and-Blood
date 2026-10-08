@@ -252,6 +252,32 @@ jobs:
           docker logs pax
           [ "$status" = healthy ]
           docker logs pax 2>&1 | grep -q "TLS certificate SHA-256"
+      - name: Every PAX_* setting reaches pax_server
+        # A renamed pax_server flag fails here, not in a deployment: the image starts
+        # with every variable the entrypoint reads, and the list below must be that
+        # list.
+        run: |
+          set -- PAX_ADMIN PAX_ADMIN_PASSWORD_FILE PAX_COMMANDS_PER_SECOND PAX_DROP_AFTER \
+            PAX_MAP_EVERY PAX_PASSWORD_FILE PAX_PAUSE_AFTER PAX_PLAYERS PAX_PORT \
+            PAX_SCENARIO PAX_UPDATES_PER_SECOND
+          diff <(printf '%s\n' "$@") <(grep -o 'PAX_[A-Z_]*' docker/entrypoint.sh | sort -u)
+          secrets="$RUNNER_TEMP/secrets"
+          mkdir -p "$secrets" && echo pw > "$secrets/pw" && echo admin-pw > "$secrets/admin-pw"
+          chmod 644 "$secrets"/*
+          docker run -d --name pax-all -v "$secrets:/run/secrets:ro" \
+            -e PAX_ADMIN=ada -e PAX_ADMIN_PASSWORD_FILE=/run/secrets/admin-pw \
+            -e PAX_COMMANDS_PER_SECOND=10 -e PAX_DROP_AFTER=20 -e PAX_MAP_EVERY=3 \
+            -e PAX_PASSWORD_FILE=/run/secrets/pw -e PAX_PAUSE_AFTER=4 -e PAX_PLAYERS=3 \
+            -e PAX_PORT=7778 -e PAX_SCENARIO=scenarios/two_states -e PAX_UPDATES_PER_SECOND=2 \
+            pax-server
+          status=starting
+          for _ in $(seq 60); do
+            status=$(docker inspect -f '{{.State.Health.Status}}' pax-all)
+            [ "$status" = healthy ] && break
+            sleep 3
+          done
+          docker logs pax-all
+          [ "$status" = healthy ]
 
   fuzz:
     # M3-10: coverage-guided fuzzing of the client frame reader, for a fixed budget.
