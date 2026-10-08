@@ -263,15 +263,6 @@ impl Connection {
     }
 }
 
-/// Whether a launched server speaks TLS (D24, M4-6).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Tls {
-    /// Single player, on loopback.
-    None,
-    /// A hosted game: a fresh certificate, whose fingerprint the launcher reads back.
-    SelfSigned,
-}
-
 /// A `pax_server` the client launched (NETWORK_PROTOCOL §6). With `--exit-when-idle`
 /// it stops by itself when the client disconnects; dropping this waits briefly for
 /// that, then kills it.
@@ -320,9 +311,7 @@ impl LocalServer {
     pub fn launch(server: &Path, scenario: &Path, saves: &Path) -> Result<LocalServer, String> {
         // Single player plays sandbox (any nation), which a server allows only with
         // --sandbox (D24).
-        let (server, _) =
-            LocalServer::start(server, scenario, saves, &["--bind", "127.0.0.1:0", "--sandbox"], Tls::None)?;
-        Ok(server)
+        LocalServer::start(server, scenario, saves, &["--bind", "127.0.0.1:0", "--sandbox"])
     }
 
     /// Starts `server` as a player-hosted multiplayer game for `players` (M4-9):
@@ -330,32 +319,35 @@ impl LocalServer {
     /// certificate (D24, M4-6). Its fingerprint comes back for the host to share.
     pub fn host(server: &Path, scenario: &Path, saves: &Path, players: u16) -> Result<HostedServer, String> {
         let players = players.to_string();
-        let args = ["--bind", "0.0.0.0:0", "--players", &players];
-        let (server, fingerprint) = LocalServer::start(server, scenario, saves, &args, Tls::SelfSigned)?;
-        let fingerprint = fingerprint.expect("start reads a TLS server's fingerprint or fails");
-        Ok(HostedServer { server, fingerprint })
+        let fingerprint_file = port_file_path().with_extension("fingerprint");
+        let _ = std::fs::remove_file(&fingerprint_file);
+        let file = fingerprint_file.to_string_lossy();
+        let args = ["--bind", "0.0.0.0:0", "--players", &players, "--tls-self-signed", "--fingerprint-file", &file];
+        let mut server = LocalServer::start(server, scenario, saves, &args)?;
+        // The server writes the fingerprint before the port (NETWORK_PROTOCOL §6), so
+        // by now it must be there: anything else is the launch's failure, said as
+        // such, not a fingerprint the player got wrong.
+        let read = std::fs::read_to_string(&fingerprint_file);
+        let _ = std::fs::remove_file(&fingerprint_file);
+        match read.ok().and_then(|text| transport::normalise(&text)) {
+            Some(fingerprint) => Ok(HostedServer { server, fingerprint }),
+            None => {
+                server.kill();
+                Err(format!(
+                    "the server gave its port but no certificate fingerprint in {}",
+                    fingerprint_file.display()
+                ))
+            }
+        }
     }
 
-    /// `tls` decides both the server's TLS flags and whether a fingerprint is read
-    /// back: one switch, so the two can't disagree.
-    /// Returns the server and, with TLS, its fingerprint.
-    fn start(
-        server: &Path,
-        scenario: &Path,
-        saves: &Path,
-        args: &[&str],
-        tls: Tls,
-    ) -> Result<(LocalServer, Option<String>), String> {
+    /// Starts `server` with `args` and waits (at most 20 s) for its port.
+    fn start(server: &Path, scenario: &Path, saves: &Path, args: &[&str]) -> Result<LocalServer, String> {
         let port_file = port_file_path();
-        let fingerprint_file = port_file.with_extension("fingerprint");
         let _ = std::fs::remove_file(&port_file);
-        let _ = std::fs::remove_file(&fingerprint_file);
         let mut command = Command::new(server);
         command.arg("--scenario").arg(scenario).args(args).arg("--exit-when-idle");
         command.arg("--port-file").arg(&port_file).arg("--saves").arg(saves);
-        if tls == Tls::SelfSigned {
-            command.arg("--tls-self-signed").arg("--fingerprint-file").arg(&fingerprint_file);
-        }
         let mut child =
             command.stdin(Stdio::null()).spawn().map_err(|e| format!("cannot start {}: {e}", server.display()))?;
         let deadline = Instant::now() + Duration::from_secs(20);
@@ -364,27 +356,7 @@ impl LocalServer {
                 && let Ok(port) = text.trim().parse::<u16>()
             {
                 let _ = std::fs::remove_file(&port_file);
-                // The server writes the fingerprint before the port (NETWORK_PROTOCOL
-                // §6), so by now it must be there: anything else is the launch's
-                // failure, said as such, not a fingerprint the player got wrong.
-                let fingerprint = match tls {
-                    Tls::None => None,
-                    Tls::SelfSigned => {
-                        let read = std::fs::read_to_string(&fingerprint_file);
-                        let _ = std::fs::remove_file(&fingerprint_file);
-                        let fingerprint = read.ok().and_then(|text| crate::transport::normalise(&text));
-                        if fingerprint.is_none() {
-                            let _ = child.kill();
-                            let _ = child.wait();
-                            return Err(format!(
-                                "the server gave its port but no certificate fingerprint in {}",
-                                fingerprint_file.display()
-                            ));
-                        }
-                        fingerprint
-                    }
-                };
-                return Ok((LocalServer { child, addr: SocketAddr::from(([127, 0, 0, 1], port)) }, fingerprint));
+                return Ok(LocalServer { child, addr: SocketAddr::from(([127, 0, 0, 1], port)) });
             }
             if let Ok(Some(status)) = child.try_wait() {
                 return Err(format!("the server exited before it was ready ({status})"));

@@ -153,7 +153,7 @@ sequenceDiagram
   - `--pause-after S` and `--drop-after S` set D24's lag thresholds (5 and 30 by default).
   - `--updates-per-second N` and `--map-every N` set D24's bandwidth for remote sessions (4 and 5 by default, M4-7).
   - `--password-file PATH` makes players give a password in `Hello` (protocol 1.6). The admin password also admits the admin. `--commands-per-second N` sets the rate limit (20 by default). Passwords come from files so they never show in the process list. A password never crosses the network in clear: off localhost, a server with a password or an admin needs TLS, and is refused without it.
-  - **TLS (M4-6):** off localhost, several players need TLS. `--tls-self-signed` makes a certificate at start (a player-hosted game); `--tls-cert PEM --tls-key PEM` loads one (a dedicated server). The server prints the certificate's SHA-256, and writes it to `--fingerprint-file PATH` (before the port file, for a launcher waiting on that). Players connect with it pinned (`PaxClient.connect_secure(host, port, fingerprint)`); a different certificate ends the connection.
+  - **TLS (M4-6):** off localhost, several players need TLS. `--tls-self-signed` makes a certificate at start (a player-hosted game); `--tls-cert PEM --tls-key PEM` loads one (a dedicated server). The server prints the certificate's SHA-256, and writes it to `--fingerprint-file PATH` (before the port file, for a launcher waiting on that). Players connect with it pinned (`PaxClient.join_game(host, port, fingerprint, …)`); a different certificate ends the connection.
 
 ## 7. Conversions and units
 

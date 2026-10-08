@@ -245,16 +245,6 @@ impl PaxClient {
         d
     }
 
-    /// The player's name, sent with the next `hello` or `resume`; the lobby shows it.
-    #[func]
-    fn set_name(&mut self, name: GString) -> GString {
-        let name = name.to_string();
-        if name.is_empty() {
-            return rejected("a name can't be empty".to_owned());
-        }
-        self.with_connection(|c| c.set_name(name))
-    }
-
     /// Where this client's copy of the scenario is, for a server it didn't launch
     /// (`launch` sets it itself; call this after `connect_to`, which clears it).
     /// `load_map` reads the map files from there.
@@ -277,7 +267,7 @@ impl PaxClient {
     /// its connection first, then a single-player server it launched, so that server
     /// can exit by itself (`--exit-when-idle`); then its tables, map and scenario
     /// directory. The one place every connect path (`launch`, `host_game`,
-    /// `join_game`, `rejoin`, `connect_to`, `connect_secure`) clears per-session
+    /// `join_game`, `rejoin`, `connect_to`) clears per-session
     /// state. A hosted game (`hosting`) and the game to rejoin (`joined`) outlive it,
     /// so a player, the host included, can rejoin.
     fn end_session(&mut self) {
@@ -311,27 +301,6 @@ impl PaxClient {
                 GString::new()
             }
             _ => rejected("not connected".to_owned()),
-        }
-    }
-
-    /// Connects to a multiplayer server elsewhere over TLS (D24, M4-6), trusting only
-    /// the certificate whose SHA-256 is `fingerprint`: what the server printed, as
-    /// the host shared it (any case, `:` and spaces allowed). Returns an error message
-    /// (nothing connected), or `""`; a wrong certificate ends the connection with a
-    /// reason as it is polled.
-    #[func]
-    fn connect_secure(&mut self, host: GString, port: i64, fingerprint: GString) -> GString {
-        self.joined = None;
-        let addr = match self.new_session(&host, port) {
-            Ok(addr) => addr,
-            Err(e) => return e,
-        };
-        match Connection::connect_tls(addr, CONNECT_TIMEOUT, &fingerprint.to_string()) {
-            Ok(c) => {
-                self.connection = Some(c);
-                GString::new()
-            }
-            Err(e) => rejected(format!("cannot connect to {addr}: {e}")),
         }
     }
 
@@ -529,14 +498,6 @@ impl PaxClient {
             Ok(n) => self.with_connection(|c| c.claim_nation(n)),
             Err(e) => rejected(e),
         }
-    }
-
-    /// The server's password (or the admin's), sent with the next `hello` or
-    /// `resume` (D24, protocol 1.6). `""` for none.
-    #[func]
-    fn set_password(&mut self, password: GString) -> GString {
-        let password = Some(password.to_string()).filter(|p| !p.is_empty());
-        self.with_connection(|c| c.set_password(password))
     }
 
     /// Reclaims the seat a dropped session kept (D24): `token` is the old `Welcome`'s

@@ -366,7 +366,7 @@ func select_province(province: int) -> void:
 func _connection_lost(reason: String) -> void:
 	# A multiplayer seat waits for its resume token (D24): the player can rejoin.
 	var hosting := client != null and not client.hosted().is_empty()
-	lost.show_reason(reason, _multiplayer and client != null and client.can_rejoin(), hosting)
+	lost.show_reason(reason, client != null and client.can_rejoin(), hosting)
 	save_menu.visible = false
 	lobby.visible = false
 	var shot := _arg("--screenshot=")
