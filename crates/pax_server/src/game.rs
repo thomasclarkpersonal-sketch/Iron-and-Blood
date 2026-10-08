@@ -226,13 +226,13 @@ mod tests {
 
     /// M4's definition of done, item 5 (D24, M4-7): a remote client's bandwidth at
     /// speed 3 at D13's long-term scale, with every view subscribed. It encodes a real
-    /// update with and without the `MapView`, then applies the throttle's policy: at
-    /// most four updates a second, the map in every fifth. Run by hand:
+    /// update with and without the `MapView`, then applies the throttle's policy with D24's
+    /// default settings: at most four updates a second, the map in every fifth. Run by hand:
     /// `cargo test -p pax_server --release -- --ignored remote_bandwidth --nocapture`
     #[test]
     #[ignore]
     fn remote_bandwidth_budget() {
-        use crate::throttle::{MAP_EVERY, UPDATES_PER_SECOND};
+        let crate::Bandwidth { updates_per_second, map_every } = crate::Bandwidth::default();
         use crate::view::{self, Subscription};
         use pax_protocol::{Pacing, wire};
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two_states");
@@ -251,13 +251,13 @@ mod tests {
         let views = game.views();
         let with_map = view::day_update(&views, &sub, wire::Speed::Normal, 0, true).len() as f64;
         let without = view::day_update(&views, &sub, wire::Speed::Normal, 0, false).len() as f64;
-        let per_update = (without * f64::from(MAP_EVERY - 1) + with_map) / f64::from(MAP_EVERY);
+        let per_update = (without * f64::from(map_every - 1) + with_map) / f64::from(map_every);
         let rate = |speed: wire::Speed| -> f64 {
             let days_per_second = match pax_protocol::pacing(speed) {
                 Pacing::Every(d) if !d.is_zero() => 1.0 / d.as_secs_f64(),
                 _ => f64::INFINITY,
             };
-            days_per_second.min(f64::from(UPDATES_PER_SECOND)) * per_update / 1000.0
+            days_per_second.min(f64::from(updates_per_second)) * per_update / 1000.0
         };
         // Speed 3 is `Normal`, two days a second (D23's pacing table).
         let (speed3, fastest) = (rate(wire::Speed::Normal), rate(wire::Speed::Fastest));

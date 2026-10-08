@@ -1,4 +1,4 @@
-//! `pax_server --scenario DIR [--bind ADDR] [--port-file PATH] [--saves DIR] [--players N] [--sandbox] [--admin NAME] [--pause-after S] [--drop-after S] [--exit-when-idle]`
+//! `pax_server --scenario DIR [--bind ADDR] [--port-file PATH] [--saves DIR] [--players N] [--sandbox] [--admin NAME] [--pause-after S] [--drop-after S] [--updates-per-second N] [--map-every N] [--exit-when-idle]`
 //!
 //! The authoritative game server (D10). In single player the client launches it with
 //! `--scenario <dir> --bind 127.0.0.1:0 --port-file <tmp> --sandbox --exit-when-idle`
@@ -10,7 +10,9 @@
 //! M4-6. Until then, `--players` above 1 is refused on any non-loopback address.
 //!
 //! With several players, a silent client pauses the game after `--pause-after`
-//! seconds and is dropped after `--drop-after` (D24: 5 and 30 by default).
+//! seconds and is dropped after `--drop-after` (D24: 5 and 30 by default). A remote
+//! client gets at most `--updates-per-second` updates a second, and the map with
+//! every `--map-every`th (D24, M4-7: 4 and 5 by default).
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -19,7 +21,7 @@ use std::time::Duration;
 use pax_server::{Config, Server};
 use tracing::error;
 
-const USAGE: &str = "usage: pax_server --scenario DIR [--bind ADDR] [--port-file PATH] [--saves DIR] [--players N] [--sandbox] [--admin NAME] [--pause-after S] [--drop-after S] [--exit-when-idle]";
+const USAGE: &str = "usage: pax_server --scenario DIR [--bind ADDR] [--port-file PATH] [--saves DIR] [--players N] [--sandbox] [--admin NAME] [--pause-after S] [--drop-after S] [--updates-per-second N] [--map-every N] [--exit-when-idle]";
 
 /// The most players `--players` allows. Player ids are `u16` on the wire; the cap is
 /// far below that, a sanity limit for a server whose every player gets every update.
@@ -43,6 +45,10 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> Result<(Config, Option<
             .map(Duration::from_secs)
             .ok_or(format!("{flag}: '{value}' is not a whole number of seconds"))
     };
+    let count = |flag: &str, value: Option<String>| -> Result<u32, String> {
+        let value = value.ok_or(format!("{flag} needs a value"))?;
+        value.parse::<u32>().ok().filter(|&n| n > 0).ok_or(format!("{flag}: '{value}' is not a whole number above 0"))
+    };
     while let Some(flag) = it.next() {
         match flag.as_str() {
             "--scenario" => scenario = Some(PathBuf::from(it.next().ok_or("--scenario needs a value")?)),
@@ -50,6 +56,10 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> Result<(Config, Option<
             "--sandbox" => config.sandbox = true,
             "--pause-after" => pause_after = Some(seconds("--pause-after", it.next())?),
             "--drop-after" => drop_after = Some(seconds("--drop-after", it.next())?),
+            "--updates-per-second" => {
+                config.bandwidth.updates_per_second = count("--updates-per-second", it.next())?;
+            }
+            "--map-every" => config.bandwidth.map_every = count("--map-every", it.next())?,
             "--admin" => config.admin = Some(it.next().ok_or("--admin needs a value")?),
             "--bind" => {
                 let value = it.next().ok_or("--bind needs a value")?;
@@ -171,6 +181,17 @@ mod tests {
         assert!(parse_args(args("--scenario s --pause-after 2")).unwrap_err().contains("multiplayer"));
         assert!(parse_args(args("--scenario s --players 2 --pause-after 9 --drop-after 9")).is_err());
         assert!(parse_args(args("--scenario s --players 2 --drop-after 0")).is_err());
+    }
+
+    /// D24's bandwidth defaults are settings (M4-7).
+    #[test]
+    fn bandwidth_settings_have_d24s_defaults() {
+        let (config, _) = parse_args(args("--scenario s --players 2")).unwrap();
+        assert_eq!(config.bandwidth, pax_server::Bandwidth { updates_per_second: 4, map_every: 5 });
+        let (config, _) = parse_args(args("--scenario s --updates-per-second 10 --map-every 1")).unwrap();
+        assert_eq!(config.bandwidth, pax_server::Bandwidth { updates_per_second: 10, map_every: 1 });
+        assert!(parse_args(args("--scenario s --updates-per-second 0")).is_err());
+        assert!(parse_args(args("--scenario s --map-every x")).is_err());
     }
 
     #[test]

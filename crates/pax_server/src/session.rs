@@ -19,7 +19,7 @@ use std::collections::BTreeMap;
 use std::num::NonZeroU64;
 
 use crate::net::{ConnHandle, Outbound};
-use crate::throttle::Throttle;
+use crate::throttle::{Bandwidth, Throttle};
 use crate::view::CheckedSubscription;
 use crate::window::UpdateWindow;
 
@@ -177,6 +177,17 @@ pub struct LobbyEntry {
     pub away: bool,
 }
 
+impl Session {
+    /// Starts the session's update stream again, as for a new connection: the
+    /// default subscription, an empty window (D23) and a fresh throttle (M4-7). For
+    /// a new game (a load) and an ended seat; the three always reset together.
+    pub(crate) fn restart_updates(&mut self) {
+        self.subscription = CheckedSubscription::default();
+        self.window = UpdateWindow::default();
+        self.throttle.restart();
+    }
+}
+
 impl SessionTable {
     /// An empty table whose host follows `host_rule`.
     pub(crate) fn new(host_rule: HostRule) -> Self {
@@ -184,8 +195,9 @@ impl SessionTable {
     }
 
     /// A new connection, not yet welcomed.
-    pub(crate) fn connect(&mut self, id: u64, conn: ConnHandle) {
-        let throttle = Throttle::new(conn.remote);
+    /// `bandwidth` throttles it if it is remote (D24, M4-7).
+    pub(crate) fn connect(&mut self, id: u64, conn: ConnHandle, bandwidth: Bandwidth) {
+        let throttle = Throttle::new(conn.remote, bandwidth);
         let row = Session {
             throttle,
             conn,
@@ -220,6 +232,8 @@ impl SessionTable {
         let row = self.rows.get_mut(&id)?;
         let seat = row.seat.take()?;
         let was_stalled = std::mem::take(&mut row.stalled);
+        // It gets no more updates: nothing it was owed stays held (M4-7).
+        row.restart_updates();
         Some(self.vacated(id, seat, was_stalled))
     }
 
@@ -446,6 +460,17 @@ impl SessionTable {
         self.rows.get(&id).and_then(|s| s.seat)
     }
 
+    /// The seated sessions whose throttle holds an update they are owed, with when
+    /// it may go out (D24, M4-7). The one definition `Sim::next_flush` and
+    /// `Sim::flush` share: a row that isn't seated is never sent an update, so it
+    /// never counts.
+    pub(crate) fn held_updates(&self) -> impl Iterator<Item = (u64, std::time::Instant)> + '_ {
+        self.rows
+            .iter()
+            .filter(|(_, s)| s.seat.is_some() && s.window.owed())
+            .filter_map(|(&id, s)| s.throttle.ready_at().map(|at| (id, at)))
+    }
+
     /// Every connection, welcomed or not, in session order.
     pub(crate) fn all(&self) -> impl Iterator<Item = &Session> {
         self.rows.values()
@@ -516,7 +541,7 @@ mod tests {
     /// Connects session `id` and seats it, checking it got player id `player`.
     fn seated(table: &mut SessionTable, id: u64, player: u16, nation: Option<u32>) {
         let (conn, _rx) = ConnHandle::for_test();
-        table.connect(id, conn);
+        table.connect(id, conn, Bandwidth::default());
         let claim = nation.map_or(Claim::Unclaimed, Claim::Nation);
         assert_eq!(table.sit(id, "p", claim, 8), Ok(Seat { player, claim }));
     }
@@ -555,7 +580,7 @@ mod tests {
         seated(&mut t, 1, 0, None);
         assert_eq!(t.host(), None, "the first player isn't host on a dedicated server");
         let (conn, _rx) = ConnHandle::for_test();
-        t.connect(2, conn);
+        t.connect(2, conn, Bandwidth::default());
         assert!(t.sit(2, "ada", Claim::Unclaimed, 8).is_ok());
         assert_eq!(t.host(), Some(2));
         assert_eq!(t.remove(2, OnLeave::EndSeat).map(|v| v.new_host), Some(None));
@@ -568,7 +593,7 @@ mod tests {
         seated(&mut t, 1, 0, Some(0));
         for id in [2, 3] {
             let (conn, _rx) = ConnHandle::for_test();
-            t.connect(id, conn);
+            t.connect(id, conn, Bandwidth::default());
         }
         assert_eq!(t.sit(2, "p", Claim::Nation(0), 8), Err(Refusal::NationTaken { nation: 0, player: 0 }));
         assert_eq!(t.sit(2, "p", Claim::Nation(1), 1), Err(Refusal::Full));
@@ -602,7 +627,7 @@ mod tests {
         seated(&mut t, 1, 0, None);
         seated(&mut t, 2, 1, Some(1));
         let (conn, _rx) = ConnHandle::for_test();
-        t.connect(3, conn); // connected, not welcomed
+        t.connect(3, conn, Bandwidth::default()); // connected, not welcomed
         assert_eq!((t.holder(0), t.holder(1)), (None, Some(1)));
         assert_eq!(t.players(), 2);
     }

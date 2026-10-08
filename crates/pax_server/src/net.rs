@@ -198,7 +198,8 @@ pub(crate) async fn accept_loop(listener: TcpListener, sim: flume::Sender<Inboun
                 info!(session, %peer, "connection");
                 // Small, latency-sensitive messages: don't wait to coalesce them.
                 let _ = stream.set_nodelay(true);
-                let remote = !peer.ip().is_loopback();
+                // `to_canonical`: on a dual-stack socket, a local IPv4 client is ::ffff:127.0.0.1.
+                let remote = !peer.ip().to_canonical().is_loopback();
                 tokio::spawn(connection(stream, session, sim.clone(), timing, remote));
             }
             Err(e) => {

@@ -34,8 +34,7 @@ use crate::net::{Inbound, Outbound};
 use crate::queue::CommandQueue;
 use crate::request::{Request, WireCommand};
 use crate::session::{Claim, HostRule, LobbyEntry, OnLeave, Refusal, Seat, Session, SessionTable, Vacated};
-use crate::view::{self, CheckedSubscription, DayViews, Subscription};
-use crate::window::UpdateWindow;
+use crate::view::{self, DayViews, Subscription};
 
 /// The lobby as players last saw it (`LobbyState` without a notice).
 #[derive(Debug, PartialEq)]
@@ -69,6 +68,8 @@ pub(crate) struct Sim {
     max_players: usize,
     /// Whether sessions without a nation are accepted (`Config::sandbox`, D24).
     sandbox: bool,
+    /// How remote sessions are throttled (D24, M4-7).
+    bandwidth: crate::Bandwidth,
     /// Stop when the last player leaves (the client launched this server).
     exit_when_idle: bool,
     /// Set when the server should stop; [`Sim::handle`] returns it. A flag rather
@@ -103,6 +104,7 @@ impl Sim {
             sessions: SessionTable::new(config.admin.clone().map_or(HostRule::FirstPlayer, HostRule::Admin)),
             max_players: usize::from(config.max_players),
             sandbox: config.sandbox,
+            bandwidth: config.bandwidth,
             exit_when_idle: config.exit_when_idle,
             stop: false,
             phase: if config.max_players > 1 { Phase::Lobby } else { Phase::SinglePlayer },
@@ -482,17 +484,13 @@ impl Sim {
     /// When the next update a throttle held may go out (D24, M4-7); `None` if none
     /// is owed.
     pub(crate) fn next_flush(&self) -> Option<Instant> {
-        self.sessions.all().filter(|s| s.window.owed()).filter_map(|s| s.throttle.ready_at()).min()
+        self.sessions.held_updates().map(|(_, at)| at).min()
     }
 
     /// Sends every held update whose time has come: the latest day, which a pause or a
     /// slow speed would otherwise keep from a remote session.
     pub(crate) fn flush(&mut self, now: Instant) {
-        let due: Vec<u64> = self
-            .sessions
-            .welcomed_mut()
-            .filter_map(|(id, s)| (s.window.owed() && s.throttle.ready_at().is_some_and(|at| at <= now)).then_some(id))
-            .collect();
+        let due: Vec<u64> = self.sessions.held_updates().filter(|&(_, at)| at <= now).map(|(id, _)| id).collect();
         if due.is_empty() {
             return;
         }
@@ -618,8 +616,7 @@ impl Sim {
         for id in self.sessions.welcomed() {
             let seat = self.sessions.seat(id).expect("welcomed sessions have a seat");
             let Some(s) = self.sessions.get_mut(id) else { continue };
-            s.subscription = CheckedSubscription::default();
-            s.window = UpdateWindow::default();
+            s.restart_updates();
             self.welcome(id, seat);
         }
     }
@@ -704,7 +701,7 @@ impl Sim {
     /// Handles one inbound event. Returns `false` when the server should stop.
     pub(crate) fn handle(&mut self, event: Inbound) -> bool {
         match event {
-            Inbound::Connected { session, conn } => self.sessions.connect(session, conn),
+            Inbound::Connected { session, conn } => self.sessions.connect(session, conn, self.bandwidth),
             Inbound::Request {
                 session,
                 request: Request::Hello { major, minor, name, requested_nation, resume_token },
@@ -803,10 +800,8 @@ pub(crate) fn run(sim: &mut Sim, inbound: Receiver<Inbound>) {
             // an event, the tick or the next held update (M4-7).
             Err(TryRecvError::Empty) => {
                 let now = Instant::now();
-                let flush = sim.next_flush();
-                if flush.is_some_and(|at| at <= now) {
+                if sim.next_flush().is_some_and(|at| at <= now) {
                     sim.flush(now);
-                    continue;
                 }
                 let due = sim.clock.due();
                 if due.is_some_and(|due| now >= due) {
@@ -814,6 +809,10 @@ pub(crate) fn run(sim: &mut Sim, inbound: Receiver<Inbound>) {
                     sim.clock.ticked(Instant::now());
                     continue;
                 }
+                // A flush sends everything due, so what's left is in the future; a
+                // past one would only spin the loop, so it never sets the deadline.
+                let flush = sim.next_flush().filter(|&at| at > now);
+                debug_assert_eq!(flush, sim.next_flush(), "a flush leaves nothing due");
                 match [due, flush].into_iter().flatten().min() {
                     Some(deadline) => match inbound.recv_deadline(deadline) {
                         Ok(event) => event,
@@ -1599,6 +1598,16 @@ mod tests {
         read(&mut rx, &mut sim, at, &mut updates);
         assert_eq!(updates.last().map(|u| u.0), Some(40), "{updates:?}");
         assert_eq!(sim.next_flush(), None);
+
+        // A seat that ends (a kick, a load without its nation) with a day held leaves
+        // nothing due: its row stays until the connection closes, and a flush would
+        // never send to it, so a held day there would spin the sim loop.
+        let now = at + Duration::from_millis(10);
+        sim.advance_at(now);
+        assert!(sim.next_flush().is_some(), "the next day is held");
+        let vacated = sim.sessions.unseat(SESSION).expect("it was seated");
+        sim.seat_ended(SESSION, vacated);
+        assert_eq!(sim.next_flush(), None, "an ended seat holds nothing");
     }
 
     /// A single-player server has no lobby and never sends LobbyState: lobby
