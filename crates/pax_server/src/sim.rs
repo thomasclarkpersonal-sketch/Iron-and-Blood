@@ -30,7 +30,7 @@ use crate::game::Game;
 use crate::net::{Inbound, Outbound};
 use crate::queue::CommandQueue;
 use crate::request::{Request, WireCommand};
-use crate::session::{Seat, Session, SessionTable};
+use crate::session::{Refusal, Seat, Session, SessionTable};
 use crate::view::{self, CheckedSubscription, DayViews, Subscription};
 use crate::window::UpdateWindow;
 
@@ -97,31 +97,36 @@ impl Sim {
             );
             return self.reject(session, &reason);
         }
-        if self.sessions.players() >= self.max_players {
-            let reason = match self.max_players {
-                1 => "server full: a single-player server accepts one client".to_owned(),
-                n => format!("server full: all {n} players are connected"),
-            };
-            return self.reject(session, &reason);
+        // `net` lets a session say Hello only once; the sim thread doesn't rely on it.
+        if self.sessions.seat(session).is_some() {
+            return self.goodbye(session, "Hello sent twice");
         }
         if requested_nation.is_none() && !self.sandbox {
             return self.reject(session, "this server has no sandbox (it runs without --sandbox): ask for a nation");
         }
-        if let Some(n) = requested_nation {
-            if n as usize >= nations {
-                return self.reject(session, &format!("unknown nation {n}: the scenario has {nations}"));
+        if let Some(n) = requested_nation
+            && n as usize >= nations
+        {
+            return self.reject(session, &format!("unknown nation {n}: the scenario has {nations}"));
+        }
+        // The table checks the limit and that the nation is free (D24), and picks the
+        // player id. A connection's events arrive in order on one channel (Connected,
+        // its requests, then Closed), so a session that sent Hello is always known.
+        let seat = match self.sessions.sit(session, requested_nation, self.max_players) {
+            Ok(seat) => seat,
+            Err(Refusal::Full) => {
+                let reason = match self.max_players {
+                    1 => "server full: a single-player server accepts one client".to_owned(),
+                    n => format!("server full: all {n} players are connected"),
+                };
+                return self.reject(session, &reason);
             }
-            // Each nation has one player (D24). Sandbox seats hold no nation.
-            if let Some(player) = self.sessions.holder(n) {
+            Err(Refusal::NationTaken { player }) => {
+                let n = requested_nation.expect("only a nation can be taken");
                 let key = &self.game.world().nations.key[n as usize];
                 return self.reject(session, &format!("nation {n} ({key}) is taken by player {player}"));
             }
-        }
-        let seat = Seat { player: self.sessions.free_player(), nation: requested_nation };
-        // A connection's events arrive in order on one channel: Connected, its
-        // requests, then Closed. So a session that sent Hello is always known here.
-        let s = self.sessions.get_mut(session).expect("Connected precedes every request of a session");
-        s.seat = Some(seat);
+        };
         info!(session, name, player = seat.player, ?requested_nation, "welcomed");
         // The host (D24): the admin by name on a dedicated server, else the first player.
         let host = match &self.admin {
@@ -323,11 +328,17 @@ impl Sim {
         let nations = self.game.world().nations.key.len();
         // Every player gets the new game's Welcome, in session order (NETWORK_PROTOCOL §3).
         for id in self.sessions.welcomed() {
+            let seat = self.sessions.seat(id).expect("welcomed sessions have a seat");
+            // A seat is never widened: a player whose nation the loaded game lacks
+            // leaves, rather than becoming a sandbox seat that commands every nation.
+            if let Some(n) = seat.nation.filter(|&n| n as usize >= nations) {
+                let was_host = self.sessions.is_host(id);
+                self.goodbye(id, &format!("the loaded game has no nation {n}, which you played"));
+                self.sessions.unseat(id);
+                self.player_left(id, seat, was_host);
+                continue;
+            }
             let Some(s) = self.sessions.get_mut(id) else { continue };
-            let seat = s.seat.as_mut().expect("welcomed sessions have a seat");
-            // A nation the loaded scenario doesn't have falls back to sandbox (M3).
-            seat.nation = seat.nation.filter(|&n| (n as usize) < nations);
-            let seat = *seat;
             s.subscription = CheckedSubscription::default();
             s.window = UpdateWindow::default();
             self.welcome(id, seat);
@@ -425,7 +436,7 @@ impl Sim {
             Inbound::Closed { session } => {
                 let was_host = self.sessions.is_host(session);
                 // The others play on (D24); see `player_left`.
-                if let Some(seat) = self.sessions.remove(session).and_then(|s| s.seat) {
+                if let Some(seat) = self.sessions.remove(session).and_then(|s| s.seat()) {
                     return self.player_left(session, seat, was_host);
                 }
             }
@@ -728,13 +739,15 @@ mod tests {
         assert_eq!(sim.clock, Clock::Paused);
     }
 
-    /// A sim with room for `players`, and nobody connected yet.
+    /// A multiplayer sim with room for `players`, nobody connected yet, and no
+    /// sandbox (D24): every player holds a nation.
     fn multiplayer(players: u16) -> (Sim, SavesDir) {
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two_states");
         let saves = test_saves_dir();
         let mut config = crate::Config::local(&dir);
         config.saves_dir = saves.0.clone();
         config.max_players = players;
+        config.sandbox = false;
         (Sim::new(pax_data::load_scenario(&dir).unwrap(), &config), saves)
     }
 
@@ -752,17 +765,19 @@ mod tests {
     /// M4-1: players up to the limit, each with their own id and nation.
     #[test]
     fn players_join_up_to_the_limit_with_distinct_ids_and_nations() {
-        let (mut sim, _saves) = multiplayer(3);
+        let (mut sim, _saves) = multiplayer(2);
         let (_a, sent) = join(&mut sim, 1, Some(0));
         assert_eq!(sent, [Sent::Welcome { player: 0 }]);
         let (_b, sent) = join(&mut sim, 2, Some(0));
         assert_eq!(sent, [Sent::Rejected, Sent::Close], "nation 0 is taken");
         let (_b, sent) = join(&mut sim, 3, Some(1));
         assert_eq!(sent, [Sent::Welcome { player: 1 }]);
+        sim.max_players = 3;
         let (_c, sent) = join(&mut sim, 4, None);
-        assert_eq!(sent, [Sent::Welcome { player: 2 }], "a sandbox seat holds no nation");
-        let (_d, sent) = join(&mut sim, 5, None);
-        assert_eq!(sent, [Sent::Rejected, Sent::Close], "three players: the server is full");
+        assert_eq!(sent, [Sent::Rejected, Sent::Close], "no sandbox without --sandbox (D24)");
+        sim.max_players = 2;
+        let (_d, sent) = join(&mut sim, 5, Some(1));
+        assert_eq!(sent, [Sent::Rejected, Sent::Close], "two players: the server is full");
         // Player 1 leaves; the next player takes the free id and nation.
         sim.handle(Inbound::Closed { session: 3 });
         let (_e, sent) = join(&mut sim, 6, Some(1));
@@ -849,10 +864,9 @@ mod tests {
     /// The host leaving hands the role to the lowest remaining player id.
     #[test]
     fn the_host_role_passes_to_the_lowest_player_when_the_host_leaves() {
-        let (mut sim, _saves) = multiplayer(3);
+        let (mut sim, _saves) = multiplayer(2);
         let (_h, _) = join(&mut sim, 1, Some(0));
         let (mut b, _) = join(&mut sim, 2, Some(1));
-        let (_c, _) = join(&mut sim, 3, None);
         sim.handle(Inbound::Closed { session: 1 });
         assert_eq!(sim.sessions.host(), Some(2), "player 1 is now the lowest");
         speed(&mut sim, 2, wire::Speed::Fast);
@@ -887,11 +901,10 @@ mod tests {
     /// dropped. Anyone else's kick is ignored.
     #[test]
     fn the_host_kicks_and_nobody_else_can() {
-        let (mut sim, _saves) = multiplayer(3);
+        let (mut sim, _saves) = multiplayer(2);
         let (mut host, _) = join(&mut sim, 1, Some(0));
         let (mut b, _) = join(&mut sim, 2, Some(1));
-        let (mut c, _) = join(&mut sim, 3, None);
-        sim.handle(Inbound::Request { session: 3, request: Request::Kick { player: 1 } });
+        sim.handle(Inbound::Request { session: 2, request: Request::Kick { player: 0 } });
         sim.handle(Inbound::Request { session: 1, request: Request::Kick { player: 0 } });
         assert_eq!((drain(&mut b), drain(&mut host)), (vec![], vec![]), "a guest can't kick, nor the host itself");
         sim.handle(Inbound::Request { session: 1, request: Request::Kick { player: 1 } });
@@ -906,7 +919,33 @@ mod tests {
         sim.handle(Inbound::Closed { session: 2 });
         let (_d, sent) = join(&mut sim, 4, Some(1));
         assert_eq!(sent, [Sent::Welcome { player: 1 }]);
-        drain(&mut c);
+        drain(&mut host);
+    }
+
+    /// A load never widens a seat: a player whose nation the loaded game lacks is
+    /// told why and leaves, instead of becoming a sandbox seat (D24).
+    #[test]
+    fn a_load_drops_a_player_whose_nation_is_gone() {
+        let (mut sim, saves) = multiplayer(2);
+        let (mut a, _) = join(&mut sim, 1, Some(0));
+        let (mut b, _) = join(&mut sim, 2, Some(1));
+        // A save of mini_valley, which has no nations, in the same saves directory.
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/mini_valley");
+        let mut config = crate::Config::local(&dir);
+        config.saves_dir = saves.0.clone();
+        let mut other = Sim::new(pax_data::load_scenario(&dir).unwrap(), &config);
+        let (mut o, _) = join(&mut other, 1, None);
+        other.handle(Inbound::Request { session: 1, request: Request::SaveGame { name: Some("mv".into()) } });
+        assert!(matches!(drain(&mut o).as_slice(), [Sent::Saved { error, .. }] if error.is_empty()));
+
+        sim.handle(Inbound::Request { session: 1, request: Request::LoadGame { name: Some("mv".into()) } });
+        for (rx, n) in [(&mut a, 0), (&mut b, 1)] {
+            match drain(rx).as_slice() {
+                [Sent::Goodbye(reason), Sent::Close] => assert!(reason.contains(&format!("no nation {n}")), "{reason}"),
+                other => panic!("{other:?}"),
+            }
+        }
+        assert_eq!((sim.sessions.players(), sim.clock), (0, Clock::Paused), "nobody plays a sandbox seat now");
     }
 
     #[test]

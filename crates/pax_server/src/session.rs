@@ -4,7 +4,11 @@
 //! A row holds what the server keeps per client: its connection handle, its
 //! subscription, its flow-control window and, once welcomed, its seat (player id and
 //! nation). Rows hold no references into the `World`; the sim thread reads both side
-//! by side. Rows are keyed by the connection's session id in a `BTreeMap`, so
+//! by side.
+//!
+//! The table is the only writer of seats ([`SessionTable::sit`], [`SessionTable::unseat`]),
+//! so its invariants hold whoever seats a player: player ids are distinct, a nation
+//! has at most one player (D24), and no more than the server's limit play at once. Rows are keyed by the connection's session id in a `BTreeMap`, so
 //! iteration (broadcasts, a load's new `Welcome`s) is in session order, never in hash
 //! order.
 
@@ -19,10 +23,26 @@ pub(crate) struct Session {
     pub subscription: CheckedSubscription,
     /// Set by `Welcome`. Until then the session may only say `Hello`: one choke
     /// point in `Sim::handle` drops anything else, so no request handler has to
-    /// remember to check (a rejected session's queued requests never act).
-    pub seat: Option<Seat>,
+    /// remember to check (a rejected session's queued requests never act). Private:
+    /// only [`SessionTable::sit`] and [`SessionTable::unseat`] write it.
+    seat: Option<Seat>,
     /// Which days' updates it is sent (D23 flow control).
     pub window: UpdateWindow,
+}
+
+impl Session {
+    pub(crate) fn seat(&self) -> Option<Seat> {
+        self.seat
+    }
+}
+
+/// Why [`SessionTable::sit`] refused a seat.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Refusal {
+    /// The server's limit of players are already playing.
+    Full,
+    /// Another player holds the nation (D24).
+    NationTaken { player: u16 },
 }
 
 /// Who a welcomed session plays.
@@ -97,6 +117,23 @@ impl SessionTable {
         self.rows.get_mut(&id)
     }
 
+    /// Seats a connected session as a new player of `nation` (`None`: sandbox, which
+    /// the caller has allowed): the lowest free player id, if fewer than `max_players`
+    /// play and nobody holds the nation. The only way a session gets a seat.
+    pub(crate) fn sit(&mut self, id: u64, nation: Option<u32>, max_players: usize) -> Result<Seat, Refusal> {
+        if self.players() >= max_players {
+            return Err(Refusal::Full);
+        }
+        if let Some(player) = nation.and_then(|n| self.holder(n)) {
+            return Err(Refusal::NationTaken { player });
+        }
+        let seat = Seat { player: self.free_player(), nation };
+        let row = self.rows.get_mut(&id).expect("a session is connected before it says Hello");
+        debug_assert!(row.seat.is_none(), "net lets a session say Hello only once");
+        row.seat = Some(seat);
+        Ok(seat)
+    }
+
     /// The session's seat, if it was welcomed.
     pub(crate) fn seat(&self, id: u64) -> Option<Seat> {
         self.rows.get(&id).and_then(|s| s.seat)
@@ -160,10 +197,11 @@ impl SessionTable {
 mod tests {
     use super::*;
 
+    /// Connects session `id` and seats it, checking it got player id `player`.
     fn seated(table: &mut SessionTable, id: u64, player: u16, nation: Option<u32>) {
         let (conn, _rx) = ConnHandle::for_test();
         table.connect(id, conn);
-        table.get_mut(id).unwrap().seat = Some(Seat { player, nation });
+        assert_eq!(table.sit(id, nation, 8), Ok(Seat { player, nation }));
     }
 
     #[test]
@@ -183,8 +221,8 @@ mod tests {
     #[test]
     fn the_host_is_cleared_when_it_leaves_or_is_unseated() {
         let mut t = SessionTable::default();
-        seated(&mut t, 5, 1, None);
         seated(&mut t, 9, 0, None);
+        seated(&mut t, 5, 1, None);
         t.set_host(5);
         assert!(t.is_host(5));
         assert_eq!(t.lowest_player(), Some(9), "player 0 is session 9");
@@ -193,6 +231,20 @@ mod tests {
         t.set_host(9);
         assert_eq!(t.unseat(9).map(|s| s.player), Some(0));
         assert_eq!((t.host(), t.players()), (None, 0));
+    }
+
+    #[test]
+    fn sit_refuses_a_full_table_and_a_taken_nation() {
+        let mut t = SessionTable::default();
+        seated(&mut t, 1, 0, Some(0));
+        for id in [2, 3] {
+            let (conn, _rx) = ConnHandle::for_test();
+            t.connect(id, conn);
+        }
+        assert_eq!(t.sit(2, Some(0), 8), Err(Refusal::NationTaken { player: 0 }));
+        assert_eq!(t.sit(2, Some(1), 1), Err(Refusal::Full));
+        assert_eq!(t.sit(3, Some(1), 2), Ok(Seat { player: 1, nation: Some(1) }));
+        assert_eq!(t.seat(2), None, "a refused session stays unseated");
     }
 
     #[test]

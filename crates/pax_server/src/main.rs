@@ -1,10 +1,14 @@
-//! `pax_server --scenario DIR [--bind ADDR] [--port-file PATH] [--saves DIR] [--players N] [--sandbox] [--admin NAME] [--exit-when-idle]`
+//! `pax_server --scenario DIR [--bind ADDR] [--port-file PATH] [--saves DIR] [--players N] [--sandbox] [--admin NAME] [--insecure-no-tls] [--exit-when-idle]`
 //!
 //! The authoritative game server (D10). In single player the client launches it with
 //! `--scenario <dir> --bind 127.0.0.1:0 --port-file <tmp> --sandbox --exit-when-idle`
 //! and reads the port from the file (NETWORK_PROTOCOL §6). `--players N` lets up to N
 //! clients play at once (M4-1; default 1). `--sandbox` accepts sessions without a
 //! nation, and `--admin NAME` makes the client of that name the host (D24, M4-3).
+//!
+//! D24 requires TLS whenever a server is not bound to localhost, and TLS arrives with
+//! M4-6. Until then, several players on a non-loopback address are refused unless
+//! `--insecure-no-tls` says the network is trusted. M4-6 removes the flag.
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -12,7 +16,7 @@ use std::process::ExitCode;
 use pax_server::{Config, Server};
 use tracing::error;
 
-const USAGE: &str = "usage: pax_server --scenario DIR [--bind ADDR] [--port-file PATH] [--saves DIR] [--players N] [--sandbox] [--admin NAME] [--exit-when-idle]";
+const USAGE: &str = "usage: pax_server --scenario DIR [--bind ADDR] [--port-file PATH] [--saves DIR] [--players N] [--sandbox] [--admin NAME] [--insecure-no-tls] [--exit-when-idle]";
 
 /// The most players `--players` allows. Player ids are `u16` on the wire; the cap is
 /// far below that, a sanity limit for a server whose every player gets every update.
@@ -26,11 +30,13 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> Result<(Config, Option<
     // Sandbox seats exist only when asked for (D24).
     config.sandbox = false;
     let mut port_file = None;
+    let mut insecure = false;
     while let Some(flag) = it.next() {
         match flag.as_str() {
             "--scenario" => scenario = Some(PathBuf::from(it.next().ok_or("--scenario needs a value")?)),
             "--exit-when-idle" => config.exit_when_idle = true,
             "--sandbox" => config.sandbox = true,
+            "--insecure-no-tls" => insecure = true,
             "--admin" => config.admin = Some(it.next().ok_or("--admin needs a value")?),
             "--bind" => {
                 let value = it.next().ok_or("--bind needs a value")?;
@@ -51,6 +57,12 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> Result<(Config, Option<
         }
     }
     config.scenario = scenario.ok_or("missing --scenario DIR")?;
+    if config.max_players > 1 && !config.bind.ip().is_loopback() && !insecure {
+        return Err(format!(
+            "--players {} on {} needs TLS, which arrives with M4-6 (D24); on a trusted network, add --insecure-no-tls",
+            config.max_players, config.bind
+        ));
+    }
     Ok((config, port_file))
 }
 
@@ -114,6 +126,16 @@ mod tests {
         assert!(config.exit_when_idle);
         assert_eq!(config.max_players, 1, "single player by default");
         assert!(config.sandbox);
+    }
+
+    /// D24: no plaintext multiplayer off localhost without saying so (until M4-6).
+    #[test]
+    fn multiplayer_off_localhost_needs_the_insecure_flag_until_tls() {
+        let e = parse_args(args("--scenario s --players 2 --bind 0.0.0.0:7777")).unwrap_err();
+        assert!(e.contains("--insecure-no-tls"), "{e}");
+        assert!(parse_args(args("--scenario s --players 2 --bind 0.0.0.0:7777 --insecure-no-tls")).is_ok());
+        assert!(parse_args(args("--scenario s --players 2 --bind 127.0.0.1:7777")).is_ok());
+        assert!(parse_args(args("--scenario s --bind 0.0.0.0:7777")).is_ok(), "one player: unchanged from M3");
     }
 
     #[test]

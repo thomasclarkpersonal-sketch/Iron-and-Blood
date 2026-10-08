@@ -129,9 +129,9 @@ sequenceDiagram
 - When the client exits, it closes the connection, and `--exit-when-idle` makes the server shut down once its player has gone.
 - The client's bridge (`pax_godot::connection`) does this, and also what every client owes the server: it acknowledges each `DayUpdate` on the poll after the one that delivered it (§5), and sends a `Ping` after a fifth of `IDLE_TIMEOUT` (2 s) without sending anything. It also pairs each `SaveResult` and load `Welcome` with the request it answers, oldest first, because the server answers save requests in order. A `Welcome` nothing asked for is another player's load (§3), and replaces the session's tables all the same.
 - There is no Docker and no separate install: the server binary ships next to the client.
-- **Several players (M4-1, M4-3):** run the server yourself, for example `pax_server --scenario <dir> --bind 0.0.0.0:7777 --players 3`, and have each client connect to it.
+- **Several players (M4-1, M4-3):** run the server yourself, for example `pax_server --scenario <dir> --bind 127.0.0.1:7777 --players 2`, and have each client connect to it.
   - **The host** is the first player to join. When the host leaves, the remaining player with the lowest id becomes host. On a dedicated server, `--admin NAME` makes the client named `NAME` the host instead, whenever it joins; while it is away there is no host (D24).
-  - The lobby (M4-2) and the lag rules (M4-4) are still to come, and so are TLS and a server password (M4-6). Until then, bind a multiplayer server only on a trusted network: a client name is not proof of identity.
+  - The lobby (M4-2) and the lag rules (M4-4) are still to come, and so are TLS and a server password (M4-6). D24 requires TLS off localhost, so until M4-6 the server refuses `--players` above 1 on any other address unless `--insecure-no-tls` says the network is trusted. Even then, a client name is not proof of identity.
 
 ## 7. Conversions and units
 
