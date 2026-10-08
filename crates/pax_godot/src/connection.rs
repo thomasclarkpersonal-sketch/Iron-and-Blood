@@ -24,7 +24,7 @@ use crate::encode;
 
 /// Send a `Ping` after this long without sending anything: a fifth of the server's
 /// idle timeout (`pax_protocol::IDLE_TIMEOUT`), so a paused game is never dropped.
-pub const KEEP_ALIVE: Duration = Duration::from_secs(pax_protocol::IDLE_TIMEOUT.as_secs() / 5);
+pub const KEEP_ALIVE: Duration = Duration::from_millis(pax_protocol::IDLE_TIMEOUT.as_millis() as u64 / 5);
 
 /// What one poll found.
 #[derive(Debug, Default, PartialEq)]
@@ -270,4 +270,15 @@ impl Drop for LocalServer {
 fn port_file_path() -> PathBuf {
     let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
     std::env::temp_dir().join(format!("pax-port-{}-{nanos}", std::process::id()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_keep_alive_is_well_inside_the_idle_timeout() {
+        assert!(KEEP_ALIVE > Duration::ZERO);
+        assert!(KEEP_ALIVE * 4 < pax_protocol::IDLE_TIMEOUT);
+    }
 }

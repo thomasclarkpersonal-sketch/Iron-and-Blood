@@ -121,17 +121,41 @@ impl RequestReader {
     }
 
     /// The next request; `Ok(None)` until more bytes arrive. An error is a protocol
-    /// error that ends the session with `Goodbye` (D22), and its text is the reason.
-    pub fn next_request(&mut self) -> Result<Option<Request>, String> {
-        let Some(frame) = self.decoder.next_frame().map_err(|e| e.to_string())? else { return Ok(None) };
-        let request = request::decode(&frame).map_err(|e| e.to_string())?;
+    /// error that ends the session with `Goodbye` (D22); its text is the reason.
+    pub fn next_request(&mut self) -> Result<Option<Request>, ReadError> {
+        let Some(frame) = self.decoder.next_frame().map_err(ReadError::Frame)? else { return Ok(None) };
+        let request = request::decode(&frame).map_err(ReadError::Decode)?;
         match (&request, self.greeted) {
             (Request::Hello { .. }, false) => self.greeted = true,
-            (Request::Hello { .. }, true) => return Err("Hello sent twice".to_owned()),
-            (_, false) => return Err("the first message must be Hello".to_owned()),
+            (Request::Hello { .. }, true) => return Err(ReadError::HelloTwice),
+            (_, false) => return Err(ReadError::NoHello),
             (_, true) => {}
         }
         Ok(Some(request))
+    }
+}
+
+/// Why a connection's input ends the session, by kind, so callers (the fuzz target,
+/// future metrics) can tell them apart. `Display` is the `Goodbye` reason.
+#[derive(Debug)]
+pub enum ReadError {
+    /// The byte stream can't be split into frames.
+    Frame(pax_protocol::FrameError),
+    /// A frame isn't a usable request.
+    Decode(request::RequestError),
+    /// The session rules: `Hello` first, and only once.
+    HelloTwice,
+    NoHello,
+}
+
+impl std::fmt::Display for ReadError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ReadError::Frame(e) => write!(f, "{e}"),
+            ReadError::Decode(e) => write!(f, "{e}"),
+            ReadError::HelloTwice => write!(f, "Hello sent twice"),
+            ReadError::NoHello => write!(f, "the first message must be Hello"),
+        }
     }
 }
 
@@ -205,7 +229,7 @@ async fn connection(stream: TcpStream, session: u64, sim: flume::Sender<Inbound>
             let request = match reader.next_request() {
                 Ok(Some(request)) => request,
                 Ok(None) => break,
-                Err(reason) => break 'read Some(reason),
+                Err(e) => break 'read Some(e.to_string()),
             };
             if let Request::Ping { nonce } = request {
                 if out_tx.try_send(Outbound::Frame(encode::pong(nonce))).is_err() {

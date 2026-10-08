@@ -80,6 +80,23 @@ pub const PROTOCOL_MINOR: u16 = 0;
 /// from this, so the two can't drift apart.
 pub const IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
+/// How long one day takes at a running `speed` (D23): the server paces its clock
+/// with this, and the client describes the speeds from it. `Fastest` is zero (as fast
+/// as the engine allows). `None` for `Paused`, where no days run, and for speeds this
+/// build doesn't know.
+pub fn day_interval(speed: wire::Speed) -> Option<std::time::Duration> {
+    use std::time::Duration;
+    use wire::Speed as S;
+    match speed {
+        S::Slowest => Some(Duration::from_millis(2_000)), // 0.5 days/s
+        S::Slow => Some(Duration::from_millis(1_000)),    // 1
+        S::Normal => Some(Duration::from_millis(500)),    // 2
+        S::Fast => Some(Duration::from_millis(200)),      // 5
+        S::Fastest => Some(Duration::ZERO),
+        _ => None,
+    }
+}
+
 /// The scale of `wire::Fixed`: its `raw` is the value × `FIXED_ONE` (D3), the same as
 /// `pax_engine::Fixed`. `pax_server`'s tests pin the two together; the client converts
 /// only through this.

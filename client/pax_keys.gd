@@ -112,6 +112,8 @@ const COMMAND_ERROR_NOT_PERMITTED := 5
 const COMMAND_ERROR_RATE_LIMITED := 6
 ## CommandError names, by value.
 const COMMAND_ERROR_NAMES := ["None", "UnknownNation", "RateOutOfRange", "NoBasket", "Malformed", "NotPermitted", "RateLimited"]
+## Milliseconds per day at each speed, by value (D23); null when paused.
+const SPEED_DAY_MS := [null, 2000, 1000, 500, 200, 0]
 
 ## Policy names for PaxClient.submit_policy.
 const POLICY_INCOME_TAX := "income_tax"

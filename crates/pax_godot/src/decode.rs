@@ -551,11 +551,11 @@ impl ServerStream {
         Ok(match kind {
             P::Rejected => {
                 let r = required(msg.payload_as_rejected(), "Rejected body")?;
-                ServerEvent::Rejected { reason: r.reason().unwrap_or_default().to_owned() }
+                ServerEvent::Rejected { reason: required(r.reason(), "Rejected reason")?.to_owned() }
             }
             P::Goodbye => {
                 let g = required(msg.payload_as_goodbye(), "Goodbye body")?;
-                ServerEvent::Goodbye { reason: g.reason().unwrap_or_default().to_owned() }
+                ServerEvent::Goodbye { reason: required(g.reason(), "Goodbye reason")?.to_owned() }
             }
             P::DayUpdate => {
                 let u = required(msg.payload_as_day_update(), "DayUpdate body")?;
@@ -589,9 +589,7 @@ impl ServerStream {
             }
             P::SaveList => {
                 let l = required(msg.payload_as_save_list(), "SaveList body")?;
-                ServerEvent::SaveList {
-                    names: l.names().map(|n| n.iter().map(str::to_owned).collect()).unwrap_or_default(),
-                }
+                ServerEvent::SaveList { names: strings(l.names(), "SaveList names")? }
             }
             _ => ServerEvent::Unknown(kind),
         })

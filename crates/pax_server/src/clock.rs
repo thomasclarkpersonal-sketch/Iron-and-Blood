@@ -18,17 +18,15 @@ pub(crate) enum Pace {
     Unknown,
 }
 
-/// Days per real second at each speed (D23).
+/// How a speed paces the clock (D23): `pax_protocol::day_interval`, the table the
+/// client describes the speeds with too.
 pub(crate) fn pace(speed: wire::Speed) -> Pace {
-    use wire::Speed as S;
-    match speed {
-        S::Paused => Pace::Paused,
-        S::Slowest => Pace::Every(Duration::from_millis(2_000)), // 0.5 days/s
-        S::Slow => Pace::Every(Duration::from_millis(1_000)),    // 1
-        S::Normal => Pace::Every(Duration::from_millis(500)),    // 2
-        S::Fast => Pace::Every(Duration::from_millis(200)),      // 5
-        S::Fastest => Pace::Every(Duration::ZERO),
-        _ => Pace::Unknown,
+    if speed == wire::Speed::Paused {
+        return Pace::Paused;
+    }
+    match pax_protocol::day_interval(speed) {
+        Some(interval) => Pace::Every(interval),
+        None => Pace::Unknown,
     }
 }
 
