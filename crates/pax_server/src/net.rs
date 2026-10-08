@@ -16,6 +16,7 @@
 //! stops reading fills the queue, and its connection is closed instead of growing
 //! memory without limit.
 
+use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -43,6 +44,12 @@ pub(crate) const INBOUND_QUEUE: usize = 1024;
 /// After the session ends, how long the writer may take to flush its queue before
 /// it is cut off (a client that isn't reading would hold it forever).
 const FLUSH_TIMEOUT: Duration = Duration::from_secs(2);
+
+/// When the server stops, how long `Server::wait` lets the connection tasks write
+/// their `Goodbye` and end before the runtime is dropped (which cancels them). A
+/// connection gives its writer [`FLUSH_TIMEOUT`], so the drain allows that and a
+/// little more: one policy, not two numbers that can drift apart.
+pub(crate) const SHUTDOWN_DRAIN: Duration = FLUSH_TIMEOUT.saturating_add(Duration::from_millis(500));
 
 /// How long a connection may stay silent (D22, D24).
 #[derive(Clone, Copy, Debug)]
@@ -193,32 +200,52 @@ impl std::fmt::Display for ReadError {
 /// that never finishes one can't hold a task forever.
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// How many sessions' connection tasks are running (a TLS connection counts once
-/// its handshake succeeded). When the server stops, the sim queues a `Goodbye` and
-/// `Close` for every session; `Server::wait` stops accepting, then waits (at most
-/// 1 s) for this to reach zero, so those tasks write it before the runtime is
-/// dropped, which would otherwise cancel them with the `Goodbye` unsent.
+/// How many sessions' connection tasks are running: [`connection`] counts itself,
+/// so every session is counted, however it arrived. When the server stops, the sim
+/// queues a `Goodbye` and `Close` for every session; `Server::wait` stops accepting,
+/// then waits ([`Self::all_closed`], at most [`SHUTDOWN_DRAIN`]) for the count to
+/// reach zero, so those tasks write it before the runtime is dropped, which would
+/// otherwise cancel them with the `Goodbye` unsent.
 #[derive(Clone, Debug, Default)]
-pub(crate) struct OpenConnections(Arc<std::sync::atomic::AtomicUsize>);
+pub(crate) struct OpenConnections(Arc<Open>);
+
+#[derive(Debug, Default)]
+pub(crate) struct Open {
+    count: std::sync::atomic::AtomicUsize,
+    /// Signalled when the count reaches zero.
+    closed: Notify,
+}
 
 impl OpenConnections {
-    pub(crate) fn count(&self) -> usize {
-        self.0.load(std::sync::atomic::Ordering::Acquire)
-    }
-
     /// Counts one connection until the returned guard is dropped (its task ends,
     /// or is cancelled).
     fn open(&self) -> OpenGuard {
-        self.0.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+        self.0.count.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
         OpenGuard(self.0.clone())
+    }
+
+    /// Returns once no connection is open.
+    pub(crate) async fn all_closed(&self) {
+        loop {
+            // Registered before the check, so a close in between can't be missed.
+            let notified = self.0.closed.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+            if self.0.count.load(std::sync::atomic::Ordering::Acquire) == 0 {
+                return;
+            }
+            notified.await;
+        }
     }
 }
 
-struct OpenGuard(Arc<std::sync::atomic::AtomicUsize>);
+struct OpenGuard(Arc<Open>);
 
 impl Drop for OpenGuard {
     fn drop(&mut self) {
-        self.0.fetch_sub(1, std::sync::atomic::Ordering::AcqRel);
+        if self.0.count.fetch_sub(1, std::sync::atomic::Ordering::AcqRel) == 1 {
+            self.0.closed.notify_waiters();
+        }
     }
 }
 
@@ -239,29 +266,17 @@ pub(crate) async fn accept_loop(
                 next_session += 1;
                 // Small, latency-sensitive messages: don't wait to coalesce them.
                 let _ = stream.set_nodelay(true);
-                // `to_canonical`: on a dual-stack socket, a local IPv4 client is ::ffff:127.0.0.1.
-                let remote = !peer.ip().to_canonical().is_loopback();
-                let sim = sim.clone();
-                // Counted once it is a session, which a Goodbye can reach: a pending
-                // or failed TLS handshake never holds up a shutdown.
+                let (sim, open) = (sim.clone(), open.clone());
                 match tls.clone() {
                     None => {
-                        info!(session, %peer, "connection");
-                        let guard = open.open();
-                        tokio::spawn(async move {
-                            let _guard = guard;
-                            connection(stream, session, sim, timing, remote).await
-                        });
+                        tokio::spawn(connection(stream, session, peer, sim, timing, open));
                     }
                     Some(acceptor) => {
-                        let open = open.clone();
+                        // A pending or failed handshake isn't a session yet, so it never
+                        // holds up a shutdown (`connection` counts sessions).
                         tokio::spawn(async move {
                             match tokio::time::timeout(HANDSHAKE_TIMEOUT, acceptor.accept(stream)).await {
-                                Ok(Ok(stream)) => {
-                                    info!(session, %peer, "connection");
-                                    let _guard = open.open();
-                                    connection(stream, session, sim, timing, remote).await
-                                }
+                                Ok(Ok(stream)) => connection(stream, session, peer, sim, timing, open).await,
                                 // A port probe, such as the Docker health check (M4-8),
                                 // closes without a word: not worth a line every 30 s.
                                 Ok(Err(e)) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
@@ -284,10 +299,23 @@ pub(crate) async fn accept_loop(
 }
 
 /// One session's connection task, over plain TCP or TLS.
-async fn connection<S>(stream: S, session: u64, sim: flume::Sender<Inbound>, timing: Timing, remote: bool)
-where
+/// One session, from its first byte to its close; every session goes through here,
+/// which counts it in `open` (for the shutdown drain) and logs it.
+async fn connection<S>(
+    stream: S,
+    session: u64,
+    peer: SocketAddr,
+    sim: flume::Sender<Inbound>,
+    timing: Timing,
+    open: OpenConnections,
+) where
     S: AsyncRead + AsyncWrite + Send + Unpin + 'static,
 {
+    let _counted = open.open();
+    info!(session, %peer, "connection");
+    // The peer is not on this machine: its updates are throttled (D24, M4-7).
+    // `to_canonical`: on a dual-stack socket, a local IPv4 client is ::ffff:127.0.0.1.
+    let remote = !peer.ip().to_canonical().is_loopback();
     let idle = timing.idle;
     let (mut rd, mut wr) = tokio::io::split(stream);
     let (out_tx, mut out_rx) = mpsc::channel::<Outbound>(OUTBOUND_QUEUE);

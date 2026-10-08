@@ -390,13 +390,12 @@ impl Server {
         let outcome = self.sim.join().unwrap_or_else(|payload| Err(ServerFailure(panic_message(&*payload))));
         // The sim queued a Goodbye and a Close for every session. Dropping the runtime
         // cancels the connection tasks at once, so first stop accepting (nothing new
-        // to wait for), then let them write it and end (at most 1 s: a client that
-        // isn't reading must not hold the server up).
+        // to wait for), then let them write it and end, within `SHUTDOWN_DRAIN` (a
+        // client that isn't reading must not hold the server up).
         self.accept.abort();
-        let deadline = std::time::Instant::now() + Duration::from_secs(1);
-        while self.open.count() > 0 && std::time::Instant::now() < deadline {
-            std::thread::sleep(Duration::from_millis(5));
-        }
+        let open = self.open.clone();
+        // The timer is made inside the runtime: it needs its clock.
+        let _ = self.runtime.block_on(async { tokio::time::timeout(net::SHUTDOWN_DRAIN, open.all_closed()).await });
         self.runtime.shutdown_timeout(Duration::from_millis(100));
         outcome
     }
