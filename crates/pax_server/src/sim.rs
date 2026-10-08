@@ -80,11 +80,13 @@ pub(crate) struct Sim {
     sandbox: bool,
     /// How remote sessions are throttled (D24, M4-7).
     bandwidth: crate::Bandwidth,
-    /// The server's and the admin's passwords (`Config`, D24, M4-6).
+    /// The server password (`Config::password`, D24, M4-6).
     password: Option<String>,
-    admin_password: Option<String>,
+    /// The admin's name and password (`Config::admin`); the table's
+    /// `HostRule::Admin` holds the same name.
+    admin: Option<crate::Admin>,
     /// D24's command rate limit (`Config::commands_per_second`).
-    commands_per_second: u32,
+    pub(crate) commands_per_second: u32,
     /// Stop when the last player leaves (the client launched this server).
     exit_when_idle: bool,
     /// Set when the server should stop; [`Sim::handle`] returns it. A flag rather
@@ -116,12 +118,14 @@ impl Sim {
             scenario_dir: config.scenario.clone(),
             saves_dir: config.saves_dir.clone(),
             // D24: the first player is host, or the admin on a dedicated server.
-            sessions: SessionTable::new(config.admin.clone().map_or(HostRule::FirstPlayer, HostRule::Admin)),
+            sessions: SessionTable::new(
+                config.admin.as_ref().map_or(HostRule::FirstPlayer, |a| HostRule::Admin(a.name.clone())),
+            ),
             max_players: usize::from(config.max_players),
             sandbox: config.sandbox,
             bandwidth: config.bandwidth,
             password: config.password.clone(),
-            admin_password: config.admin_password.clone(),
+            admin: config.admin.clone(),
             commands_per_second: config.commands_per_second,
             exit_when_idle: config.exit_when_idle,
             stop: false,
@@ -166,12 +170,17 @@ impl Sim {
         }
         // The admin proves it with the admin password; it, or the server password,
         // admits a player to a server that has one (D24, M4-6).
-        let matches = |expected: &Option<String>| match (expected, password) {
+        let matches = |expected: Option<&String>| match (expected, password) {
             (Some(expected), Some(given)) => constant_time_eq(expected.as_bytes(), given.as_bytes()),
             _ => false,
         };
-        let admin_proved = matches(&self.admin_password);
-        if self.password.is_some() && !admin_proved && !matches(&self.password) {
+        let admin_proved = matches(self.admin.as_ref().map(|a| &a.password));
+        // The admin's name without its password is an ordinary player: say so, or a
+        // mistyped password shows only as `NotPermitted` later (NETWORK_PROTOCOL §6).
+        if !admin_proved && self.admin.as_ref().is_some_and(|a| name == Some(a.name.as_str())) {
+            info!(session, "the admin's name without the admin password: not the host");
+        }
+        if self.password.is_some() && !admin_proved && !matches(self.password.as_ref()) {
             return self.reject(session, "wrong password");
         }
         // A player coming back to a started game with their token gets their seat (D24).
@@ -1279,7 +1288,7 @@ mod tests {
         let (mut sim, _saves) = multiplayer(2);
         // As `Sim::new` sets it for `--admin ada --admin-password-file …`.
         sim.sessions = SessionTable::new(HostRule::Admin("ada".into()));
-        sim.admin_password = Some("s3cret".into());
+        sim.admin = Some(crate::Admin { name: "ada".into(), password: "s3cret".into() });
         let (_a, _) = join(&mut sim, 1, Some(0));
         assert_eq!(sim.sessions.host(), None, "the first player isn't host on a dedicated server");
         let ada = |sim: &mut Sim, id: u64, password: Option<&str>| {

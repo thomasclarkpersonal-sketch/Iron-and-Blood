@@ -264,7 +264,7 @@ fn the_sim_thread_survives_hostile_requests() {
     config.max_players = 8;
     // The run sends hundreds of commands within a real second; D24's limit of 20
     // would refuse nearly all, and the game paths below would go untested. The
-    // limit still applies, just higher.
+    // limit still applies, just higher, until the last rounds lower it.
     config.commands_per_second = 10_000;
     let mut sim = Sim::new(pax_data::load_scenario(&dir).unwrap(), &config);
     let mut receivers: Vec<Receiver<Outbound>> = Vec::new();
@@ -275,7 +275,13 @@ fn the_sim_thread_survives_hostile_requests() {
     let mut open: Vec<u64> = Vec::new();
     let mut next_session = 1;
     let mut tokens: Vec<u64> = Vec::new();
+    let mut rate_limited = 0;
     for round in 0..6_000u64 {
+        // The last rounds run at a limit the noise exceeds, so the refusal path is
+        // fuzzed with the rest (D24).
+        if round == 5_000 {
+            sim.commands_per_second = 2;
+        }
         // The first half plays in the lobby, where hostile claims and starts rarely
         // line everyone up; the second half plays the game itself.
         if round == 3_000 {
@@ -310,17 +316,21 @@ fn the_sim_thread_survives_hostile_requests() {
         if round % 64 == 0 {
             for rx in &mut receivers {
                 while let Ok(out) = rx.try_recv() {
+                    let Outbound::Frame(f) = out else { continue };
+                    let Ok(m) = pax_protocol::read_server_message(&f) else { continue };
                     // Keep the resume tokens the server hands out, to come back with.
-                    if let Outbound::Frame(f) = out
-                        && let Some(w) = pax_protocol::read_server_message(&f).ok().and_then(|m| m.payload_as_welcome())
-                    {
+                    if let Some(w) = m.payload_as_welcome() {
                         tokens.push(w.resume_token());
+                    }
+                    if m.payload_as_command_result().is_some_and(|r| r.error() == wire::CommandError::RateLimited) {
+                        rate_limited += 1;
                     }
                 }
             }
         }
     }
     assert!(sim.world_day() > 100, "the game kept running");
+    assert!(rate_limited > 0, "the rate limit refused some commands");
     // The run reached the deep paths: commands applied, and games saved.
     assert!(sim.log().iter().any(|l| l.player.is_some()), "some hostile session's commands applied");
     let saved = std::fs::read_dir(&saves).map_or(0, |d| d.count());

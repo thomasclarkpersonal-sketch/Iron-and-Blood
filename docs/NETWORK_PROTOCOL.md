@@ -146,11 +146,11 @@ sequenceDiagram
 - The client's bridge (`pax_godot::connection`) does this, and also what every client owes the server: it acknowledges each `DayUpdate` on the poll after the one that delivered it (§5), and sends a `Ping` after a fifth of `IDLE_TIMEOUT` (2 s) without sending anything. It also pairs each `SaveResult` and load `Welcome` with the request it answers, oldest first, because the server answers save requests in order. A `Welcome` nothing asked for is another player's load (§3), and replaces the session's tables all the same.
 - There is no Docker and no separate install: the server binary ships next to the client.
 - **Several players (M4-1, M4-3):** run the server yourself, for example `pax_server --scenario <dir> --bind 127.0.0.1:7777 --players 2`, and have each client connect to it.
-  - **The host** is the first player to join. When the host leaves, the remaining player with the lowest id becomes host. On a dedicated server, `--admin NAME` makes the client named `NAME` the host instead, whenever it joins; while it is away there is no host (D24).
+  - **The host** is the first player to join. When the host leaves, the remaining player with the lowest id becomes host. On a dedicated server, `--admin NAME --admin-password-file PATH` makes the client named `NAME` the host instead, whenever it joins with the admin password; while it is away there is no host (D24). A name alone proves nothing: a client that gives the admin's name without the admin password joins as an ordinary player (the server logs it), and `--admin` without `--admin-password-file` is refused (M4-6).
   - `--pause-after S` and `--drop-after S` set D24's lag thresholds (5 and 30 by default).
   - `--updates-per-second N` and `--map-every N` set D24's bandwidth for remote sessions (4 and 5 by default, M4-7).
-  - `--password-file PATH` makes players give a password in `Hello` (protocol 1.6). `--admin NAME --admin-password-file PATH` makes the admin the host, proven by the admin password. `--commands-per-second N` sets the rate limit (20 by default). Passwords come from files so they never show in the process list.
-  - TLS and a server password are still to come (M4-6). D24 requires TLS off localhost, so until M4-6 the server refuses `--players` above 1 on any other address: multiplayer is for testing on one machine until then.
+  - `--password-file PATH` makes players give a password in `Hello` (protocol 1.6). The admin password also admits the admin. `--commands-per-second N` sets the rate limit (20 by default). Passwords come from files so they never show in the process list.
+  - TLS is still to come (M4-6b). D24 requires TLS off localhost, so until then the server refuses `--players` above 1 on any other address: multiplayer is for testing on one machine until then.
 
 ## 7. Conversions and units
 
