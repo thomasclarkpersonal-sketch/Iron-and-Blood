@@ -17,8 +17,8 @@ use pax_engine::world::{Geography, NewProducer};
 /// compaction merges the repeated rows (D7). A benchmark that runs longer measures a
 /// different, smaller world, or overflows, so `pax_cli bench` refuses it.
 pub fn days_before_compaction(base: &World) -> u64 {
-    let month = u64::from(base.defs.rules.days_per_month.max(1));
-    month - 1 - base.day % month
+    // The day ticks before the month-end one; that day itself compacts.
+    pax_engine::systems::demographics::days_until_month_end(base)
 }
 
 /// The `scale` that brings `base`, copied `regions` times, to about `rows` POP rows.
@@ -97,4 +97,27 @@ pub fn replicate_with_nations(base: &World, scale: u32, regions: u32, max_nation
         }
     }
     world
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The benchmark's limit is the engine's schedule: after `days_before_compaction`
+    /// days, the next day is a month end and compacts (D7).
+    #[test]
+    fn the_limit_ends_the_day_before_compaction() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two_states");
+        let mut world = replicate(&crate::load_scenario(&dir).unwrap().world, 3, 1);
+        let limit = days_before_compaction(&world);
+        let rows = world.pops.len();
+        for _ in 0..limit {
+            assert!(!pax_engine::systems::demographics::is_month_end(&world));
+            pax_engine::step(&mut world);
+        }
+        assert_eq!(world.pops.len(), rows, "the copies are all still there");
+        assert!(pax_engine::systems::demographics::is_month_end(&world));
+        assert!(pax_engine::step(&mut world).compacted > 0, "the next day merges them");
+        assert_eq!(days_before_compaction(&world), limit, "a month later, the same limit");
+    }
 }

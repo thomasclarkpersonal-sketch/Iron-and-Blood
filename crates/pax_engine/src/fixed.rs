@@ -258,6 +258,12 @@ impl fmt::Debug for Fixed {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    fn d(s: &str) -> Fixed {
+        Fixed::parse_decimal(s).unwrap()
+    }
+
     /// M4-11: the i64 fast paths give exactly the i128 results, so they change no
     /// simulation result (D3, D11). The references are the original i128 formulas.
     #[test]
@@ -314,12 +320,6 @@ mod tests {
             }
         }
         assert!(checked > 500_000, "{checked}");
-    }
-
-    use super::*;
-
-    fn d(s: &str) -> Fixed {
-        Fixed::parse_decimal(s).unwrap()
     }
 
     #[test]

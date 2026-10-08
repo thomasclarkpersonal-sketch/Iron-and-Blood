@@ -14,10 +14,18 @@
 use crate::fixed::Fixed;
 use crate::world::World;
 
-/// True on the last day of each month.
+/// True on the last day of each month, when the month-end systems and POP
+/// compaction run (D4, D7).
 pub fn is_month_end(world: &World) -> bool {
+    days_until_month_end(world) == 0
+}
+
+/// Days from today to the next month end: 0 on a month-end day. The one place the
+/// month schedule lives; [`is_month_end`] and the benchmarks (`pax_data::bench`)
+/// both read it.
+pub fn days_until_month_end(world: &World) -> u64 {
     let days = world.defs.rules.days_per_month.max(1) as u64;
-    (world.day + 1).is_multiple_of(days)
+    days - 1 - world.day % days
 }
 
 pub fn update_population(world: &mut World) {

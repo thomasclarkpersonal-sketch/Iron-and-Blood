@@ -6,9 +6,9 @@
 //! pax_cli verify <scenario-dir> [--threads T]   # replay and compare with golden.hashes
 //! pax_cli bench  <scenario-dir> [--days N] [--scale K] [--regions R] [--threads T]
 //!     (--scale copies POP rows with identical identities, which month-end
-//!     compaction merges back, so with --scale the run stops before the first
-//!     month end: 29 days by default, and longer is refused; use --regions for
-//!     longer runs)
+//!     compaction merges back, so with --scale the default run stops before the
+//!     first month end, after 29 days; a longer --days warns, and can overflow at
+//!     large scales; use --regions for long runs)
 //! pax_cli report <scenario-dir> [--days N] [--every K]   # economy health indicators
 //! pax_cli replay <save.toml> [--threads T]      # replay a server save, verifying its checkpoints
 //! ```
@@ -270,20 +270,21 @@ fn verify(mut world: World, log: &CommandLog, path: &Path) -> Result<ExitCode, S
 }
 
 /// Times `days` days (default 30) of the scenario grown by `scale` and `regions`
-/// (D13). With `scale > 1` the default is the days before the first month end, and
-/// more is refused: compaction would merge the copies (`pax_data::bench`).
+/// (D13). With `scale > 1` the default is the days before the first month end, when
+/// compaction merges the copies (`pax_data::bench`). A longer run is allowed, to
+/// time the month-end systems too (CI's `two_states` benchmark does), with a warning:
+/// past the month end it measures a smaller world, and at large scales the merged
+/// sizes overflow.
 fn bench(world: World, days: Option<u64>, scale: u32, regions: u32) -> Result<ExitCode, String> {
     let days = if scale > 1 {
         let limit = pax_data::bench::days_before_compaction(&world);
-        match days {
-            Some(d) if d > limit => {
-                return Err(format!(
-                    "--days {d} with --scale {scale}: the copies share identities, which month-end compaction merges \
-                     after day {limit} (D7); use --days {limit} or less, or --regions for longer runs"
-                ));
-            }
-            d => d.unwrap_or(limit),
+        if let Some(d) = days.filter(|&d| d > limit) {
+            eprintln!(
+                "warning: --days {d} with --scale {scale}: the copies share identities, which month-end compaction \
+                 merges after day {limit} (D7), so later days measure a smaller world; use --regions for long runs"
+            );
         }
+        days.unwrap_or(limit)
     } else {
         days.unwrap_or(30)
     };
