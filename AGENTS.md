@@ -19,6 +19,8 @@ Binding design decisions live in [docs/DECISIONS.md](docs/DECISIONS.md) (cited a
   - `pax_cli`: headless runner (run, record/verify golden hashes, benchmark).
   - `pax_server` *(M3, stub until M3-2)*: the authoritative game server and API boundary (D10, D22, D23).
   - `pax_protocol`: generated FlatBuffers code (`scripts/gen-protocol.sh`; never edit it by hand) and framing for the wire protocol (D22). No engine dependency.
+  - `pax_godot`: the Godot GDExtension bridge; the client's side of the protocol (D12). Depends on `pax_protocol` only, never on `pax_engine` (CI checks this).
+  - `client/`: the Godot 4 project. GDScript for the UI only; anything about the protocol belongs in `pax_godot`.
 
 ## 3. Concurrency Mitigation
 - **Avoid lock contention:** when many entities affect a shared resource (thousands of POPs and one market), use **Map-Reduce**. POPs compute in parallel (Map: rayon `fold` into per-thread accumulators); the market then processes the aggregate (Reduce). See `systems/market.rs`.

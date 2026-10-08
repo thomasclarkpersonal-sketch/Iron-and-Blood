@@ -39,6 +39,35 @@ mod generated;
 pub mod frame;
 
 pub use frame::{FrameDecoder, FrameError};
+
+/// Which way a message travels. It fixes both the file identifier a frame must carry
+/// and the frame size limit, so a session can't pair one direction's limit with the
+/// other direction's reader.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Direction {
+    /// `ClientMessage`, identifier `PAXC`, at most [`MAX_CLIENT_FRAME`] bytes.
+    ClientToServer,
+    /// `ServerMessage`, identifier `PAXS`, at most [`MAX_SERVER_FRAME`] bytes.
+    ServerToClient,
+}
+
+impl Direction {
+    /// The 4-byte file identifier frames in this direction carry.
+    pub const fn identifier(self) -> &'static str {
+        match self {
+            Direction::ClientToServer => wire::CLIENT_MESSAGE_IDENTIFIER,
+            Direction::ServerToClient => wire::SERVER_MESSAGE_IDENTIFIER,
+        }
+    }
+
+    /// The largest frame body accepted in this direction.
+    pub const fn max_frame(self) -> usize {
+        match self {
+            Direction::ClientToServer => MAX_CLIENT_FRAME,
+            Direction::ServerToClient => MAX_SERVER_FRAME,
+        }
+    }
+}
 pub use generated::pax::net as wire;
 
 /// Protocol major version. A different major version is refused at `Hello` (D22).
@@ -57,9 +86,8 @@ pub const MAX_SERVER_FRAME: usize = 16 * 1024 * 1024;
 /// receiver never guesses at a malformed message.
 #[derive(Debug)]
 pub enum ProtocolError {
-    /// The frame's 4-byte file identifier is not the one for this direction
-    /// (`PAXC` for client messages, `PAXS` for server messages).
-    WrongIdentifier { expected: &'static str },
+    /// The frame's 4-byte file identifier is not the one for `expected`'s direction.
+    WrongIdentifier { expected: Direction },
     /// The frame failed the FlatBuffers verifier. The verifier guarantees memory-safe
     /// reads; it does not detect corrupted values (TCP's job).
     Invalid(flatbuffers::InvalidFlatbuffer),
@@ -68,7 +96,9 @@ pub enum ProtocolError {
 impl std::fmt::Display for ProtocolError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ProtocolError::WrongIdentifier { expected } => write!(f, "frame is not a {expected} message"),
+            ProtocolError::WrongIdentifier { expected } => {
+                write!(f, "frame is not a {expected:?} message (identifier {})", expected.identifier())
+            }
             ProtocolError::Invalid(e) => write!(f, "frame failed verification: {e}"),
         }
     }
@@ -80,25 +110,25 @@ impl std::error::Error for ProtocolError {}
 /// offset and the file identifier.
 const HEADER_LEN: usize = 4 + 4 + 4;
 
-/// Whether `frame` (as produced by [`FrameDecoder`], length prefix included) carries
-/// `identifier`. Checks the length first, because flatbuffers' own check asserts on
-/// short input, and a hostile peer controls frame length.
-fn has_identifier(frame: &[u8], identifier: &str) -> bool {
-    frame.len() >= HEADER_LEN && &frame[8..12] == identifier.as_bytes()
+/// Fails unless `frame` (as produced by [`FrameDecoder`], length prefix included)
+/// carries `direction`'s identifier. Checks the length first, because flatbuffers' own
+/// check asserts on short input, and a hostile peer controls frame length.
+fn check_identifier(frame: &[u8], direction: Direction) -> Result<(), ProtocolError> {
+    if frame.len() >= HEADER_LEN && &frame[8..12] == direction.identifier().as_bytes() {
+        Ok(())
+    } else {
+        Err(ProtocolError::WrongIdentifier { expected: direction })
+    }
 }
 
 /// Reads a client→server frame: identifier `PAXC`, then the verifier.
 pub fn read_client_message(frame: &[u8]) -> Result<wire::ClientMessage<'_>, ProtocolError> {
-    if !has_identifier(frame, wire::CLIENT_MESSAGE_IDENTIFIER) {
-        return Err(ProtocolError::WrongIdentifier { expected: wire::CLIENT_MESSAGE_IDENTIFIER });
-    }
+    check_identifier(frame, Direction::ClientToServer)?;
     wire::size_prefixed_root_as_client_message(frame).map_err(ProtocolError::Invalid)
 }
 
 /// Reads a server→client frame: identifier `PAXS`, then the verifier.
 pub fn read_server_message(frame: &[u8]) -> Result<wire::ServerMessage<'_>, ProtocolError> {
-    if !has_identifier(frame, wire::SERVER_MESSAGE_IDENTIFIER) {
-        return Err(ProtocolError::WrongIdentifier { expected: wire::SERVER_MESSAGE_IDENTIFIER });
-    }
+    check_identifier(frame, Direction::ServerToClient)?;
     wire::size_prefixed_root_as_server_message(frame).map_err(ProtocolError::Invalid)
 }

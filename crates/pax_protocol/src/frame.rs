@@ -8,6 +8,8 @@
 //! the limit as soon as its 4 bytes arrive, before any of the body is buffered, so a
 //! hostile peer can't make the receiver hold more than `limit + 4` bytes.
 
+use crate::Direction;
+
 /// Why the byte stream can't be split into frames. Fatal to the connection: the
 /// decoder refuses all further input after returning one.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -38,10 +40,10 @@ pub struct FrameDecoder {
 }
 
 impl FrameDecoder {
-    /// A decoder accepting bodies of at most `limit` bytes
-    /// ([`crate::MAX_CLIENT_FRAME`] or [`crate::MAX_SERVER_FRAME`]).
-    pub fn new(limit: usize) -> Self {
-        FrameDecoder { buf: Vec::new(), limit, failed: None }
+    /// A decoder for frames travelling in `direction`, accepting bodies of at most
+    /// [`Direction::max_frame`] bytes.
+    pub fn new(direction: Direction) -> Self {
+        FrameDecoder { buf: Vec::new(), limit: direction.max_frame(), failed: None }
     }
 
     /// Appends bytes as they arrived from the socket. After an error, input is

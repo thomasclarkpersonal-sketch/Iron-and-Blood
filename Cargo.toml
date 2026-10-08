@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/pax_engine", "crates/pax_data", "crates/pax_cli", "crates/pax_server", "crates/pax_protocol"]
+members = ["crates/pax_engine", "crates/pax_data", "crates/pax_cli", "crates/pax_server", "crates/pax_protocol", "crates/pax_godot"]
 
 [workspace.package]
 version = "0.1.0"

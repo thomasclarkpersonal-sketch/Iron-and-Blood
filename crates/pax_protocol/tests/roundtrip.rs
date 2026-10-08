@@ -6,18 +6,18 @@ mod common;
 use common::*;
 use flatbuffers::FlatBufferBuilder;
 use pax_protocol::wire::*;
-use pax_protocol::{FrameDecoder, MAX_CLIENT_FRAME, MAX_SERVER_FRAME, read_client_message, read_server_message};
+use pax_protocol::{Direction, FrameDecoder, read_client_message, read_server_message};
 
 /// The frame survives the decoder unchanged, and reads as a client message.
 fn client(frame: &[u8]) -> ClientMessage<'_> {
-    let mut d = FrameDecoder::new(MAX_CLIENT_FRAME);
+    let mut d = FrameDecoder::new(Direction::ClientToServer);
     d.push(frame);
     assert_eq!(d.next_frame().unwrap().as_deref(), Some(frame));
     read_client_message(frame).expect("valid client message")
 }
 
 fn server(frame: &[u8]) -> ServerMessage<'_> {
-    let mut d = FrameDecoder::new(MAX_SERVER_FRAME);
+    let mut d = FrameDecoder::new(Direction::ServerToClient);
     d.push(frame);
     assert_eq!(d.next_frame().unwrap().as_deref(), Some(frame));
     read_server_message(frame).expect("valid server message")
@@ -284,7 +284,7 @@ fn each_direction_refuses_the_others_messages() {
         day_update(&Scale { nations: 1, provinces: 0, goods: 0, pops: 0, map: false, market: false, province: false });
     assert!(matches!(
         read_client_message(&to_client),
-        Err(pax_protocol::ProtocolError::WrongIdentifier { expected: "PAXC" })
+        Err(pax_protocol::ProtocolError::WrongIdentifier { expected: Direction::ClientToServer })
     ));
 
     let mut b = FlatBufferBuilder::new();
@@ -292,6 +292,6 @@ fn each_direction_refuses_the_others_messages() {
     let to_server = client_frame(&mut b, ClientPayload::Ping, m.as_union_value());
     assert!(matches!(
         read_server_message(&to_server),
-        Err(pax_protocol::ProtocolError::WrongIdentifier { expected: "PAXS" })
+        Err(pax_protocol::ProtocolError::WrongIdentifier { expected: Direction::ServerToClient })
     ));
 }

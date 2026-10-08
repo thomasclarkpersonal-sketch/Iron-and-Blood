@@ -6,7 +6,7 @@ mod common;
 use common::*;
 use flatbuffers::FlatBufferBuilder;
 use pax_protocol::wire::*;
-use pax_protocol::{FrameDecoder, FrameError, MAX_CLIENT_FRAME, read_client_message};
+use pax_protocol::{Direction, FrameDecoder, FrameError, MAX_CLIENT_FRAME, read_client_message};
 
 fn ping(nonce: u64) -> Vec<u8> {
     let mut b = FlatBufferBuilder::new();
@@ -33,7 +33,7 @@ fn frames_survive_any_chunking() {
     let stream: Vec<u8> = (0..50).flat_map(ping).collect();
     let mut noise = Noise(0x9E37_79B9_7F4A_7C15);
     for _ in 0..200 {
-        let mut d = FrameDecoder::new(MAX_CLIENT_FRAME);
+        let mut d = FrameDecoder::new(Direction::ClientToServer);
         let mut nonces = Vec::new();
         let mut at = 0;
         while at < stream.len() {
@@ -51,7 +51,7 @@ fn frames_survive_any_chunking() {
 
 #[test]
 fn an_oversized_length_is_refused_before_its_body_arrives() {
-    let mut d = FrameDecoder::new(MAX_CLIENT_FRAME);
+    let mut d = FrameDecoder::new(Direction::ClientToServer);
     d.push(&(MAX_CLIENT_FRAME as u32 + 1).to_le_bytes());
     assert_eq!(d.next_frame(), Err(FrameError::TooLarge { len: MAX_CLIENT_FRAME + 1, limit: MAX_CLIENT_FRAME }));
     // Nothing is buffered, and the decoder stays failed: the session is closing.
@@ -62,7 +62,7 @@ fn an_oversized_length_is_refused_before_its_body_arrives() {
 
 #[test]
 fn a_maximal_length_waits_for_its_body() {
-    let mut d = FrameDecoder::new(MAX_CLIENT_FRAME);
+    let mut d = FrameDecoder::new(Direction::ClientToServer);
     d.push(&(MAX_CLIENT_FRAME as u32).to_le_bytes());
     d.push(&[0; 100]);
     assert_eq!(d.next_frame(), Ok(None));
@@ -70,7 +70,7 @@ fn a_maximal_length_waits_for_its_body() {
 
 #[test]
 fn an_empty_frame_is_refused() {
-    let mut d = FrameDecoder::new(MAX_CLIENT_FRAME);
+    let mut d = FrameDecoder::new(Direction::ClientToServer);
     d.push(&[0, 0, 0, 0]);
     assert_eq!(d.next_frame(), Err(FrameError::Empty));
 }
@@ -99,7 +99,7 @@ fn garbage_and_truncated_frames_are_errors_not_panics() {
             }
             _ => valid[..noise.below(valid.len())].to_vec(),
         };
-        let mut d = FrameDecoder::new(MAX_CLIENT_FRAME);
+        let mut d = FrameDecoder::new(Direction::ClientToServer);
         d.push(&frame);
         if let Ok(Some(frame)) = d.next_frame()
             && let Ok(msg) = read_client_message(&frame)
