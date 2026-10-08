@@ -133,7 +133,10 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 ## A new session's UI, whatever kind it is.
-func _begin(multiplayer: bool) -> void:
+## Starts a session's UI. `rejoining`: the same client reconnects (its hosted game,
+## if any, lives in it, so it must not be replaced); otherwise a fresh client, and
+## freeing the old one ends whatever it ran.
+func _begin(multiplayer: bool, rejoining := false) -> void:
 	start_screen.visible = false
 	game.visible = true
 	lost.visible = false
@@ -146,7 +149,8 @@ func _begin(multiplayer: bool) -> void:
 	top_bar.set_host(true)
 	if client != null:
 		client.disconnect_from_server()
-	client = PaxClient.new()
+	if not rejoining or client == null:
+		client = PaxClient.new()
 
 
 ## Single player: the client launches its own server (NETWORK_PROTOCOL §6).
@@ -200,24 +204,31 @@ func _connect_join() -> String:
 
 
 func _hello(nation: Variant) -> void:
-	if _join != null and _join.name != "":
-		client.set_name(_join.name)
-	var error := client.hello(nation)
+	var error := _send_name()
+	if error == "":
+		error = client.hello(nation)
 	if error != "":
 		_connection_lost(error)
+
+
+## The player's name for the next hello or resume, if they gave one; an error, or "".
+func _send_name() -> String:
+	if _join == null or _join.name == "":
+		return ""
+	return client.set_name(_join.name)
 
 
 ## Rejoins a multiplayer game after a drop: the same server, with the resume token
 ## that reclaims the seat and its nation (D24).
 func _rejoin() -> void:
 	var token := _resume_token
-	_begin(true)
+	_begin(true, true)
 	var error := _connect_join()
 	if error != "":
 		return _connection_lost(error)
-	if _join.name != "":
-		client.set_name(_join.name)
-	error = client.resume(token)
+	error = _send_name()
+	if error == "":
+		error = client.resume(token)
 	if error != "":
 		_connection_lost(error)
 
@@ -403,7 +414,8 @@ func select_province(province: int) -> void:
 
 func _connection_lost(reason: String) -> void:
 	# A multiplayer seat waits for its resume token (D24): the player can rejoin.
-	lost.show_reason(reason, _multiplayer and _resume_token != 0)
+	var hosting := client != null and not client.hosted().is_empty()
+	lost.show_reason(reason, _multiplayer and _resume_token != 0, hosting)
 	save_menu.visible = false
 	lobby.visible = false
 	var shot := _arg("--screenshot=")

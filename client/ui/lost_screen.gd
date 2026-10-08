@@ -9,6 +9,7 @@ signal rejoin_requested
 
 var _reason: Label
 var _rejoin: Button
+var _restart: Button
 
 
 func _init() -> void:
@@ -33,10 +34,10 @@ func _init() -> void:
 	_rejoin.visible = false
 	_rejoin.pressed.connect(func() -> void: rejoin_requested.emit())
 	buttons.add_child(_rejoin)
-	var restart := Button.new()
-	restart.text = "Start a new game"
-	restart.pressed.connect(func() -> void: restart_requested.emit())
-	buttons.add_child(restart)
+	_restart = Button.new()
+	_restart.text = "Start a new game"
+	_restart.pressed.connect(func() -> void: restart_requested.emit())
+	buttons.add_child(_restart)
 	var quit := Button.new()
 	quit.text = "Quit"
 	quit.pressed.connect(func() -> void: get_tree().quit())
@@ -49,7 +50,10 @@ func _init() -> void:
 
 
 ## `can_rejoin`: a multiplayer game whose seat waits for this client's token (D24).
-func show_reason(reason: String, can_rejoin := false) -> void:
+## `hosting`: this client hosts that game, which is still running for the others
+## (M4-9); starting a new game ends it for everyone, so the button says so.
+func show_reason(reason: String, can_rejoin := false, hosting := false) -> void:
 	_reason.text = reason
 	_rejoin.visible = can_rejoin
+	_restart.text = "End the hosted game and start a new one" if hosting else "Start a new game"
 	visible = true

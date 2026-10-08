@@ -66,9 +66,15 @@ pub struct PaxClient {
     /// `set_scenario_dir` for a server started elsewhere.
     scenario_dir: Option<std::path::PathBuf>,
     connection: Option<Connection>,
+    /// The single-player server `launch` started: one session's, ended with it.
     /// Declared after `connection`, so the connection closes first and the server
     /// can exit by itself (`--exit-when-idle`).
     server: Option<LocalServer>,
+    /// The game `host_game` started (M4-9). It holds the other players' game, so it
+    /// outlives this client's sessions: the host can lose its connection and rejoin
+    /// (D24). Only `stop_hosting`, a new `host_game` or `launch`, or freeing this
+    /// client ends it.
+    hosting: Option<LocalServer>,
 }
 
 /// `null` for `None`.
@@ -99,6 +105,7 @@ impl PaxClient {
     #[func]
     fn launch(&mut self, server_path: GString, scenario_dir: GString, saves_dir: GString) -> GString {
         self.end_session();
+        self.hosting = None;
         let (server, scenario, saves) = (server_path.to_string(), scenario_dir.to_string(), saves_dir.to_string());
         self.scenario_dir = Some(scenario.clone().into());
         match LocalServer::launch(Path::new(&server), Path::new(&scenario), Path::new(&saves)) {
@@ -117,11 +124,11 @@ impl PaxClient {
     /// an error message, or `""`.
     #[func]
     fn host_game(&mut self, server_path: GString, scenario_dir: GString, saves_dir: GString, players: i64) -> GString {
-        let Ok(players) = u16::try_from(players).map_err(|_| ()).and_then(|p| if p >= 2 { Ok(p) } else { Err(()) })
-        else {
+        let Some(players) = u16::try_from(players).ok().filter(|&p| p >= 2) else {
             return rejected(format!("{players} players: a hosted game has at least 2"));
         };
         self.end_session();
+        self.hosting = None;
         let (server, scenario, saves) = (server_path.to_string(), scenario_dir.to_string(), saves_dir.to_string());
         self.scenario_dir = Some(scenario.clone().into());
         let local = match LocalServer::host(Path::new(&server), Path::new(&scenario), Path::new(&saves), players) {
@@ -130,7 +137,7 @@ impl PaxClient {
         };
         let addr = local.addr;
         let fingerprint = local.fingerprint.clone().expect("LocalServer::host reads the fingerprint or fails");
-        self.server = Some(local);
+        self.hosting = Some(local);
         // The host reaches its own server over TLS too, pinned like everyone else.
         match Connection::connect_tls(addr, Duration::from_secs(5), &fingerprint) {
             Ok(c) => {
@@ -141,12 +148,19 @@ impl PaxClient {
         }
     }
 
+    /// Ends the game this client hosts, for every player in it (a deliberate choice:
+    /// losing the connection doesn't end it). Nothing if it hosts none.
+    #[func]
+    fn stop_hosting(&mut self) {
+        self.hosting = None;
+    }
+
     /// What the host shares so players can join (`PORT` and `FINGERPRINT`), or an
     /// empty Dictionary when this client isn't hosting.
     #[func]
     fn hosted(&self) -> VarDictionary {
         let mut d = VarDictionary::new();
-        if let Some(local) = &self.server
+        if let Some(local) = &self.hosting
             && let Some(fingerprint) = &local.fingerprint
         {
             d.set(keys::PORT, i64::from(local.addr.port()));
@@ -183,10 +197,11 @@ impl PaxClient {
     }
 
     /// Ends the current session, if any, so nothing of it carries over into the next:
-    /// its connection first, then a server it launched, so that server can exit by
-    /// itself (`--exit-when-idle`); then its tables, map and scenario directory. The
-    /// one place every connect path (`launch`, `host_game`, `connect_to`,
-    /// `connect_secure`) clears per-session state.
+    /// its connection first, then a single-player server it launched, so that server
+    /// can exit by itself (`--exit-when-idle`); then its tables, map and scenario
+    /// directory. The one place every connect path (`launch`, `host_game`,
+    /// `connect_to`, `connect_secure`) clears per-session state. A hosted game
+    /// (`hosting`) outlives it, so the host can rejoin its own game.
     fn end_session(&mut self) {
         self.connection = None;
         self.server = None;
