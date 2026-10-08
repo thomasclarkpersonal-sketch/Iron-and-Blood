@@ -29,7 +29,7 @@ M4 builds on [Milestone 3](MILESTONE_3.md) without replacing it: the same server
 Found during M3 and left for M4, with the reason:
 - **Broadcast `Welcome` after another player's load.** The client's decoder accepts a second `Welcome` only as the answer to its own `LoadGame`. D23 sends every session a new `Welcome` after a load, so with several players (D24) the other clients must accept it too.
 - **Non-blocking server start in the bridge.** `PaxClient.launch` waits for the local server on the main thread (two_states starts in well under a second). A pollable start-up state keeps the UI responsive for large scenarios.
-- **The tick is over D13 at M2 content.** `two_states` (12 goods, nations) replicated to about 1M POP rows ticks in about 126 ms on 8 threads at 1,500 markets, over the 100 ms budget, while D13's 4-good reference world takes 44 ms on the same machine (D13, "Measured"). The cost grows with goods and markets, so profile the per-good, per-market loops before the content grows towards D13's 50 goods.
+- **The tick is over D13 at M2 content: task M4-11** (the owner closed M3 with it moved here, 2026-10-08). `two_states` (12 goods, nations) replicated to about 1M POP rows ticks in about 126 ms on 8 threads at 1,500 markets, over the 100 ms budget, while D13's 4-good reference world takes 44 ms on the same machine (D13, "Measured").
 - **A faster state hash.** The per-day `state_hash` costs about 31 ms at 1M POP rows (M3 kept it, by the owner's decision). FNV over 8-byte words would cut it to a few ms, but changes every golden file (D11).
 - **`pax_cli bench --scale` overflows at month end.** The copies `--scale` makes share their identities, so the month-end compaction merges them past `u32`. The default 30 days reaches month end, so the AGENTS.md D13 command panics as written; `--days 29` works (38 ms/day at 1M rows on 8 threads). The benchmark should give the copies distinct identities. Then `pax_server`'s `server_day_budget` test should build its world through the same `pax_data::bench` helper (one that picks the scale for a target row count), so D13's two "Measured" rows describe the same kind of world.
 - **Saves record the scenario by path.** A save stops loading if the game or scenario directory moves. Record the scenario by name, resolved against the server's scenarios root, before saves are shared.
@@ -90,6 +90,7 @@ Loading a save goes through the lobby, and players reclaim their nations.
 | M4-8 | **Dedicated server:** Dockerfile and compose file | M4-6 | See "Docker" below |
 | M4-9 | **Client:** lobby screen, player list, "waiting for player" overlay, reconnect, host controls | M4-2 to M4-4 | |
 | M4-10 | **Docs:** D24 accepted; NETWORK_PROTOCOL (lobby, security); REPO_SETUP or a hosting guide; this file's status | all | |
+| M4-11 | **Tick budget at M2 content (D13):** profile the per-good and per-market loops and bring `two_states` at about 1M POP rows under 100 ms/day on 8 threads | M3 done | Carried over from M3's definition of done (item 4). First fix the `bench --scale` month-end overflow and share one `pax_data::bench` world-building helper with `server_day_budget`, so the two measurements describe the same world. The cost grows with goods and markets, so it must hold before content grows towards D13's 50 goods |
 
 ### Docker (M4-8)
 
@@ -111,6 +112,7 @@ The draft Dockerfile needs these fixes before it is useful:
 5. **Bandwidth:** ≤ 100 KB/s per remote client at speed 3 at long-term scale, measured and recorded.
 6. **Security:** TLS on non-local binds; fuzzing covers the lobby messages; command rate limits are enforced.
 7. **Dedicated server:** `docker compose up` starts it with a persistent saves volume.
+8. **Tick budget (D13, from M3):** `two_states` replicated to about 1M POP rows ticks within 100 ms/day on 8 threads, measured and recorded in D13's "Measured" column (M4-11).
 
 ## Out of scope for M4
 

@@ -268,7 +268,7 @@ All parsing lives in `pax_data`, so the format can change without touching the e
 |---|---|---|
 | M1: 1M POP rows, 1 market, 4 goods, 8 threads | ≤ 100 ms/day | **≈37 ms/day** after T4 (was 45; `pax_cli bench … --scale 170000 --threads 8`) |
 | Long-term: 2M POP rows, ~3,000 markets, ~50 goods, 8-core desktop | ≤ 100 ms/day | 1M rows / 3,000 markets / 4 goods: **≈35 ms/day** after T5 (`bench --scale 56 --regions 3000`) |
-| M2 content: `two_states` (12 goods, nations, taxes) replicated to about 1M POP rows, 8 threads | ≤ 100 ms/day | **Over:** ≈126 ms/day at 1,500 markets (`pax_server` `server_day_budget`, M3-11) and ≈96 ms/day at 400 markets (`bench scenarios/two_states --scale 416 --regions 200 --days 29`). Same machine, same day: the 4-good row above measured 44 ms. Bringing it back under budget is carried to M4 |
+| M2 content: `two_states` (12 goods, nations, taxes) replicated to about 1M POP rows, 8 threads | ≤ 100 ms/day | **Over:** ≈126 ms/day at 1,500 markets (`pax_server` `server_day_budget`, M3-11) and ≈96 ms/day at 400 markets (`bench scenarios/two_states --scale 416 --regions 200 --days 29`). Same machine, same day: the 4-good row above measured 44 ms. Bringing it back under budget is M4-11 |
 
 At 100 ms/day, the fastest game speed runs at about 10 in-game days per second. CI fails a PR that makes the tick more than 20% slower. The `Benchmark regression` job times the PR's base and head on the same runner (`scripts/bench-compare.sh`), so runner speed cancels out.
 

@@ -2,6 +2,8 @@
 
 **Goal:** a person can play `two_states` in a Godot client, and the client never touches the engine directly. The client launches a local `pax_server`, shows the map and panels, lets the player pause, change speed and set policy, and saves and loads games.
 
+**Status: closed by the owner on 2026-10-08.** Every task is merged (#35–#49). The tick budget from item 4 of the definition of done moved to M4 (task M4-11). The human playtest (item 1) is the owner's.
+
 M3 is **single player over a local connection** (D10). Multiplayer is [Milestone 4](MILESTONE_4.md). It reuses everything built here unchanged and adds sessions, authority and hosting.
 
 Binding rules: D10, D12, D22, D23 in [DECISIONS.md](DECISIONS.md). The wire format is in [NETWORK_PROTOCOL.md](NETWORK_PROTOCOL.md).
@@ -111,7 +113,7 @@ M3 is done when all of these hold. Each is checked by a test or a recorded measu
 | 1 | Built and checked headless; **a human playtest remains** | The client does all of it. CI's `--smoke` drives the client headless: it starts `two_states`, runs at full speed, sets an income tax and checks the nation table, opens a province panel and a value map, then saves, lists and loads and plays on. The nation panel shows treasury and militancy (protocol 1.2). Quitting and relaunching the client, then loading, is for the playtest |
 | 2 | Met | No simulation code in the client. The bridge links `pax_protocol`, plus the side-neutral `pax_map` and `pax_content` (the owner approved this D12 exception on 2026-10-08; CI allowlists exactly these), and never `pax_engine`, not even in tests (CI checks dev edges) |
 | 3 | Met | `pax_server/tests/session_replay.rs` through the real `pax_cli replay`, on Linux, Windows and macOS (M3-9) |
-| 4 | **Partly met.** The server's share is met; the per-day hash is accepted outside the budget (owner's decision, 2026-10-08). **The tick itself is over D13's 100 ms at `two_states` content** (12 goods, nations): 126 ms. That comes from M2's content, not from the server, and is carried to M4 | At about 1M POP rows on 8 threads (`game::tests::server_day_budget`, 2026-10-08): tick 126 ms, state hash 31 ms, stats and one update 7.5 ms (6% of the tick). `DayUpdate`: 8.3 KB summary-only, 91 KB with every view (M3-1). View building: 2.4–4.0 ms (M3-3). A command gets its `CommandResult` on arrival, before the next tick. The hash adds about 25% per day, which the owner accepted: see Risks |
+| 4 | **Partly met; closed by the owner with the tick budget moved to M4 (2026-10-08).** The server's share is met; the per-day hash is accepted outside the budget (owner's decision, 2026-10-08). **The tick itself is over D13's 100 ms at `two_states` content** (12 goods, nations): 126 ms. That comes from M2's content, not from the server: M4-11 | At about 1M POP rows on 8 threads (`game::tests::server_day_budget`, 2026-10-08): tick 126 ms, state hash 31 ms, stats and one update 7.5 ms (6% of the tick). `DayUpdate`: 8.3 KB summary-only, 91 KB with every view (M3-1). View building: 2.4–4.0 ms (M3-3). A command gets its `CommandResult` on arrival, before the next tick. The hash adds about 25% per day, which the owner accepted: see Risks |
 | 5 | Met | A second client is refused, a silent client times out, and killing the client stops the server (`pax_server/tests/session.rs`). Hostile input closes the session without a panic, fuzzed (M3-10) |
 | 6 | Met | D12, D22, D23 accepted; ARCHITECTURE, BACKEND_SCHEMA, DATA_FORMAT, ONBOARDING, NETWORK_PROTOCOL and this file updated (M3-11) |
 
