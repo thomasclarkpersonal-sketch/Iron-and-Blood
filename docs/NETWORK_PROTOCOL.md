@@ -45,7 +45,7 @@ sequenceDiagram
 ```
 
 1. **Hello first.** The client sends `Hello` with `protocol_major` and `protocol_minor`. A different major version gets `Rejected`. A newer or older minor version is accepted, under the evolution rules in §8.
-2. **Welcome** carries `StaticData`: the key tables (goods, professions, producer types, provinces, markets, nations) plus the province→market and market→nation maps.
+2. **Welcome** carries `StaticData`: the key tables (goods, professions, producer types, provinces, markets), the province→market map, and each nation with the markets it owns (a market no nation lists is stateless).
    - Every id in the protocol is an index into these tables, and the indices stay fixed for the whole session.
    - The client checks `content_hash` against its own copy of the content (the map image and labels). On a mismatch it shows an error rather than mislabelling provinces.
 3. **Subscribe** replaces the whole subscription. The server immediately answers with a `DayUpdate` for the current day, even while paused, so a newly opened panel fills at once.
@@ -59,7 +59,7 @@ sequenceDiagram
 
 | Message | Purpose | Reply |
 |---|---|---|
-| `Hello` | Open the session; request a nation (`-1` = sandbox, M3 only) | `Welcome` or `Rejected` |
+| `Hello` | Open the session; request a nation (absent = sandbox, M3 only) | `Welcome` or `Rejected` |
 | `SubmitCommand` | One engine command (`SetIncomeTax`, `SetTransferRate`, `SetConsumptionRate`) with a client-chosen `client_seq` | exactly one `CommandResult` |
 | `SetSpeed` | Pause, or set speed 1–5 | `ServerState` |
 | `Subscribe` | Choose the map mode, market panel and province panel | a `DayUpdate` for the current day |
@@ -126,7 +126,7 @@ sequenceDiagram
 | rates and fractions (`income_tax_rate`, `life_needs`, `militancy`, unemployment) | in [0, 1] | multiply by 100 for % |
 | money (`treasury`, `cash`, spending) | currency units | — |
 | `people`, `workforce`, `population` | whole people | — |
-| ids | indices into `StaticData` | labels via the key → localisation table |
+| ids | `uint` indices into `StaticData` (player ids `ushort`); "none" is an absent optional field, never `-1` | labels via the key → localisation table |
 
 Clients **send** rates as `Fixed` too. A UI slider at 12.5% sends `raw = 125_000`. Round on the client to the slider's step, never via float arithmetic on the server.
 
@@ -142,7 +142,7 @@ FlatBuffers stays compatible across versions only if changes follow these rules.
 
 ## 9. Testing
 
-- **Round trip:** every message type is built, framed, verified and read back in `pax_protocol`'s tests, including the defaults (`requested_nation = -1`).
+- **Round trip:** every message type is built, framed, verified and read back in `pax_protocol`'s tests, including absent optional fields (a `Hello` without `requested_nation` is sandbox).
 - **Size budgets:** a test builds a `DayUpdate` at the D13 long-term scale and asserts the §4 budgets.
 - **Session replay (determinism):** a scripted headless client connects, submits commands over several days, saves, and disconnects. Loading the save and running `pax_cli run` with the save's command log must reproduce the server's final `state_hash`. This ties the server to the D11 golden harness.
 - **Hostile input:** fuzz the frame reader and `ClientMessage` handling (oversized lengths, truncated frames, invalid unions, a message before `Hello`). The server must close the session, never panic.

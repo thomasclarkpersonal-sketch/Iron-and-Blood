@@ -365,11 +365,14 @@ The state → national → sphere → global roll-up in the old ECONOMY_SYSTEM w
 - **Framing:** TCP; each message is a size-prefixed FlatBuffer with file identifier `PAXC` (client→server) or `PAXS` (server→client). Client messages are at most 64 KiB and server messages at most 16 MiB.
   - Every inbound buffer is verified before it is read.
   - Any protocol error closes the session with `Goodbye`.
-- **Generated code:** produced by flatc **24.3.25**, matching the `flatbuffers` crate, in the engine-free `pax_protocol` crate. It is checked in, and CI fails if regenerating it gives a different result.
+- **Generated code:** produced by flatc **24.3.25**, matching the `flatbuffers` crate, in the engine-free `pax_protocol` crate, by `scripts/gen-protocol.sh`. That script downloads the pinned flatc and checks its checksum. The code is checked in, and CI fails if regenerating it gives a different result.
+  - **`unsafe` exception:** flatc's Rust code uses `unsafe` internally, and the workspace forbids `unsafe_code`. `pax_protocol` therefore *denies* `unsafe_code` and allows it on the generated module only, so its hand-written code (framing, readers) is still held to the rule.
+  - **planus** (a pure-Rust FlatBuffers compiler) was evaluated in M3-1. Its generated code also uses `unsafe`, so it would remove neither the exception nor the pinned toolchain's role, and flatc was kept.
+  - **Reading untrusted frames:** check the length before the file identifier, because flatbuffers' identifier helper asserts on short input. Every frame is verified before anything reads it.
 - **Versioning:** `Hello` and `Welcome` carry `protocol_major`/`protocol_minor`. A major mismatch is refused.
   - Compatible changes only append fields, deprecate instead of deleting, and add union members and enum values at the end.
   - Receivers ignore unknown union members and enum values.
-- **Ids:** every id is an index into the `StaticData` tables sent in `Welcome`, fixed for the session. POPs are identified by `(province, profession)`, never by row index, because compaction reorders rows (D7).
+- **Ids:** every id is a `uint` index into the `StaticData` tables sent in `Welcome`, fixed for the session (player ids are `ushort`). "None" is an absent optional field, never a sentinel such as `-1`, so a missing id can't be cast into a huge index. POPs are identified by `(province, profession)`, never by row index, because compaction reorders rows (D7).
 - **Views, not state:** a `DayUpdate` carries `WorldSummary` and `NationTable` always, plus the subscribed `MapView`, `MarketDetail` and `ProvinceDetail`. The full POP and producer tables are never sent.
   - Budget at the D13 long-term scale: ≤ 16 KB summary-only and ≤ 128 KB with every view subscribed.
   - Measured on the schema: 8.3 KB and 91 KB.

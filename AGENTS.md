@@ -18,7 +18,7 @@ Binding design decisions live in [docs/DECISIONS.md](docs/DECISIONS.md) (cited a
   - `pax_data`: parsing and validating TOML data files into a `World` (D9); golden-hash file IO.
   - `pax_cli`: headless runner (run, record/verify golden hashes, benchmark).
   - `pax_server` *(M3, stub until M3-2)*: the authoritative game server and API boundary (D10, D22, D23).
-  - `pax_protocol` *(M3-1, planned)*: generated FlatBuffers code and framing for the wire protocol (D22). No engine dependency.
+  - `pax_protocol`: generated FlatBuffers code (`scripts/gen-protocol.sh`; never edit it by hand) and framing for the wire protocol (D22). No engine dependency.
 
 ## 3. Concurrency Mitigation
 - **Avoid lock contention:** when many entities affect a shared resource (thousands of POPs and one market), use **Map-Reduce**. POPs compute in parallel (Map: rayon `fold` into per-thread accumulators); the market then processes the aggregate (Reduce). See `systems/market.rs`.

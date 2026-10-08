@@ -23,7 +23,7 @@ crates/
 ├── pax_data/              TOML schema (schema.rs), validation, World builder, golden files
 ├── pax_cli/               run | record | verify | bench
 ├── pax_server/            authoritative game server (M3: stub until M3-2; D10, D22, D23)
-└── pax_protocol/          planned (M3-1): generated FlatBuffers code + framing, no engine dependency (D22)
+└── pax_protocol/          generated FlatBuffers code (scripts/gen-protocol.sh) + framing, no engine dependency (D22)
 data/                      base definitions
 scenarios/<name>/          scenario.toml + golden.hashes
 schemas/                   FlatBuffers wire schemas (D22)

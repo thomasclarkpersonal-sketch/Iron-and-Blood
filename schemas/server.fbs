@@ -9,6 +9,13 @@ namespace pax.net;
 
 // ------------------------------------------------------------- session setup
 
+/// A nation and the markets it owns (D7, D15).
+table NationDef {
+  key: string;
+  /// Indices into StaticData.markets.
+  markets: [uint];
+}
+
 /// Index tables for the session. Every id elsewhere in the protocol (good,
 /// profession, province, market, nation) is an index into one of these vectors.
 /// The tables don't change during a session; a LoadGame sends a new Welcome.
@@ -19,8 +26,8 @@ table StaticData {
   provinces: [string];
   province_market: [uint];  // market index per province
   markets: [string];
-  market_nation: [int];     // nation index per market, -1 = stateless
-  nations: [string];
+  /// A market that no nation lists is stateless.
+  nations: [NationDef];
 }
 
 table Welcome {
@@ -29,8 +36,8 @@ table Welcome {
   player: ushort;
   /// Present this in Hello.resume_token to reclaim the session after a drop (M4).
   resume_token: ulong;
-  /// The nation this session commands, or -1 for sandbox (M3 only).
-  nation: int = -1;
+  /// The nation this session commands; absent for sandbox (M3 only).
+  nation: uint = null;
   scenario: string;
   /// FNV-1a hash of the scenario and content files. The client checks it against
   /// its own copy, so its map assets and labels match the server's data.
