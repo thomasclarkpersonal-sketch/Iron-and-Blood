@@ -153,4 +153,9 @@ FlatBuffers stays compatible across versions only if changes follow these rules.
 - **Round trip:** every message type is built, framed, verified and read back in `pax_protocol`'s tests, including absent optional fields (a `Hello` without `requested_nation` is sandbox).
 - **Size budgets:** a test builds a `DayUpdate` at the D13 long-term scale and asserts the §4 budgets.
 - **Session replay (determinism, M3-9):** a scripted headless client connects, submits commands over several days for both nations, changes speed and subscription, saves, and disconnects. `pax_cli replay <save>` (`pax_data::save::load_by_replay`) must reproduce the server's final `state_hash` at 1 and 4 threads (`pax_server/tests/session_replay.rs`, run on Linux, Windows and macOS). A second test pins the server's day step to every scenario's `golden.hashes` (D11).
-- **Hostile input:** fuzz the frame reader and `ClientMessage` handling (oversized lengths, truncated frames, invalid unions, a message before `Hello`). The server must close the session, never panic.
+- **Hostile input (M3-10):** the server must close the session, never panic. Three layers check it:
+  - seeded tests on stable Rust, run in every CI build:
+    - `pax_protocol/tests/frames.rs`: chunking, oversized and empty lengths, noise;
+    - `pax_server/src/hostile.rs`: noise, flipped bytes and truncation for every request type through the request decoder, and thousands of well-formed requests with hostile values sent to the sim thread from several sessions, with ticks, saves and loads in between;
+    - `pax_server/tests/hostile.rs`: concurrent TCP connections sending damaged frames before and after `Hello`;
+  - a coverage-guided `cargo fuzz` target, `fuzz/fuzz_targets/client_frames.rs`, which runs exactly what a connection task runs: a `FrameDecoder` fed in fuzzed chunks, then the server's own request decoder (exposed by `pax_server`'s `fuzzing` feature, so there is no copy to drift). It needs nightly, and runs for 60 s on every pull request.

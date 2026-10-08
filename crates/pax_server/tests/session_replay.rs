@@ -7,8 +7,9 @@
 //! runs) must reach the server's final `state_hash`, at any thread count. When the
 //! `PAX_CLI` environment variable names a `pax_cli` binary (absolute, or relative to
 //! the workspace root), the test also runs
-//! `pax_cli replay` on the save and checks the hash it prints. CI sets it, and runs
-//! this test on Linux, Windows and macOS.
+//! `pax_cli replay` on the save and checks the hash it prints. CI sets it (and
+//! `PAX_CLI_REQUIRED`, which makes a missing `PAX_CLI` a failure), and runs this test
+//! on Linux, Windows and macOS.
 
 mod common;
 
@@ -106,7 +107,14 @@ fn a_saved_session_replays_to_the_servers_final_state() {
         let players: Vec<_> = replayed.save.commands.iter().filter(|c| c.player.is_some()).collect();
         assert_eq!(players.len(), 6, "every accepted command is in the save's log");
     }
-    if let Some(cli) = std::env::var_os("PAX_CLI") {
+    let cli = std::env::var_os("PAX_CLI");
+    if cli.is_none() {
+        // CI sets PAX_CLI_REQUIRED, so a renamed variable or a rewritten step can't
+        // quietly drop the binary's check.
+        assert!(std::env::var_os("PAX_CLI_REQUIRED").is_none(), "PAX_CLI_REQUIRED is set but PAX_CLI is not");
+        eprintln!("note: PAX_CLI is not set, so the pax_cli replay check is skipped");
+    }
+    if let Some(cli) = cli {
         let cli = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").join(cli);
         let out = std::process::Command::new(cli).arg("replay").arg(&path).output().expect("pax_cli runs");
         let stdout = String::from_utf8_lossy(&out.stdout);

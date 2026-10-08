@@ -1,5 +1,7 @@
 [workspace]
 resolver = "3"
+# `fuzz/` is its own workspace (nightly only, M3-10).
+exclude = ["fuzz"]
 members = ["crates/pax_engine", "crates/pax_data", "crates/pax_cli", "crates/pax_server", "crates/pax_protocol", "crates/pax_godot", "crates/pax_content"]
 
 [workspace.package]
