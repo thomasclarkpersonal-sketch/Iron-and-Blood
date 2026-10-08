@@ -151,6 +151,7 @@ All systems are plain functions over `&mut World`, called by `tick::step` in the
 | `net.rs` | One tokio task per connection. `RequestReader` turns bytes into requests and enforces the `Hello` rules; the rest goes to the sim thread over a bounded channel |
 | `request.rs`, `encode.rs`, `commands.rs` | Wire ↔ owned values. Engine ↔ wire conversions are exhaustive matches, with no `_` arm (NETWORK_PROTOCOL §5) |
 | `sim.rs` | The sim thread: the handshake and admission, subscriptions, command checks, speed, flow control, saves |
+| `session.rs` | The session table (M4-1): one row per connection, with its subscription, window and seat (player id and nation); player ids, who holds a nation, the host (M4-3), broadcasts |
 | `game.rs` | `Game`: the world, its applied-command log and checkpoints, and the day's derived views (`Today`), all changed in one step |
 | `queue.rs`, `clock.rs`, `window.rs` | Command stamping `(player, sequence)`, the game clock (D23), the 3-update flow-control window |
 | `view.rs` | The views, built from `pax_engine::views` (the engine owns every rule a view applies) |

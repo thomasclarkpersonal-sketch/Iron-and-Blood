@@ -43,6 +43,7 @@ flowchart LR
 ```
 
 - **Single player:** the client launches `pax_server` on a free local port and connects (NETWORK_PROTOCOL §6). The server stops when its player leaves.
+- **Several players (M4):** the same server with `--players N`. Each session is a row in the sim thread's session table, with its own subscription, flow-control window and nation; the clock and the game are shared (M4-1, D24).
 - **The sim thread** owns the `World`. It handles requests in arrival order, ticks at the chosen speed (rayon inside the tick), and builds each day's views once for every session. There are no locks around world state.
 - **Network tasks** only frame, verify and decode. A full outbound queue closes its connection instead of growing memory.
 - **The client** never simulates. The bridge does everything about the protocol: decoding, acknowledgements, keep-alive and argument checks. GDScript only draws.

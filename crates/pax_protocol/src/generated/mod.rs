@@ -24,6 +24,8 @@ pub mod pax {
     pub use self::goodbye_generated::*;
     mod hello_generated;
     pub use self::hello_generated::*;
+    mod kick_generated;
+    pub use self::kick_generated::*;
     mod labour_rows_generated;
     pub use self::labour_rows_generated::*;
     mod list_saves_generated;

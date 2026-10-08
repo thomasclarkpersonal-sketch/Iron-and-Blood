@@ -55,6 +55,10 @@ pub enum Request {
         name: Option<String>,
     },
     ListSaves,
+    /// End another player's session (host only, D24).
+    Kick {
+        player: u16,
+    },
 }
 
 /// Why a frame isn't a usable request. Fatal to the session (D22).
@@ -126,6 +130,7 @@ pub fn decode(frame: &[u8]) -> Result<Request, RequestError> {
         P::SaveGame => msg.payload_as_save_game().map(|s| Request::SaveGame { name: owned(s.name()) }),
         P::LoadGame => msg.payload_as_load_game().map(|s| Request::LoadGame { name: owned(s.name()) }),
         P::ListSaves => msg.payload_as_list_saves().map(|_| Request::ListSaves),
+        P::Kick => msg.payload_as_kick().map(|k| Request::Kick { player: k.player() }),
         _ => None,
     };
     request.ok_or(RequestError::UnknownPayload)

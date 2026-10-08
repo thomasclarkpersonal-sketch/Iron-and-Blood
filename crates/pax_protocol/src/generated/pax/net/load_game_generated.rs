@@ -12,7 +12,8 @@ use super::*;
 pub enum LoadGameOffset {}
 #[derive(Copy, Clone, PartialEq)]
 
-/// M3: always allowed. M4: host only, from the lobby.
+/// Host only (D24); anyone else gets a SaveResult with the error. M4-5 moves
+/// loading into the lobby.
 pub struct LoadGame<'a> {
   pub _tab: flatbuffers::Table<'a>,
 }

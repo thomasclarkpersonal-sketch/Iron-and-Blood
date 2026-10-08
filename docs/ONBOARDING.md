@@ -31,7 +31,7 @@ godot --path client                       # the client starts a local server and
 Or run a server by itself and point any client at it:
 
 ```bash
-cargo run --release -p pax_server -- --scenario scenarios/two_states --bind 127.0.0.1:7777 --saves saves
+cargo run --release -p pax_server -- --scenario scenarios/two_states --bind 127.0.0.1:7777 --saves saves --sandbox
 cargo run --release -p pax_cli -- replay saves/<name>.toml   # replay a save; prints its final state_hash
 ```
 

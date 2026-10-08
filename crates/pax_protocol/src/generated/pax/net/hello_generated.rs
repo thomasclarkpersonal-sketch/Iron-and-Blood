@@ -74,8 +74,9 @@ impl<'a> Hello<'a> {
     unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<&str>>(Hello::VT_CLIENT_NAME, None)}
   }
   /// Nation to play, as an index into the Welcome's nation table.
-  /// Absent: sandbox, so the session may command every nation (M3 only).
-  /// M4: ignored; nations are assigned in the lobby (D24).
+  /// Absent: sandbox, so the session may command every nation. Only a server run
+  /// with --sandbox accepts it (D24); single player launches its server that way.
+  /// M4-2: nations are claimed in the lobby instead (D24).
   #[inline]
   pub fn requested_nation(&self) -> Option<u32> {
     // Safety:

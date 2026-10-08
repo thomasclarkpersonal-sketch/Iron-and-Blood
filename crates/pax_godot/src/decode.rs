@@ -477,6 +477,13 @@ enum Phase {
 /// A save request the server hasn't answered yet. It answers them in the order they
 /// were sent: `SaveGame` with a `SaveResult`, and `LoadGame` with a new `Welcome`
 /// (loaded) or a `SaveResult` (failed). So each answer pairs with the oldest one.
+///
+/// With several players (M4-1), a load sends *every* player the new game's
+/// `Welcome` (D23), so a `Welcome` can also arrive unasked, after another player's
+/// load. It answers this client's `LoadGame` only when one is the oldest
+/// outstanding request; otherwise it is that broadcast, and leaves the requests
+/// alone. D24 lets only the host save and load (M4-3), so a client's own load and
+/// another's never race.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SaveRequest {
     Save,
@@ -549,7 +556,7 @@ impl ServerStream {
     }
 
     /// Call when sending `SaveGame` or `LoadGame`, so their answers can be told apart
-    /// (see [`SaveRequest`]). Only an outstanding `LoadGame` admits a new `Welcome`.
+    /// (see [`SaveRequest`]): a new `Welcome` answers an outstanding `LoadGame` first.
     pub fn expect(&mut self, request: SaveRequest) {
         self.outstanding.push_back(request);
     }
@@ -559,15 +566,15 @@ impl ServerStream {
         let msg = read_server_message(frame)?;
         let kind = msg.payload_type();
         let tables = match (self.phase, kind) {
-            // A Welcome opens a session, or replaces it as the answer to a LoadGame.
+            // A Welcome opens a session, or replaces it after a load: this client's
+            // (the answer to its oldest request) or another player's (a broadcast).
             (Phase::AwaitingWelcome, P::Welcome) => None,
-            (Phase::Session(_), P::Welcome) => match self.outstanding.pop_front() {
-                Some(SaveRequest::Load) => None,
-                Some(SaveRequest::Save) => {
-                    return Err(invalid("a Welcome where the answer to a SaveGame was due".to_owned()));
+            (Phase::Session(_), P::Welcome) => {
+                if self.outstanding.front() == Some(&SaveRequest::Load) {
+                    self.outstanding.pop_front();
                 }
-                None => return Err(invalid("a second Welcome without a LoadGame".to_owned())),
-            },
+                None
+            }
             // Before the first Welcome, only a refusal can explain why there will be none.
             (Phase::AwaitingWelcome, P::Rejected | P::Goodbye) => None,
             (Phase::AwaitingWelcome, _) => return Err(invalid(format!("{} before Welcome", payload_tag(kind)))),
@@ -833,12 +840,14 @@ mod tests {
     }
 
     #[test]
-    fn a_second_welcome_is_fatal_unless_a_reload_was_requested() {
+    fn a_later_welcome_replaces_the_tables() {
+        // Unasked: another player's load (M4-1). The new tables apply.
         let mut s = ServerStream::default();
         let mut bytes = welcome_frame(PROTOCOL_MAJOR, 2, 2, true);
         bytes.extend(welcome_frame(PROTOCOL_MAJOR, 3, 3, true));
-        assert_eq!(s.push(&bytes).len(), 1);
-        assert!(matches!(s.error(), Some(StreamError::Invalid(e)) if e.contains("second Welcome")));
+        bytes.extend(day_update_frame(1, 3));
+        assert_eq!(s.push(&bytes).len(), 3);
+        assert_eq!(s.error(), None);
 
         // After a LoadGame, the new Welcome's tables replace the old ones.
         let mut s = ServerStream::default();
@@ -865,9 +874,9 @@ mod tests {
         assert!(
             matches!(s.push(&failed).as_slice(), [ServerEvent::SaveResult { request: SaveRequest::Load, error, .. }] if error.contains("no save"))
         );
-        // A Welcome now is no longer expected.
-        assert!(s.push(&welcome_frame(PROTOCOL_MAJOR, 2, 2, true)).is_empty());
-        assert!(matches!(s.error(), Some(StreamError::Invalid(e)) if e.contains("second Welcome")));
+        // Nothing is outstanding now: a SaveResult would be a protocol error.
+        assert!(s.push(&save_result_frame("x", "")).is_empty());
+        assert!(matches!(s.error(), Some(StreamError::Invalid(e)) if e.contains("without a SaveGame")));
     }
 
     /// Save then load before either is answered: the save's SaveResult answers the
@@ -890,13 +899,24 @@ mod tests {
         assert!(matches!(s.error(), Some(StreamError::Invalid(e)) if e.contains("without a SaveGame")));
     }
 
+    /// Another player's load while this client's save is outstanding: the Welcome is
+    /// the broadcast, and the save's SaveResult still pairs with the save.
     #[test]
-    fn a_welcome_cannot_answer_a_save() {
+    fn a_welcome_never_answers_a_save() {
         let mut s = ServerStream::default();
         s.push(&welcome_frame(PROTOCOL_MAJOR, 2, 2, true));
         s.expect(SaveRequest::Save);
-        assert!(s.push(&welcome_frame(PROTOCOL_MAJOR, 2, 2, true)).is_empty());
-        assert!(matches!(s.error(), Some(StreamError::Invalid(e)) if e.contains("answer to a SaveGame")));
+        let mut bytes = welcome_frame(PROTOCOL_MAJOR, 2, 2, true);
+        bytes.extend(save_result_frame("a", ""));
+        let events = s.push(&bytes);
+        assert!(
+            matches!(
+                events.as_slice(),
+                [ServerEvent::Welcome(_), ServerEvent::SaveResult { request: SaveRequest::Save, .. }]
+            ),
+            "{events:?}"
+        );
+        assert_eq!(s.error(), None);
     }
 
     #[test]

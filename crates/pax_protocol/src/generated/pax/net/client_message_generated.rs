@@ -193,6 +193,21 @@ impl<'a> ClientMessage<'a> {
     }
   }
 
+  #[inline]
+  #[allow(non_snake_case)]
+  pub fn payload_as_kick(&self) -> Option<Kick<'a>> {
+    if self.payload_type() == ClientPayload::Kick {
+      self.payload().map(|t| {
+       // Safety:
+       // Created from a valid Table for this object
+       // Which contains a valid union in this slot
+       unsafe { Kick::init_from_table(t) }
+     })
+    } else {
+      None
+    }
+  }
+
 }
 
 impl flatbuffers::Verifiable for ClientMessage<'_> {
@@ -213,6 +228,7 @@ impl flatbuffers::Verifiable for ClientMessage<'_> {
           ClientPayload::SaveGame => v.verify_union_variant::<flatbuffers::ForwardsUOffset<SaveGame>>("ClientPayload::SaveGame", pos),
           ClientPayload::LoadGame => v.verify_union_variant::<flatbuffers::ForwardsUOffset<LoadGame>>("ClientPayload::LoadGame", pos),
           ClientPayload::ListSaves => v.verify_union_variant::<flatbuffers::ForwardsUOffset<ListSaves>>("ClientPayload::ListSaves", pos),
+          ClientPayload::Kick => v.verify_union_variant::<flatbuffers::ForwardsUOffset<Kick>>("ClientPayload::Kick", pos),
           _ => Ok(()),
         }
      })?
@@ -325,6 +341,13 @@ impl core::fmt::Debug for ClientMessage<'_> {
         },
         ClientPayload::ListSaves => {
           if let Some(x) = self.payload_as_list_saves() {
+            ds.field("payload", &x)
+          } else {
+            ds.field("payload", &"InvalidFlatbuffer: Union discriminant does not match value.")
+          }
+        },
+        ClientPayload::Kick => {
+          if let Some(x) = self.payload_as_kick() {
             ds.field("payload", &x)
           } else {
             ds.field("payload", &"InvalidFlatbuffer: Union discriminant does not match value.")

@@ -27,7 +27,7 @@ M4 builds on [Milestone 3](MILESTONE_3.md) without replacing it: the same server
 ### Carried over from M3
 
 Found during M3 and left for M4, with the reason:
-- **Broadcast `Welcome` after another player's load.** The client's decoder accepts a second `Welcome` only as the answer to its own `LoadGame`. D23 sends every session a new `Welcome` after a load, so with several players (D24) the other clients must accept it too.
+- ✅ **Broadcast `Welcome` after another player's load** (done in M4-1). The client's decoder accepted a second `Welcome` only as the answer to its own `LoadGame`. D23 sends every session a new `Welcome` after a load, so with several players (D24) the other clients must accept it too.
 - **Non-blocking server start in the bridge.** `PaxClient.launch` waits for the local server on the main thread (two_states starts in well under a second). A pollable start-up state keeps the UI responsive for large scenarios.
 - **The tick is over D13 at M2 content: task M4-11** (the owner closed M3 with it moved here, 2026-10-08). `two_states` (12 goods, nations) replicated to about 1M POP rows ticks in about 126 ms on 8 threads at 1,500 markets, over the 100 ms budget, while D13's 4-good reference world takes 44 ms on the same machine (D13, "Measured").
 - **A faster state hash.** The per-day `state_hash` costs about 31 ms at 1M POP rows (M3 kept it, by the owner's decision). FNV over 8-byte words would cut it to a few ms, but changes every golden file (D11).
@@ -81,12 +81,12 @@ Loading a save goes through the lobby, and players reclaim their nations.
 | ID | Task | Depends on | Notes |
 |---|---|---|---|
 | M4-0 ✅ | Accept D24 (this design) after review; confirm the lag thresholds | M3 done | Accepted by the owner on 2026-10-08, with the thresholds as server settings whose defaults a playtest confirms |
-| M4-1 | **Several sessions:** session table on the sim thread; per-session subscriptions, flow-control windows and nations; broadcast of `ServerState` | M4-0 | Sessions are rows in a table, not objects holding references into `World` |
+| M4-1 ✅ | **Several sessions:** session table on the sim thread; per-session subscriptions, flow-control windows and nations; broadcast of `ServerState` | M4-0 | Sessions are rows in a table, not objects holding references into `World`. **Done:** `pax_server --players N` (default 1); each player a distinct id (the lowest free) and nation, a taken nation refused; `ServerState` says who changed the speed; a load welcomes every player again, and the client's bridge accepts that broadcast `Welcome` (carried over from M3); the others play on when one leaves, and the last one leaving pauses the game |
 | M4-2 | **Lobby:** protocol additions (`LobbyState`, `ClaimNation`, `Ready`, `StartGame`, new union members at the end), nation claims, host start | M4-1 | Minor protocol version bump |
-| M4-3 | **Authority:** permission check before `World::validate`; host-only controls; `NotPermitted`; `--sandbox` flag | M4-1 | Tests: a player can't change another nation's taxes; a non-host can't unpause or save |
+| M4-3 ✅ | **Authority:** permission check before `World::validate`; host-only controls; `NotPermitted`; `--sandbox` flag | M4-1 | Tests: a player can't change another nation's taxes; a non-host can't unpause or save. **Done:** the host (first player, or `--admin NAME`; passed to the lowest player id when the host leaves a player-hosted server); host-only speed, saves, loads and the new `Kick` (protocol 1.3); any player may pause; sandbox seats only with `--sandbox`, which the client's single-player launch passes |
 | M4-4 | **Lag and drop rules:** fairness pause, drop, `Goodbye`, resume tokens and rejoin | M4-1 | Tests with a scripted client that stalls, recovers, disconnects and resumes |
 | M4-5 | **Multiplayer saves:** the command log records the player for each command; loading goes through the lobby | M4-2 | The replay test covers a two-player session |
-| M4-6 | **Transport security:** TLS for non-local binds, server password, per-session rate limit | M4-1 | Self-signed certificate for player-hosted games, with its fingerprint shown to join |
+| M4-6 | **Transport security:** TLS for non-local binds, server password, per-session rate limit | M4-1 | Self-signed certificate for player-hosted games, with its fingerprint shown to join. Then lift M4-1's rule that `--players` above 1 binds loopback only. The server password must also authenticate the host: `--admin NAME` (M4-3) trusts a name the client asserts |
 | M4-7 | **Bandwidth controls:** per-session update-rate cap; `MapView` refresh policy | M4-1 | Measured at long-term scale over a simulated 50 ms/1% loss link |
 | M4-8 | **Dedicated server:** Dockerfile and compose file | M4-6 | See "Docker" below |
 | M4-9 | **Client:** lobby screen, player list, "waiting for player" overlay, reconnect, host controls | M4-2 to M4-4 | |

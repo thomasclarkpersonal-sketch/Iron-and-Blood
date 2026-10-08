@@ -149,7 +149,7 @@ fn the_request_decoder_survives_noise_flipped_bytes_and_truncation() {
 fn hostile_request(n: &mut Noise) -> Request {
     let nation = |n: &mut Noise| n.int(2) as u32;
     let opt = |n: &mut Noise, below: u64| (!n.chance(3)).then(|| n.int(below) as u32);
-    match n.below(10) {
+    match n.below(11) {
         0 => Request::Hello {
             major: if n.chance(2) { PROTOCOL_MAJOR } else { n.next() as u16 },
             minor: n.next() as u16,
@@ -177,6 +177,7 @@ fn hostile_request(n: &mut Noise) -> Request {
         6 => Request::Ack { day: n.int(400) },
         7 => Request::SaveGame { name: n.name() },
         8 => Request::LoadGame { name: n.name() },
+        9 => Request::Kick { player: n.int(4) as u16 },
         _ => Request::ListSaves,
     }
 }
@@ -200,6 +201,8 @@ fn the_sim_thread_survives_hostile_requests() {
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two_states");
     let mut config = crate::Config::local(&dir);
     config.saves_dir = saves.clone();
+    // Several players, so taken nations, the host's rules and kicks are exercised too.
+    config.max_players = 3;
     let mut sim = Sim::new(pax_data::load_scenario(&dir).unwrap(), &config);
     let mut receivers: Vec<Receiver<Outbound>> = Vec::new();
     let mut noise = Noise::new(0xC0FF_EE00_DEAD_BEEF);

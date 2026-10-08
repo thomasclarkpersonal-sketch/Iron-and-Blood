@@ -380,6 +380,7 @@ The state → national → sphere → global roll-up in the old ECONOMY_SYSTEM w
 - **Framing:** TCP; each message is a size-prefixed FlatBuffer with file identifier `PAXC` (client→server) or `PAXS` (server→client). Client messages are at most 64 KiB and server messages at most 16 MiB.
   - Every inbound buffer is verified before it is read.
   - Any protocol error closes the session with `Goodbye`.
+- **Liveness:** the server closes a session that has sent nothing for **10 s**. A client therefore sends `Ping` whenever it has sent nothing for a fifth of that (2 s), so a live client never trips it. Both sides derive their timing from one constant, `pax_protocol::IDLE_TIMEOUT`. In multiplayer, D24's lag rules replace this.
 - **Generated code:** produced by flatc **24.3.25**, matching the `flatbuffers` crate, in the engine-free `pax_protocol` crate, by `scripts/gen-protocol.sh`. That script downloads the pinned flatc and checks its checksum. The code is checked in, and CI fails if regenerating it gives a different result.
   - **`unsafe` exception:** flatc's Rust code uses `unsafe` internally, and the workspace forbids `unsafe_code`. `pax_protocol` therefore *denies* `unsafe_code` and allows it on the generated module only, so its hand-written code (framing, readers) is still held to the rule.
   - **planus** (a pure-Rust FlatBuffers compiler) was evaluated in M3-1. Its generated code also uses `unsafe`, so it would remove neither the exception nor the pinned toolchain's role, and flatc was kept.
@@ -411,7 +412,7 @@ The state → national → sphere → global roll-up in the old ECONOMY_SYSTEM w
 - **Speed:** paused, or speeds 1–5 at 0.5, 1, 2 and 5 days per second, and as fast as the tick allows (about 10 days/s at the D13 budget). Speed and pause are **server controls, not engine commands**: they change no results, so they appear in neither the command log nor the state hash. The pacing table is `pax_protocol::pacing`: the server's clock runs on it, and the client labels its speed buttons from it (generated into `PaxKeys.SPEED_DAY_MS`), so the two can't disagree.
 - **Command order within a tick:** the scenario's own scripted commands for the day (`commands.toml`) apply first, then players' commands in stamp order `(day, player, sequence)` (D10). The applied-command log holds both kinds, with scripted commands marked as having no player. Saves are built from this log (below). The order lives in one function, `pax_data::step_day`, which `pax_cli`, the tests and the server all call. A server test pins it to every scenario's `golden.hashes` (D11).
 - **Replays apply the saved log alone.** The scenario's scripted commands for logged days are in it, so a replay never applies `commands.toml` again for those days. Scripted commands for later days still come from the scenario. The tick and the save loader therefore apply each command exactly once, and both run the day through `pax_data::step_day`.
-- **The clock stops when the player leaves.** When the welcomed session closes, the server pauses; a game never runs unobserved.
+- **The clock stops when the last player leaves.** When the last welcomed session closes, the server pauses; a game never runs unobserved. While other players remain, the game goes on (D24).
 - **Flow control:** each client may have at most 3 unacknowledged `DayUpdate`s.
   - While its window is full, the server keeps simulating but sends that client nothing.
   - When the client acknowledges, the server sends only the latest day, with `skipped` counting the days skipped.
@@ -448,11 +449,14 @@ The state → national → sphere → global roll-up in the old ECONOMY_SYSTEM w
 
 - **Permissions:** each session commands at most one nation, claimed in the lobby. The server checks a command's nation against the session's before `World::validate`; a mismatch gets `NotPermitted`. Permission (here) and rule validity (D21) are separate checks, in that order. Sandbox sessions exist only with `--sandbox`.
 - **Host:** only the host changes speed, unpauses, saves, loads and kicks. Any player may pause.
+  - The host is the first player on a player-hosted server. When the host leaves, the remaining player with the lowest id becomes host, so a game is never left without anyone able to unpause it (M4-3).
+  - On a dedicated server, `--admin NAME` names the host's client instead. While the admin is away there is no host, and the role never passes to another player. The name is only what the client says it is, so until M4-6's server password authenticates the admin, a multiplayer server binds loopback only.
+  - A refused speed change is answered with the unchanged `ServerState`, and a refused save or load with a `SaveResult` error. A refused kick is ignored.
 - **Order:** commands apply in `(day, player, sequence)` order, all server-stamped. Any future command that can conflict with another player's must define its own conflict rule in its decision. Player order is only a deterministic tie-break, and would otherwise always favour lower ids.
 - **Lag, in wall-clock time:**
   - updates coalesce per client (D23);
   - 5 s of silence from a client pauses the game ("waiting for player");
-  - 30 s drops the session, and its nation keeps its current policies. In multiplayer this replaces M3's 10 s idle timeout (`pax_protocol::IDLE_TIMEOUT`), which would otherwise drop a client before the fairness pause could help it; single player keeps the 10 s rule;
+  - 30 s drops the session, and its nation keeps its current policies. In multiplayer this replaces D22's 10 s liveness rule, which would otherwise drop a client before the fairness pause could help it; single player keeps D22's rule;
   - a resume token reclaims the nation.
 - **Transport:**
   - TLS whenever the server is not bound to localhost;

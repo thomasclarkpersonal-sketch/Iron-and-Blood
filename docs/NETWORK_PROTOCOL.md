@@ -32,7 +32,7 @@ sequenceDiagram
     participant C as Client (Godot)
     participant S as pax_server
     C->>S: Hello {protocol, name, requested_nation}
-    alt protocol major mismatch / server full
+    alt protocol major mismatch / server full / nation taken
         S->>C: Rejected {reason}
     else accepted
         S->>C: Welcome {player, nation, content_hash, day, speed, StaticData}
@@ -50,14 +50,16 @@ sequenceDiagram
 ```
 
 1. **Hello first.** The client sends `Hello` with `protocol_major` and `protocol_minor`. A different major version gets `Rejected`. A newer or older minor version is accepted, under the evolution rules in §8.
+   - **Players (M4-1):** a server started with `--players N` (default 1) welcomes up to N clients at once; one more gets `Rejected: server full`. Each nation has one player, so `Hello` for a nation another player holds is `Rejected` too. Each player gets a distinct `Welcome.player` id, the lowest one free.
 2. **Welcome** carries `StaticData`: the key tables (goods, professions, producer types, provinces, markets), the province→market map, and each nation with the markets it owns (a market no nation lists is stateless).
    - Every id in the protocol is an index into these tables, and the indices stay fixed for the whole session.
    - **Map check:** the client draws the map from its own copy of the scenario's map files, in the directory `StaticData.map_dir` names (relative to the scenario, checked by `pax_map::check_map_dir`; protocol 1.1). It hashes them with `pax_content::map_hash`, the same function the server uses, and compares the result with `StaticData.map_hash`. On a mismatch it shows an error rather than mislabelling provinces.
    - `content_hash` covers every file the scenario loader reads, maps included, each keyed by its role rather than its path. It identifies the game content in logs and saves (D23).
 3. **Subscribe** replaces the whole subscription. The server immediately answers with a `DayUpdate` for the current day, even while paused, so a newly opened panel fills at once.
 4. **Daily updates** follow the flow-control rule in §5.
-5. **Keep-alive:** a session silent for `pax_protocol::IDLE_TIMEOUT` (10 seconds in M3) is closed, so the client sends `Ping` at least every fifth of that (2 seconds). Both sides take the value from that one constant. M4's lag rules are in D24.
-6. **LoadGame** ends with a new `Welcome`, because the scenario and its tables may differ. The client must drop everything it holds from the old session.
+5. **Keep-alive:** a session silent for `pax_protocol::IDLE_TIMEOUT` (10 seconds, D22) is closed, so the client sends `Ping` at least every fifth of that (2 seconds). Both sides take the value from that one constant. M4's lag rules are in D24.
+6. **LoadGame** ends with a new `Welcome` to **every** player, because the scenario and its tables may differ. Each client must drop everything it holds from the old session, whether or not it asked for the load.
+7. **Leaving:** when a player leaves, the others play on (D24). When the last one leaves, the game pauses, because D23 never runs a game nobody is watching.
 
 ## 4. Messages
 
@@ -65,19 +67,20 @@ sequenceDiagram
 
 | Message | Purpose | Reply |
 |---|---|---|
-| `Hello` | Open the session; request a nation (absent = sandbox, M3 only) | `Welcome` or `Rejected` |
+| `Hello` | Open the session; request a nation (absent = sandbox, only on a server run with `--sandbox`, D24) | `Welcome` or `Rejected` |
 | `SubmitCommand` | One engine command (`SetIncomeTax`, `SetTransferRate`, `SetConsumptionRate`) with a client-chosen `client_seq` | exactly one `CommandResult` |
-| `SetSpeed` | Pause, or set speed 1–5. A speed the server doesn't know is ignored: the reply is the unchanged `ServerState` (D22) | `ServerState` |
+| `SetSpeed` | Pause, or set speed 1–5. Any player may pause; only the host sets a speed (D24). A refused change, or a speed the server doesn't know (D22), gets the unchanged `ServerState`, to the asker only | `ServerState` |
 | `Subscribe` | Choose the map mode, market panel and province panel | a `DayUpdate` for the current day |
 | `Ack` | Finished processing the `DayUpdate` for `day` | — |
 | `Ping` | Keep-alive and round-trip measurement | `Pong` |
-| `SaveGame`, `LoadGame`, `ListSaves` | Saves (D23) | `SaveResult`, `Welcome`, `SaveList` |
+| `SaveGame`, `LoadGame`, `ListSaves` | Saves (D23). Only the host saves and loads (D24); anyone else gets a `SaveResult` with the error. Anyone may list | `SaveResult`, `Welcome`, `SaveList` |
+| `Kick` | Host only (D24, protocol 1.3): end the session of player `player`, which gets `Goodbye: kicked by the host`. Ignored from anyone else, for the host itself, or for a player who isn't connected | — |
 
 ### Server → client (`ServerPayload`)
 
 | Message | When |
 |---|---|
-| `Welcome`, `Rejected` | Reply to `Hello` (and `Welcome` again after `LoadGame`) |
+| `Welcome`, `Rejected` | Reply to `Hello` (and `Welcome` again, to every player, after any player's `LoadGame`) |
 | `DayUpdate` | After a simulated day, subject to flow control (§5) |
 | `CommandResult` | Reply to `SubmitCommand` |
 | `ServerState` | The speed changed (including pause and unpause) |
@@ -122,10 +125,13 @@ sequenceDiagram
 
 ## 6. Single player: how the client runs the server
 
-- The client launches `pax_server` as a child process: `pax_server --scenario <dir> --bind 127.0.0.1:0 --port-file <tmp> --exit-when-idle`. The server binds a free port and writes it to the port file (atomically, so a polling client never reads half a number). The client then connects.
+- The client launches `pax_server` as a child process: `pax_server --scenario <dir> --bind 127.0.0.1:0 --port-file <tmp> --sandbox --exit-when-idle`. Single player plays sandbox, which a server allows only with `--sandbox` (D24). The server binds a free port and writes it to the port file (atomically, so a polling client never reads half a number). The client then connects.
 - When the client exits, it closes the connection, and `--exit-when-idle` makes the server shut down once its player has gone.
-- The client's bridge (`pax_godot::connection`) does this, and also what every client owes the server: it acknowledges each `DayUpdate` on the poll after the one that delivered it (§5), and sends a `Ping` after a fifth of `IDLE_TIMEOUT` (2 s) without sending anything. It also pairs each `SaveResult` and load `Welcome` with the request it answers, oldest first, because the server answers save requests in order.
+- The client's bridge (`pax_godot::connection`) does this, and also what every client owes the server: it acknowledges each `DayUpdate` on the poll after the one that delivered it (§5), and sends a `Ping` after a fifth of `IDLE_TIMEOUT` (2 s) without sending anything. It also pairs each `SaveResult` and load `Welcome` with the request it answers, oldest first, because the server answers save requests in order. A `Welcome` nothing asked for is another player's load (§3), and replaces the session's tables all the same.
 - There is no Docker and no separate install: the server binary ships next to the client.
+- **Several players (M4-1, M4-3):** run the server yourself, for example `pax_server --scenario <dir> --bind 127.0.0.1:7777 --players 2`, and have each client connect to it.
+  - **The host** is the first player to join. When the host leaves, the remaining player with the lowest id becomes host. On a dedicated server, `--admin NAME` makes the client named `NAME` the host instead, whenever it joins; while it is away there is no host (D24).
+  - The lobby (M4-2) and the lag rules (M4-4) are still to come, and so are TLS and a server password (M4-6). D24 requires TLS off localhost, so until M4-6 the server refuses `--players` above 1 on any other address: multiplayer is for testing on one machine until then.
 
 ## 7. Conversions and units
 
@@ -147,7 +153,7 @@ FlatBuffers stays compatible across versions only if changes follow these rules.
 - **Never delete** a field; mark it `(deprecated)`.
 - **Add union members and enum values only at the end.** Never renumber them. Receivers must ignore an unknown union member or enum value, not crash on it.
 - A change that breaks these rules bumps `protocol_major`. A compatible addition bumps `protocol_minor`.
-- A receiver treats a field added in a later minor version as *no data* when it is absent, never as an error: a newer client must still read an older server. History: 1.1 (M3) added `StaticData.map_dir`; 1.2 (M3) added `NationTable.militancy`.
+- A receiver treats a field added in a later minor version as *no data* when it is absent, never as an error: a newer client must still read an older server. History: 1.1 (M3) added `StaticData.map_dir`; 1.2 (M3) added `NationTable.militancy`; 1.3 (M4-3) added the `Kick` request.
 - Rust code is generated with **flatc 24.3.25**, matching the `flatbuffers` crate version, into the `pax_protocol` crate. It is checked in, and CI regenerates it and fails on any difference. Mismatched compiler and runtime versions produce code that doesn't compile.
 
 ## 9. Testing

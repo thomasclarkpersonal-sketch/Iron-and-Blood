@@ -215,7 +215,9 @@ impl LocalServer {
         let mut child = Command::new(server)
             .arg("--scenario")
             .arg(scenario)
-            .args(["--bind", "127.0.0.1:0", "--exit-when-idle"])
+            // Single player plays sandbox (any nation), which a server allows only with
+            // --sandbox (D24).
+            .args(["--bind", "127.0.0.1:0", "--sandbox", "--exit-when-idle"])
             .arg("--port-file")
             .arg(&port_file)
             .arg("--saves")
