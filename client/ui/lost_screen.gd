@@ -1,11 +1,15 @@
 ## The connection-lost screen (M3-8d): the reason the session ended (a `Goodbye`, a
 ## protocol error, a refusal or a closed socket), and what the player can do about
-## it: start a new game, or quit.
+## it: rejoin a multiplayer game with the resume token (M4-9), start a new game, or
+## quit.
 extends ColorRect
 
 signal restart_requested
+signal rejoin_requested
 
 var _reason: Label
+var _rejoin: Button
+var _restart: Button
 
 
 func _init() -> void:
@@ -25,10 +29,15 @@ func _init() -> void:
 	_reason.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	column.add_child(_reason)
 	var buttons := HBoxContainer.new()
-	var restart := Button.new()
-	restart.text = "Start a new game"
-	restart.pressed.connect(func() -> void: restart_requested.emit())
-	buttons.add_child(restart)
+	_rejoin = Button.new()
+	_rejoin.text = "Rejoin"
+	_rejoin.visible = false
+	_rejoin.pressed.connect(func() -> void: rejoin_requested.emit())
+	buttons.add_child(_rejoin)
+	_restart = Button.new()
+	_restart.text = "Start a new game"
+	_restart.pressed.connect(func() -> void: restart_requested.emit())
+	buttons.add_child(_restart)
 	var quit := Button.new()
 	quit.text = "Quit"
 	quit.pressed.connect(func() -> void: get_tree().quit())
@@ -40,6 +49,11 @@ func _init() -> void:
 	visible = false
 
 
-func show_reason(reason: String) -> void:
+## `can_rejoin`: a multiplayer game whose seat waits for this client's token (D24).
+## `hosting`: this client hosts that game, which is still running for the others
+## (M4-9); starting a new game ends it for everyone, so the button says so.
+func show_reason(reason: String, can_rejoin := false, hosting := false) -> void:
 	_reason.text = reason
+	_rejoin.visible = can_rejoin
+	_restart.text = "End the hosted game and start a new one" if hosting else "Start a new game"
 	visible = true

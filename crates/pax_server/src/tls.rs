@@ -38,9 +38,8 @@ pub(crate) fn fingerprint(certificate: &[u8]) -> String {
 
 /// A fresh self-signed certificate, for a player-hosted game.
 pub(crate) fn self_signed() -> Result<Tls, String> {
-    // The name is cosmetic: clients pin the fingerprint and ignore the name (the
-    // bridge sends the same one as SNI, `pax_godot::transport`).
-    let generated = rcgen::generate_simple_self_signed(vec!["pax-server".to_owned()])
+    // Cosmetic: clients pin the fingerprint and ignore the name.
+    let generated = rcgen::generate_simple_self_signed(vec![pax_protocol::TLS_SERVER_NAME.to_owned()])
         .map_err(|e| format!("cannot make a certificate: {e}"))?;
     let certificate = generated.cert.der().clone();
     let key = PrivateKeyDer::Pkcs8(generated.key_pair.serialize_der().into());

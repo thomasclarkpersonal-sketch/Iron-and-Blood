@@ -1,5 +1,6 @@
-## The Iron and Blood client (M3-8, D12): launches the local server, opens a
-## session and shows what the server sends. It never simulates.
+## The Iron and Blood client (M3-8, M4-9, D12): plays alone (it launches a local
+## server), hosts a multiplayer game, or joins one; then shows what the server sends.
+## It never simulates.
 ##
 ## Everything about the protocol (the connection, decoding, acknowledgements,
 ## keep-alive) is in the Rust bridge, `PaxClient`. This script only routes events
@@ -17,6 +18,10 @@
 ##   --screenshot=PATH      run to day 30, pause, save a screenshot and quit
 ##   --smoke                headless check (smoke.gd): a province panel, the Price map, a policy,
 ##                          and a save, list and load; prints SMOKE OK and quits
+##   --host=N               host a game for N players at start (M4-9); with --screenshot, the
+##                          screenshot is of the lobby
+##   --smoke-host           headless check (smoke_host.gd): host a game over TLS, go through the
+##                          lobby, start and play; prints SMOKE OK (host) and quits
 class_name ClientApp
 extends Control
 
@@ -34,6 +39,10 @@ const ProvincePanel := preload("res://ui/province_panel.gd")
 const SaveMenu := preload("res://ui/save_menu.gd")
 const LostScreen := preload("res://ui/lost_screen.gd")
 const Smoke := preload("res://smoke.gd")
+const SmokeHost := preload("res://smoke_host.gd")
+const SmokeScript := preload("res://smoke_script.gd")
+const StartScreen := preload("res://ui/start_screen.gd")
+const LobbyScreen := preload("res://ui/lobby_screen.gd")
 
 const SCREENSHOT_DAYS := 30
 
@@ -41,7 +50,8 @@ var client: PaxClient
 var welcome: Dictionary = {}
 var last_update: Dictionary = {}
 
-var start_screen: Control
+var start_screen: StartScreen
+var lobby: LobbyScreen
 var game: Control
 var top_bar: TopBar
 var summary: SummaryPanel
@@ -58,8 +68,13 @@ var lost: LostScreen
 
 ## Whether this connection has had its first Welcome (a later one is a load).
 var _session_started := false
-## The --smoke run, or `null`.
-var _smoke: Smoke = null
+## The --smoke or --smoke-host run, or `null`.
+var _smoke: SmokeScript = null
+## A multiplayer session (hosted or joined). How to reach it again, and the resume
+## token, live in the bridge (`PaxClient.rejoin`, D24).
+var _multiplayer := false
+## The latest LOBBY_STATE: who is host, and the names `waiting_for` refers to.
+var _last_lobby: Dictionary = {}
 ## The province panel's province, or `null` for none (D22: no sentinels).
 var selected_province: Variant = null
 var _finishing := false
@@ -73,7 +88,11 @@ func _ready() -> void:
 		if _flag("--smoke") or _arg("--screenshot=") != "":
 			finish(1, "FAILED: " + error)
 			return
-	if _flag("--autostart") or _flag("--smoke") or _arg("--screenshot=") != "":
+	if _flag("--smoke-host"):
+		_host(2, "Smoke")
+	elif _arg("--host=").is_valid_int():
+		_host(int(_arg("--host=")), "Host")
+	elif _flag("--autostart") or _flag("--smoke") or _arg("--screenshot=") != "":
 		_start()
 
 
@@ -94,15 +113,30 @@ func _unhandled_input(event: InputEvent) -> void:
 		overlay.visible = not overlay.visible
 
 
-func _start() -> void:
+## Starts a session's UI. `rejoining`: the same client reconnects (its hosted game,
+## if any, lives in it, so it must not be replaced); otherwise a fresh client, and
+## freeing the old one ends whatever it ran.
+func _begin(multiplayer: bool, rejoining := false) -> void:
 	start_screen.visible = false
 	game.visible = true
 	lost.visible = false
-	_smoke = Smoke.new(self) if _flag("--smoke") else null
+	lobby.visible = false
+	_multiplayer = multiplayer
 	_session_started = false
+	_last_lobby = {}
 	welcome = {}
 	_reset_session()
-	client = PaxClient.new()
+	top_bar.set_host(true)
+	if client != null:
+		client.disconnect_from_server()
+	if not rejoining or client == null:
+		client = PaxClient.new()
+
+
+## Single player: the client launches its own server (NETWORK_PROTOCOL §6).
+func _start() -> void:
+	_begin(false)
+	_smoke = Smoke.new(self) if _flag("--smoke") else null
 	var error := client.launch(_server_path(), _scenario_dir(), OS.get_user_data_dir().path_join("saves"))
 	if error != "":
 		_connection_lost(error)
@@ -111,6 +145,57 @@ func _start() -> void:
 	error = client.hello(int(nation) if nation.is_valid_int() else null)
 	if error != "":
 		_connection_lost(error)
+
+
+## Hosts a game for `players` (M4-9): a server on this machine over TLS, which this
+## client joins like everyone else; the lobby shows what to share.
+func _host(players: int, name: String) -> void:
+	_begin(true)
+	_smoke = SmokeHost.new(self) if _flag("--smoke-host") else null
+	var saves := OS.get_user_data_dir().path_join("saves")
+	var error := client.host_game(_server_path(), _scenario_dir(), saves, players, name)
+	if error != "":
+		return _back_to_start(error)
+	lobby.set_hosting(client.hosted())
+	_hello(null)
+
+
+## Joins a game elsewhere (M4-9) over TLS, pinned to the fingerprint the host shared.
+func _join_game(host: String, port: int, fingerprint: String, password: String, name: String) -> void:
+	_begin(true)
+	# The map comes from this client's own copy of the scenario (D12).
+	var error := client.join_game(host, port, fingerprint, password, name, _scenario_dir())
+	if error != "":
+		return _back_to_start(error)
+	_hello(null)
+
+
+func _hello(nation: Variant) -> void:
+	var error := client.hello(nation)
+	if error != "":
+		_connection_lost(error)
+
+
+## Rejoins a multiplayer game after a drop: the bridge reconnects the way it first
+## joined and sends the resume token, which reclaims the seat and its nation (D24).
+func _rejoin() -> void:
+	_begin(true, true)
+	var error := client.rejoin()
+	if error != "":
+		_connection_lost(error)
+
+
+func _back_to_start(error: String) -> void:
+	game.visible = false
+	start_screen.visible = true
+	start_screen.show_status(error)
+	if _smoke != null:
+		finish(1, "SMOKE FAILED: " + error)
+
+
+## What the host shares (`PaxClient.hosted()`); empty unless this client hosts.
+func hosted() -> Dictionary:
+	return client.hosted() if client != null else {}
 
 
 func _handle(event: Dictionary) -> void:
@@ -122,6 +207,8 @@ func _handle(event: Dictionary) -> void:
 			if reload:
 				# A load replaced the game (D23): its tables may differ, so start afresh.
 				_reset_session()
+			if _multiplayer:
+				lobby.set_session(welcome)
 			top_bar.set_session(welcome)
 			summary.set_session(welcome)
 			nation_panel.set_session(welcome)
@@ -150,6 +237,24 @@ func _handle(event: Dictionary) -> void:
 			nation_panel.show_result(event)
 		PaxKeys.SERVER_STATE:
 			top_bar.show_speed(event[PaxKeys.SPEED])
+			top_bar.show_waiting(LobbyScreen.names_of(_last_lobby, event[PaxKeys.WAITING_FOR]))
+		PaxKeys.LOBBY_STATE:
+			if event[PaxKeys.NOTICE] == null:
+				_last_lobby = event
+			lobby.show_lobby(event)
+			top_bar.set_host(LobbyScreen.is_host(_last_lobby, welcome.get(PaxKeys.PLAYER, -1)))
+			# In multiplayer the lobby's claim, not the Welcome, says who this player plays.
+			var me := LobbyScreen.me(_last_lobby, welcome.get(PaxKeys.PLAYER, -1))
+			if not me.is_empty():
+				top_bar.set_playing(me[PaxKeys.NATION], me[PaxKeys.SANDBOX])
+				nation_panel.set_playing(null if me[PaxKeys.SANDBOX] else me[PaxKeys.NATION])
+			# --host with --screenshot: what a host sees in the lobby.
+			var shot := _arg("--screenshot=")
+			if shot != "" and not event[PaxKeys.STARTED] and not _finishing:
+				_finishing = true
+				await get_tree().create_timer(0.3).timeout
+				await _save_screenshot(shot)
+				finish(0, "")
 		PaxKeys.SAVE_LIST:
 			save_menu.show_list(event[PaxKeys.NAMES])
 		PaxKeys.SAVE_RESULT:
@@ -259,14 +364,17 @@ func select_province(province: int) -> void:
 
 
 func _connection_lost(reason: String) -> void:
-	lost.show_reason(reason)
+	# A multiplayer seat waits for its resume token (D24): the player can rejoin.
+	var hosting := client != null and not client.hosted().is_empty()
+	lost.show_reason(reason, client != null and client.can_rejoin(), hosting)
 	save_menu.visible = false
+	lobby.visible = false
 	var shot := _arg("--screenshot=")
 	if shot != "" and not _finishing:
 		# Show what the player would see, then fail the run.
 		_finishing = true
 		await _save_screenshot(shot)
-	if _flag("--smoke") or shot != "":
+	if _flag("--smoke") or _flag("--smoke-host") or shot != "":
 		finish(1, "FAILED: connection lost: %s" % reason)
 
 
@@ -293,19 +401,11 @@ func _exit_tree() -> void:
 func _build_ui() -> void:
 	set_anchors_preset(Control.PRESET_FULL_RECT)
 
-	start_screen = VBoxContainer.new()
-	start_screen.set_anchors_preset(Control.PRESET_CENTER)
-	var title := Label.new()
-	title.text = "Iron and Blood"
-	title.add_theme_font_size_override("font_size", 32)
-	start_screen.add_child(title)
-	var scenario := Label.new()
-	scenario.text = "Scenario: %s" % _scenario_dir().get_file()
-	start_screen.add_child(scenario)
-	var start := Button.new()
-	start.text = "Start (sandbox)"
-	start.pressed.connect(_start)
-	start_screen.add_child(start)
+	start_screen = StartScreen.new()
+	start_screen.set_scenario(_scenario_dir().get_file())
+	start_screen.single_player_requested.connect(_start)
+	start_screen.host_requested.connect(_host)
+	start_screen.join_requested.connect(_join_game)
 	add_child(start_screen)
 
 	game = VBoxContainer.new()
@@ -379,7 +479,19 @@ func _build_ui() -> void:
 	lost.restart_requested.connect(func() -> void:
 		if client != null:
 			client.disconnect_from_server()
-		_start())
+		client = null
+		game.visible = false
+		lost.visible = false
+		start_screen.visible = true)
+	lost.rejoin_requested.connect(_rejoin)
+
+	lobby = LobbyScreen.new()
+	lobby.claim_requested.connect(func(nation: Variant) -> void: client.claim_nation(nation))
+	lobby.ready_requested.connect(func(ready: bool) -> void: client.set_ready(ready))
+	lobby.start_requested.connect(func() -> void: client.start_game())
+	lobby.kick_requested.connect(func(player: int) -> void: client.kick(player))
+	add_child(lobby)
+	# The connection-lost screen goes over the lobby.
 	add_child(lost)
 
 

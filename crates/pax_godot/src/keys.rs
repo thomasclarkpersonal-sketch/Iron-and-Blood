@@ -152,6 +152,10 @@ keys! {
     /// Why this client's last lobby request was refused, or null.
     NOTICE = "notice",
 
+    // A hosted game (PaxClient.hosted): what the host shares with the players.
+    PORT = "port",
+    FINGERPRINT = "fingerprint",
+
     // A loaded map (PaxClient.load_map): ERROR, or the ID texture and labels.
     WIDTH = "width",
     HEIGHT = "height",

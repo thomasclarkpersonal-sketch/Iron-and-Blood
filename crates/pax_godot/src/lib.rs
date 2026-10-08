@@ -25,7 +25,7 @@ use std::net::ToSocketAddrs;
 use std::path::Path;
 use std::time::Duration;
 
-use connection::{Connection, LocalServer};
+use connection::{Connection, HostedServer, JoinTarget, LocalServer};
 use decode::{
     DayUpdateView, MapViewData, MarketView, NationTableView, ProvinceView, ServerEvent, WelcomeView, WorldSummaryView,
 };
@@ -66,10 +66,32 @@ pub struct PaxClient {
     /// `set_scenario_dir` for a server started elsewhere.
     scenario_dir: Option<std::path::PathBuf>,
     connection: Option<Connection>,
+    /// The single-player server `launch` started: one session's, ended with it.
     /// Declared after `connection`, so the connection closes first and the server
     /// can exit by itself (`--exit-when-idle`).
     server: Option<LocalServer>,
+    /// The game `host_game` started (M4-9). It holds the other players' game, so it
+    /// outlives this client's sessions: the host can lose its connection and rejoin
+    /// (D24). Only `stop_hosting`, a new `host_game` or `launch`, or freeing this
+    /// client ends it.
+    hosting: Option<HostedServer>,
+    /// The multiplayer game this client last joined or hosted, to rejoin it (D24):
+    /// set by `join_game` and `host_game`, kept across sessions, forgotten by any
+    /// other connect.
+    joined: Option<Joined>,
 }
+
+/// A multiplayer game to rejoin (D24, M4-9): how to reach it, this client's copy of
+/// its scenario, and the resume token from its latest `Welcome`.
+#[derive(Debug)]
+struct Joined {
+    target: JoinTarget,
+    scenario_dir: std::path::PathBuf,
+    resume_token: Option<std::num::NonZeroU64>,
+}
+
+/// How long a connect waits for the server.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// `null` for `None`.
 fn optional<T: ToGodot>(v: Option<T>) -> Variant {
@@ -98,12 +120,8 @@ impl PaxClient {
     /// Returns an error message, or `""` on success.
     #[func]
     fn launch(&mut self, server_path: GString, scenario_dir: GString, saves_dir: GString) -> GString {
-        // A previous session ends first: its connection, then its server, so that
-        // server can exit by itself (`--exit-when-idle`).
-        self.connection = None;
-        self.server = None;
-        self.welcome = None;
-        self.map = None;
+        self.end_session();
+        self.forget_multiplayer();
         let (server, scenario, saves) = (server_path.to_string(), scenario_dir.to_string(), saves_dir.to_string());
         self.scenario_dir = Some(scenario.clone().into());
         match LocalServer::launch(Path::new(&server), Path::new(&scenario), Path::new(&saves)) {
@@ -114,6 +132,116 @@ impl PaxClient {
             }
             Err(e) => rejected(e),
         }
+    }
+
+    /// Hosts a multiplayer game (M4-9): starts `server_path` for `scenario_dir` with
+    /// room for `players`, reachable from other machines over TLS (D24, M4-6), and
+    /// joins it as `name` (empty: the default name). `hosted()` then gives what to
+    /// share with the players; send `hello` next. Returns an error message, or `""`.
+    #[func]
+    fn host_game(
+        &mut self,
+        server_path: GString,
+        scenario_dir: GString,
+        saves_dir: GString,
+        players: i64,
+        name: GString,
+    ) -> GString {
+        let Some(players) = u16::try_from(players).ok().filter(|&p| p >= 2) else {
+            return rejected(format!("{players} players: a hosted game has at least 2"));
+        };
+        self.end_session();
+        self.forget_multiplayer();
+        let (server, scenario, saves) = (server_path.to_string(), scenario_dir.to_string(), saves_dir.to_string());
+        let hosted = match LocalServer::host(Path::new(&server), Path::new(&scenario), Path::new(&saves), players) {
+            Ok(hosted) => hosted,
+            Err(e) => return rejected(e),
+        };
+        // The host reaches its own server over TLS too, pinned like everyone else.
+        let target = JoinTarget {
+            addr: hosted.server.addr,
+            fingerprint: hosted.fingerprint.clone(),
+            password: None,
+            name: Some(name.to_string()).filter(|n| !n.is_empty()),
+        };
+        self.hosting = Some(hosted);
+        self.join(target, scenario.into())
+    }
+
+    /// Joins a multiplayer game elsewhere (M4-9) over TLS (D24, M4-6), trusting only
+    /// the certificate whose SHA-256 is `fingerprint` (as the host shared it: any
+    /// case, `:` and spaces allowed), giving `password` and `name` if not empty.
+    /// `scenario_dir` is this client's copy of the game's scenario (D12). Send `hello`
+    /// next. Returns an error message, or `""`.
+    #[func]
+    fn join_game(
+        &mut self,
+        host: GString,
+        port: i64,
+        fingerprint: GString,
+        password: GString,
+        name: GString,
+        scenario_dir: GString,
+    ) -> GString {
+        self.forget_multiplayer();
+        let addr = match self.new_session(&host, port) {
+            Ok(addr) => addr,
+            Err(e) => return e,
+        };
+        let Some(fingerprint) = transport::normalise(&fingerprint.to_string()) else {
+            return rejected("a fingerprint is 64 hex digits (the server prints it)".to_owned());
+        };
+        let given = |s: GString| Some(s.to_string()).filter(|s| !s.is_empty());
+        let target = JoinTarget { addr, fingerprint, password: given(password), name: given(name) };
+        self.join(target, scenario_dir.to_string().into())
+    }
+
+    /// Whether `rejoin` can try: a multiplayer game was joined or hosted, and its
+    /// `Welcome` gave a resume token (D24).
+    #[func]
+    fn can_rejoin(&self) -> bool {
+        self.joined.as_ref().is_some_and(|j| j.resume_token.is_some())
+    }
+
+    /// Reconnects to the last multiplayer game with the resume token, which reclaims
+    /// the seat and its nation (D24): the same address, pinned fingerprint, password
+    /// and name as the first time. A game this client hosts is still running (a lost
+    /// connection doesn't end it). Returns an error message, or `""`.
+    #[func]
+    fn rejoin(&mut self) -> GString {
+        let Some(Joined { target, scenario_dir, resume_token: Some(token) }) = &self.joined else {
+            return rejected("there is no game to rejoin".to_owned());
+        };
+        let (target, scenario_dir, token) = (target.clone(), scenario_dir.clone(), token.get());
+        self.end_session();
+        match target.connect(CONNECT_TIMEOUT) {
+            Ok(mut c) => {
+                c.resume(token);
+                self.connection = Some(c);
+                self.scenario_dir = Some(scenario_dir);
+                GString::new()
+            }
+            Err(e) => rejected(format!("cannot reach the game at {}: {e}", target.addr)),
+        }
+    }
+
+    /// Ends the game this client hosts, for every player in it (a deliberate choice:
+    /// losing the connection doesn't end it). Nothing if it hosts none.
+    #[func]
+    fn stop_hosting(&mut self) {
+        self.hosting = None;
+    }
+
+    /// What the host shares so players can join (`PORT` and `FINGERPRINT`), or an
+    /// empty Dictionary when this client isn't hosting.
+    #[func]
+    fn hosted(&self) -> VarDictionary {
+        let mut d = VarDictionary::new();
+        if let Some(hosted) = &self.hosting {
+            d.set(keys::PORT, i64::from(hosted.server.addr.port()));
+            d.set(keys::FINGERPRINT, &GString::from(&hosted.fingerprint));
+        }
+        d
     }
 
     /// Where this client's copy of the scenario is, for a server it didn't launch
@@ -127,10 +255,34 @@ impl PaxClient {
     /// Connects to a running server. Returns an error message, or `""`.
     #[func]
     fn connect_to(&mut self, host: GString, port: i64) -> GString {
+        self.forget_multiplayer();
         match self.new_session(&host, port) {
             Ok(addr) => self.connect_addr(addr),
             Err(e) => e,
         }
+    }
+
+    /// Ends the current session, if any, so nothing of it carries over into the next:
+    /// its connection first, then a single-player server it launched, so that server
+    /// can exit by itself (`--exit-when-idle`); then its tables, map and scenario
+    /// directory. The one place every connect path (`launch`, `host_game`,
+    /// `join_game`, `rejoin`, `connect_to`) clears per-session
+    /// state. A hosted game (`hosting`) and the game to rejoin (`joined`) outlive it,
+    /// so a player, the host included, can rejoin.
+    fn end_session(&mut self) {
+        self.connection = None;
+        self.server = None;
+        self.welcome = None;
+        self.map = None;
+        self.scenario_dir = None;
+    }
+
+    /// Leaves multiplayer: ends the game this client hosts, if any, and forgets the
+    /// game to rejoin. Every connect path but `rejoin` starts with it, so a client is
+    /// in at most one multiplayer game.
+    fn forget_multiplayer(&mut self) {
+        self.hosting = None;
+        self.joined = None;
     }
 
     /// Starts a new session to `host:port`: nothing of the previous one carries over,
@@ -140,11 +292,7 @@ impl PaxClient {
     /// for the caller.
     fn new_session(&mut self, host: &GString, port: i64) -> Result<std::net::SocketAddr, GString> {
         let Ok(port) = u16::try_from(port) else { return Err(rejected(format!("port {port} out of range"))) };
-        self.connection = None;
-        self.server = None;
-        self.welcome = None;
-        self.map = None;
-        self.scenario_dir = None;
+        self.end_session();
         match (host.to_string(), port).to_socket_addrs().map(|mut a| a.next()) {
             Ok(Some(addr)) => Ok(addr),
             Ok(None) => Err(rejected(format!("{host} has no address"))),
@@ -163,28 +311,22 @@ impl PaxClient {
         }
     }
 
-    /// Connects to a multiplayer server elsewhere over TLS (D24, M4-6), trusting only
-    /// the certificate whose SHA-256 is `fingerprint`: what the server printed, as
-    /// the host shared it (any case, `:` and spaces allowed). Returns an error message
-    /// (nothing connected), or `""`; a wrong certificate ends the connection with a
-    /// reason as it is polled.
-    #[func]
-    fn connect_secure(&mut self, host: GString, port: i64, fingerprint: GString) -> GString {
-        let addr = match self.new_session(&host, port) {
-            Ok(addr) => addr,
-            Err(e) => return e,
-        };
-        match Connection::connect_tls(addr, Duration::from_secs(5), &fingerprint.to_string()) {
+    /// Connects to a multiplayer game over TLS (`target`) and remembers it, so a
+    /// drop can be rejoined; its resume token comes with the next `Welcome`.
+    fn join(&mut self, target: JoinTarget, scenario_dir: std::path::PathBuf) -> GString {
+        match target.connect(CONNECT_TIMEOUT) {
             Ok(c) => {
                 self.connection = Some(c);
+                self.scenario_dir = Some(scenario_dir.clone());
+                self.joined = Some(Joined { target, scenario_dir, resume_token: None });
                 GString::new()
             }
-            Err(e) => rejected(format!("cannot connect to {addr}: {e}")),
+            Err(e) => rejected(format!("cannot connect to {}: {e}", target.addr)),
         }
     }
 
     fn connect_addr(&mut self, addr: std::net::SocketAddr) -> GString {
-        match Connection::connect(addr, Duration::from_secs(5)) {
+        match Connection::connect(addr, CONNECT_TIMEOUT) {
             Ok(c) => {
                 self.connection = Some(c);
                 GString::new()
@@ -217,6 +359,10 @@ impl PaxClient {
                 // A new session or a load: its map has to be loaded again.
                 self.welcome = Some((**w).clone());
                 self.map = None;
+                // The token that reclaims this seat after a drop (D24); 0 is none.
+                if let Some(joined) = &mut self.joined {
+                    joined.resume_token = std::num::NonZeroU64::new(w.resume_token);
+                }
             }
             out.push(&event_dictionary(event));
         }
@@ -359,22 +505,6 @@ impl PaxClient {
             Ok(n) => self.with_connection(|c| c.claim_nation(n)),
             Err(e) => rejected(e),
         }
-    }
-
-    /// The server's password (or the admin's), sent with the next `hello` or
-    /// `resume` (D24, protocol 1.6). `""` for none.
-    #[func]
-    fn set_password(&mut self, password: GString) -> GString {
-        let password = Some(password.to_string()).filter(|p| !p.is_empty());
-        self.with_connection(|c| c.set_password(password))
-    }
-
-    /// Reclaims the seat a dropped session kept (D24): `token` is the old `Welcome`'s
-    /// `RESUME_TOKEN`. A `Welcome` answers, or `Rejected` if no seat is kept for it.
-    #[func]
-    fn resume(&mut self, token: i64) -> GString {
-        // The token's bits, as the Welcome dictionary carried them.
-        self.with_connection(|c| c.resume(token as u64))
     }
 
     /// Lobby: marks this player ready, or not.
