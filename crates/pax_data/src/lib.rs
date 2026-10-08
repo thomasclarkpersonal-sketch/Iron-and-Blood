@@ -230,7 +230,7 @@ pub fn load_scenario(dir: &Path) -> Result<Scenario, LoadError> {
     };
     let map = match &scenario.map {
         Some(map_dir) => {
-            let (map, files) = map::load(&dir.join(map_dir), &world)?;
+            let (map, files) = map::load(dir, map_dir, &world)?;
             files.hash_into(&mut hash);
             Some(map)
         }

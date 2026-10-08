@@ -138,7 +138,7 @@ Commands of the same day apply in file order. Every command is checked at load a
 
 ## Province map (`map/`, M3-7)
 
-The picture the client draws, and which province each colour is. The engine never reads it. A scenario names its map directory with `map = "map"`, and the directory holds two files:
+The picture the client draws, and which province each colour is. The engine never reads it. A scenario names its map directory with `map = "map"`: a relative path inside the scenario directory, with `/` separators and no `.` or `..` (`pax_map::check_map_dir`; the server refuses anything else at load, and the client refuses it in `StaticData.map_dir`). The directory holds two files:
 
 - **`provinces.png`:** every province painted in one unique colour, 8-bit RGB or RGBA (alpha is ignored). Province edges must be hard, because anti-aliasing creates colours that belong to no province. At most 16384 pixels per side.
 - **`provinces.toml`:**
@@ -157,9 +157,10 @@ Load errors:
 - two provinces sharing a colour, or one using the background colour;
 - a pixel whose colour is neither a province's nor the background (the first five such colours are listed, then a count of the rest);
 - a province with no pixels, or a label outside its own pixels;
-- an image that isn't 8-bit RGB or RGBA PNG.
+- an image that isn't 8-bit RGB or RGBA PNG;
+- a scenario with more than 65,535 provinces (`pax_map::MAX_PROVINCES`): the client's ID texture can't draw more, so the server refuses such a map at load.
 
-The two files are part of the scenario's content hash, and together they are `StaticData.map_hash` (D22). `scripts/draw_two_states_map.py` regenerates the `two_states` map.
+The two files are part of the scenario's content hash, and together they are `StaticData.map_hash` (D22). One reader, `pax_map`, validates them for the server and loads them for the client (D9's one exception). The client finds its copy where the server says (`StaticData.map_dir`) and refuses one whose hash differs from the server's. `scripts/draw_two_states_map.py` regenerates the `two_states` map.
 
 ## Save files (`saves/<name>.toml`, D23)
 

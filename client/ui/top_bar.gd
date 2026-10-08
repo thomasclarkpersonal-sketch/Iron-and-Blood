@@ -6,15 +6,10 @@ const PaxKeys := preload("res://pax_keys.gd")
 ## The player asked for `speed` (a `PaxKeys.SPEED_*`).
 signal speed_requested(speed: int)
 
-## Each speed's button: value, label, tooltip (D23).
-const SPEEDS := [
-	[PaxKeys.SPEED_PAUSED, "Pause", "Paused"],
-	[PaxKeys.SPEED_SLOWEST, "0.5", "0.5 days per second"],
-	[PaxKeys.SPEED_SLOW, "1", "1 day per second"],
-	[PaxKeys.SPEED_NORMAL, "2", "2 days per second"],
-	[PaxKeys.SPEED_FAST, "5", "5 days per second"],
-	[PaxKeys.SPEED_FASTEST, "Max", "As fast as the server can"],
-]
+## The speeds, in button order (D23). Labels and tooltips come from the server's
+## pacing table (`PaxKeys.SPEED_DAY_MS`), so they can't disagree with it.
+const SPEEDS := [PaxKeys.SPEED_PAUSED, PaxKeys.SPEED_SLOWEST, PaxKeys.SPEED_SLOW, PaxKeys.SPEED_NORMAL,
+	PaxKeys.SPEED_FAST, PaxKeys.SPEED_FASTEST]
 
 var _day: Label
 var _session: Label
@@ -29,11 +24,19 @@ func _init() -> void:
 	_day.custom_minimum_size.x = 120
 	row.add_child(_day)
 	var group := ButtonGroup.new()
-	for entry in SPEEDS:
-		var speed: int = entry[0]
+	for speed: int in SPEEDS:
 		var b := Button.new()
-		b.text = entry[1]
-		b.tooltip_text = entry[2]
+		var ms = PaxKeys.SPEED_DAY_MS[speed]
+		if ms == null:
+			b.text = "Pause"
+			b.tooltip_text = "Paused"
+		elif ms == 0:
+			b.text = "Max"
+			b.tooltip_text = "As fast as the server can"
+		else:
+			var per_second: float = 1000.0 / ms
+			b.text = _number(per_second)
+			b.tooltip_text = "%s days per second" % _number(per_second)
 		b.toggle_mode = true
 		b.button_group = group
 		b.set_meta("speed", speed)
@@ -63,3 +66,8 @@ func show_day(update: Dictionary) -> void:
 func show_speed(speed: int) -> void:
 	for b in _buttons:
 		b.set_pressed_no_signal(b.get_meta("speed") == speed)
+
+
+## A number without a trailing ".0" for whole values (display only).
+static func _number(x: float) -> String:
+	return str(int(x)) if is_equal_approx(x, roundf(x)) else str(x)

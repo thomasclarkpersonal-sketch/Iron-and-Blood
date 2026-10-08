@@ -2,6 +2,7 @@
 //! complete size-prefixed frame (`PAXS`), ready to write to the socket.
 
 use flatbuffers::FlatBufferBuilder;
+use pax_data::map::MapData;
 use pax_engine::World;
 use pax_protocol::wire::{self, ServerPayload};
 
@@ -20,7 +21,7 @@ fn finish(
 fn static_data<'a>(
     b: &mut FlatBufferBuilder<'a>,
     world: &World,
-    map_hash: Option<u64>,
+    map: Option<&MapData>,
 ) -> flatbuffers::WIPOffset<wire::StaticData<'a>> {
     let defs = &world.defs;
     let geo = &world.geography;
@@ -47,6 +48,8 @@ fn static_data<'a>(
         })
         .collect();
     let nations = b.create_vector(&nations);
+    // The directory and the hash travel together (StaticData: one only with the other).
+    let map_dir = map.map(|m| b.create_string(&m.dir));
     wire::StaticData::create(
         b,
         &wire::StaticDataArgs {
@@ -57,7 +60,8 @@ fn static_data<'a>(
             province_market: Some(province_market),
             markets: Some(markets),
             nations: Some(nations),
-            map_hash,
+            map_hash: map.map(|m| m.map.map_hash),
+            map_dir,
         },
     )
 }
@@ -70,14 +74,14 @@ pub struct WelcomeInfo<'s> {
     pub nation: Option<u32>,
     pub scenario: &'s str,
     pub content_hash: u64,
-    /// The scenario's map files' hash (`StaticData.map_hash`), if it has a map.
-    pub map_hash: Option<u64>,
+    /// The scenario's map, if it has one (`StaticData.map_dir`, `.map_hash`).
+    pub map: Option<&'s MapData>,
     pub speed: wire::Speed,
 }
 
 pub fn welcome(world: &World, info: &WelcomeInfo<'_>) -> Vec<u8> {
     let mut b = FlatBufferBuilder::new();
-    let defs = static_data(&mut b, world, info.map_hash);
+    let defs = static_data(&mut b, world, info.map);
     let scenario = b.create_string(info.scenario);
     let w = wire::Welcome::create(
         &mut b,

@@ -88,6 +88,7 @@ fn play(c: &mut Tester) {
     let ServerEvent::Welcome(w) = c.wait_for(|e| matches!(e, ServerEvent::Welcome(_))) else { unreachable!() };
     assert_eq!((w.scenario.as_str(), w.nations.len(), w.day), ("Two States", 2, 0));
     assert!(w.map_hash.is_some(), "two_states has a map");
+    assert_eq!(w.map_dir.as_deref(), Some("map"), "the server says where the map is");
 
     c.subscribe(MapMode::Price, 0, Some(0), Some(0));
     let ServerEvent::DayUpdate(u) = c.wait_for(|e| matches!(e, ServerEvent::DayUpdate(_))) else { unreachable!() };

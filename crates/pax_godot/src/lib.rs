@@ -7,15 +7,17 @@
 //! it against a real `pax_server`). This file only converts between it and Godot
 //! types, with every Dictionary key named once in `keys.rs`.
 //!
-//! It depends on `pax_protocol` only, never on `pax_engine`, so the client can't
-//! simulate (D10). Float arithmetic is linted everywhere except `decode::display`:
-//! code that builds commands (simulation input) must use integers (D3).
+//! It depends on `pax_protocol` and D12's side-neutral crates (`pax_map`,
+//! `pax_content`), never on `pax_engine`, so the client can't simulate (D10). Float
+//! arithmetic is linted everywhere except `decode::display`: code that builds
+//! commands (simulation input) must use integers (D3).
 
 pub mod args;
 pub mod connection;
 pub mod decode;
 pub mod encode;
 pub mod keys;
+pub mod map;
 pub mod rates;
 
 use std::path::Path;
@@ -53,6 +55,14 @@ mod entry {
 #[derive(GodotClass)]
 #[class(base = RefCounted, init)]
 pub struct PaxClient {
+    /// The scenario's map, once `load_map` succeeded: picking reads it.
+    map: Option<map::MapImage>,
+    /// The latest `Welcome` (a load replaces it): `load_map` reads the session's
+    /// map directory, hash and provinces from it, never from GDScript.
+    welcome: Option<decode::WelcomeView>,
+    /// Where this client's copy of the scenario's files is: `launch`'s scenario, or
+    /// `set_scenario_dir` for a server started elsewhere.
+    scenario_dir: Option<std::path::PathBuf>,
     connection: Option<Connection>,
     /// Declared after `connection`, so the connection closes first and the server
     /// can exit by itself (`--exit-when-idle`).
@@ -90,7 +100,10 @@ impl PaxClient {
         // server can exit by itself (`--exit-when-idle`).
         self.connection = None;
         self.server = None;
+        self.welcome = None;
+        self.map = None;
         let (server, scenario, saves) = (server_path.to_string(), scenario_dir.to_string(), saves_dir.to_string());
+        self.scenario_dir = Some(scenario.clone().into());
         match LocalServer::launch(Path::new(&server), Path::new(&scenario), Path::new(&saves)) {
             Ok(local) => {
                 let addr = local.addr;
@@ -99,6 +112,13 @@ impl PaxClient {
             }
             Err(e) => rejected(e),
         }
+    }
+
+    /// Where this client's copy of the scenario is, for a server it didn't launch
+    /// (`launch` sets it itself). `load_map` reads the map files from there.
+    #[func]
+    fn set_scenario_dir(&mut self, scenario_dir: GString) {
+        self.scenario_dir = Some(scenario_dir.to_string().into());
     }
 
     /// Connects to a running server. Returns an error message, or `""`.
@@ -152,6 +172,11 @@ impl PaxClient {
         let Some(c) = &mut self.connection else { return out };
         let polled = c.poll();
         for event in polled.events {
+            if let ServerEvent::Welcome(w) = &event {
+                // A new session or a load: its map has to be loaded again.
+                self.welcome = Some((**w).clone());
+                self.map = None;
+            }
             out.push(&event_dictionary(event));
         }
         if let Some(reason) = polled.closed {
@@ -233,6 +258,50 @@ impl PaxClient {
     #[func]
     fn load_game(&mut self, name: GString) -> GString {
         self.with_connection(|c| c.load_game(&name.to_string()))
+    }
+
+    /// Loads this session's province map, ready to draw (see `map.rs`): from where
+    /// the latest `Welcome` said it is, checked against its provinces and `map_hash`.
+    /// The bridge keeps both; GDScript passes nothing. Returns a Dictionary with
+    /// `PaxKeys.ERROR` (empty when it loaded) and, on success, `WIDTH`, `HEIGHT`, `IDS`
+    /// (the RGB8 province-ID texels) and `LABELS` (one `Vector2i` anchor per province).
+    /// A session without a map gives an empty Dictionary apart from `ERROR`.
+    /// `province_at` then answers for this map.
+    #[func]
+    fn load_map(&mut self) -> VarDictionary {
+        let mut d = VarDictionary::new();
+        self.map = None;
+        let (Some(welcome), Some(scenario_dir)) = (&self.welcome, &self.scenario_dir) else {
+            d.set(keys::ERROR, &rejected("no session or no scenario directory yet".to_owned()));
+            return d;
+        };
+        match map::load(scenario_dir, welcome) {
+            Ok(Some((m, texels))) => {
+                d.set(keys::ERROR, &GString::new());
+                d.set(keys::WIDTH, i64::from(m.ids.width()));
+                d.set(keys::HEIGHT, i64::from(m.ids.height()));
+                d.set(keys::IDS, &PackedByteArray::from(texels.as_slice()));
+                let mut labels: Array<Vector2i> = Array::new();
+                for &[x, y] in &m.labels {
+                    let coordinate = |v: u32| {
+                        i32::try_from(v).expect("label inside the map, whose sides are at most pax_map::MAX_SIDE")
+                    };
+                    labels.push(Vector2i::new(coordinate(x), coordinate(y)));
+                }
+                d.set(keys::LABELS, &labels);
+                self.map = Some(m);
+            }
+            Ok(None) => d.set(keys::ERROR, &GString::new()),
+            Err(e) => d.set(keys::ERROR, &GString::from(&e)),
+        }
+        d
+    }
+
+    /// The province at map pixel `(x, y)` of the loaded map, or `null` for sea, off
+    /// the map, or no map.
+    #[func]
+    fn province_at(&self, x: i64, y: i64) -> Variant {
+        optional(self.map.as_ref().and_then(|m| m.province_at(x, y)).map(i64::from))
     }
 
     /// Asks for the saves; a `SaveList` answers. Returns an error message, or `""`.
@@ -329,6 +398,7 @@ fn welcome(d: &mut VarDictionary, w: &WelcomeView) {
     // Identifiers: their bits are kept as-is in Godot's signed 64-bit int.
     d.set(keys::CONTENT_HASH, w.content_hash as i64);
     d.set(keys::MAP_HASH, &optional(w.map_hash.map(|h| h as i64)));
+    d.set(keys::MAP_DIR, &optional(w.map_dir.as_deref().map(GString::from)));
     d.set(keys::GOODS, &strings(&w.goods));
     d.set(keys::PROFESSIONS, &strings(&w.professions));
     d.set(keys::PRODUCER_TYPES, &strings(&w.producer_types));

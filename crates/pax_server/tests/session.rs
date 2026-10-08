@@ -34,7 +34,7 @@ fn hello_gets_welcome_with_the_scenario_tables() {
     match c.next() {
         Got::Welcome { nation, day, provinces, nations, content_hash, map_hash } => {
             assert_eq!((nation, day, content_hash), (Some(1), 0, expected_hash));
-            let expected_map = pax_data::load_scenario(&scenario("two_states")).unwrap().map.map(|m| m.map_hash);
+            let expected_map = pax_data::load_scenario(&scenario("two_states")).unwrap().map.map(|m| m.map.map_hash);
             assert_eq!(map_hash, expected_map);
             assert!(map_hash.is_some(), "two_states has a map");
             assert_eq!(provinces.len(), 4);

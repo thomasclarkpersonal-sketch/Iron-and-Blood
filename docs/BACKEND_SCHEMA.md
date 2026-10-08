@@ -24,14 +24,16 @@ crates/
 ├── pax_cli/               run | record | verify | bench
 ├── pax_server/            authoritative game server: sim thread owns the World, tokio for the network (D10, D22, D23)
 ├── pax_protocol/          generated FlatBuffers code (scripts/gen-protocol.sh) + framing, no engine dependency (D22)
-└── pax_godot/             Godot GDExtension bridge: the client's side of the protocol (D12)
+├── pax_godot/             Godot GDExtension bridge: the client's side of the protocol (D12)
+├── pax_content/           the content-hash scheme both sides share (no dependencies)
+└── pax_map/               the province-map reader both sides share (no engine, no wire types)
 client/                    Godot 4 project (GDScript UI); loads pax_godot
 data/                      base definitions
 scenarios/<name>/          scenario.toml + golden.hashes
 schemas/                   FlatBuffers wire schemas (D22)
 ```
 
-The client (Godot, with a Rust GDExtension bridge, D12) depends on `pax_protocol` only, never on `pax_engine`.
+The client (Godot, with a Rust GDExtension bridge, D12) depends on `pax_protocol` and the side-neutral `pax_content` and `pax_map` only, never on `pax_engine`.
 
 ## 🧩 State Schema
 

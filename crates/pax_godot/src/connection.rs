@@ -24,7 +24,7 @@ use crate::encode;
 
 /// Send a `Ping` after this long without sending anything: a fifth of the server's
 /// idle timeout (`pax_protocol::IDLE_TIMEOUT`), so a paused game is never dropped.
-pub const KEEP_ALIVE: Duration = Duration::from_secs(pax_protocol::IDLE_TIMEOUT.as_secs() / 5);
+pub const KEEP_ALIVE: Duration = Duration::from_millis(pax_protocol::IDLE_TIMEOUT.as_millis() as u64 / 5);
 
 /// What one poll found.
 #[derive(Debug, Default, PartialEq)]
@@ -266,8 +266,33 @@ impl Drop for LocalServer {
     }
 }
 
-/// A port file no other client on this machine uses.
+/// A port file no other launch on this machine uses: the process id, a counter for
+/// launches within this process (two at the same instant must not share a file, or
+/// both clients read one server's port), and the time, for a reused process id.
 fn port_file_path() -> PathBuf {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static LAUNCHES: AtomicU64 = AtomicU64::new(0);
+    let launch = LAUNCHES.fetch_add(1, Ordering::Relaxed);
     let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
-    std::env::temp_dir().join(format!("pax-port-{}-{nanos}", std::process::id()))
+    std::env::temp_dir().join(format!("pax-port-{}-{launch}-{nanos}", std::process::id()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Two launches at the same instant in one process get different port files
+    /// (CI once connected two tests' clients to one server).
+    #[test]
+    fn port_files_are_unique_within_a_process() {
+        let a = port_file_path();
+        let b = port_file_path();
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn the_keep_alive_is_well_inside_the_idle_timeout() {
+        assert!(KEEP_ALIVE > Duration::ZERO);
+        assert!(KEEP_ALIVE * 4 < pax_protocol::IDLE_TIMEOUT);
+    }
 }

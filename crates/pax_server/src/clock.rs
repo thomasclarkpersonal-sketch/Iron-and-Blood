@@ -5,32 +5,7 @@
 
 use std::time::{Duration, Instant};
 
-use pax_protocol::wire;
-
-/// How a speed paces the clock (D23).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum Pace {
-    Paused,
-    /// One day per interval; a zero interval for `Fastest`, which ticks as fast as
-    /// the engine allows.
-    Every(Duration),
-    /// A speed newer than this server.
-    Unknown,
-}
-
-/// Days per real second at each speed (D23).
-pub(crate) fn pace(speed: wire::Speed) -> Pace {
-    use wire::Speed as S;
-    match speed {
-        S::Paused => Pace::Paused,
-        S::Slowest => Pace::Every(Duration::from_millis(2_000)), // 0.5 days/s
-        S::Slow => Pace::Every(Duration::from_millis(1_000)),    // 1
-        S::Normal => Pace::Every(Duration::from_millis(500)),    // 2
-        S::Fast => Pace::Every(Duration::from_millis(200)),      // 5
-        S::Fastest => Pace::Every(Duration::ZERO),
-        _ => Pace::Unknown,
-    }
-}
+use pax_protocol::{Pacing, pacing, wire};
 
 /// The game clock: one value, so "paused" and "a tick is due" can't disagree.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -43,10 +18,11 @@ impl Clock {
     /// The clock at `speed`, its first tick one interval after `now`, so unpausing
     /// never fires a burst of catch-up ticks. `None` for an unknown speed.
     pub(crate) fn at(speed: wire::Speed, now: Instant) -> Option<Clock> {
-        match pace(speed) {
-            Pace::Paused => Some(Clock::Paused),
-            Pace::Every(interval) => Some(Clock::Running { speed, interval, next: now + interval }),
-            Pace::Unknown => None,
+        // D23's pacing table, shared with the client (`pax_protocol::pacing`).
+        match pacing(speed) {
+            Pacing::Paused => Some(Clock::Paused),
+            Pacing::Every(interval) => Some(Clock::Running { speed, interval, next: now + interval }),
+            Pacing::Unknown => None,
         }
     }
 

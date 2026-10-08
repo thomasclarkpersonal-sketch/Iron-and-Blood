@@ -73,12 +73,39 @@ pub use generated::pax::net as wire;
 /// Protocol major version. A different major version is refused at `Hello` (D22).
 pub const PROTOCOL_MAJOR: u16 = 1;
 /// Protocol minor version: bumped for compatible additions (NETWORK_PROTOCOL §8).
-pub const PROTOCOL_MINOR: u16 = 0;
+pub const PROTOCOL_MINOR: u16 = 1;
 
 /// How long the server waits for any message before it ends a silent session (D22).
 /// Clients send a `Ping` well within it; the client's bridge derives its keep-alive
 /// from this, so the two can't drift apart.
 pub const IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// How a speed paces the game clock (D23).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Pacing {
+    /// No days run.
+    Paused,
+    /// One day per interval: zero for `Fastest`, as fast as the engine allows.
+    Every(std::time::Duration),
+    /// A speed newer than this build: the server ignores it (D22).
+    Unknown,
+}
+
+/// D23's pacing table: the server paces its clock with it, and the client describes
+/// the speeds from it.
+pub fn pacing(speed: wire::Speed) -> Pacing {
+    use std::time::Duration;
+    use wire::Speed as S;
+    match speed {
+        S::Paused => Pacing::Paused,
+        S::Slowest => Pacing::Every(Duration::from_millis(2_000)), // 0.5 days/s
+        S::Slow => Pacing::Every(Duration::from_millis(1_000)),    // 1
+        S::Normal => Pacing::Every(Duration::from_millis(500)),    // 2
+        S::Fast => Pacing::Every(Duration::from_millis(200)),      // 5
+        S::Fastest => Pacing::Every(Duration::ZERO),
+        _ => Pacing::Unknown,
+    }
+}
 
 /// The scale of `wire::Fixed`: its `raw` is the value × `FIXED_ONE` (D3), the same as
 /// `pax_engine::Fixed`. `pax_server`'s tests pin the two together; the client converts

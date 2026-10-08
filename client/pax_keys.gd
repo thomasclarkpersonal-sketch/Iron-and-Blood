@@ -23,6 +23,7 @@ const SPEED := "speed"
 const SCENARIO := "scenario"
 const CONTENT_HASH := "content_hash"
 const MAP_HASH := "map_hash"
+const MAP_DIR := "map_dir"
 const GOODS := "goods"
 const PROFESSIONS := "professions"
 const PRODUCER_TYPES := "producer_types"
@@ -84,6 +85,10 @@ const CHANGED_BY := "changed_by"
 const NONCE := "nonce"
 const NAME := "name"
 const NAMES := "names"
+const WIDTH := "width"
+const HEIGHT := "height"
+const IDS := "ids"
+const LABELS := "labels"
 
 ## Wire enum values (schemas/common.fbs).
 const MAP_MODE_NONE := 0
@@ -108,6 +113,8 @@ const COMMAND_ERROR_NOT_PERMITTED := 5
 const COMMAND_ERROR_RATE_LIMITED := 6
 ## CommandError names, by value.
 const COMMAND_ERROR_NAMES := ["None", "UnknownNation", "RateOutOfRange", "NoBasket", "Malformed", "NotPermitted", "RateLimited"]
+## Milliseconds per day at each speed, by value (D23); null when paused.
+const SPEED_DAY_MS := [null, 2000, 1000, 500, 200, 0]
 
 ## Policy names for PaxClient.submit_policy.
 const POLICY_INCOME_TAX := "income_tax"

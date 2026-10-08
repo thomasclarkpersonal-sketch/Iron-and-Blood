@@ -69,6 +69,8 @@ pub struct WelcomeView {
     /// The hash the client's copy of the map files must have (`StaticData.map_hash`);
     /// `None` if the scenario has no map.
     pub map_hash: Option<u64>,
+    /// Where the map's files are, relative to the scenario (`StaticData.map_dir`, 1.1).
+    pub map_dir: Option<String>,
     pub goods: Vec<String>,
     pub professions: Vec<String>,
     pub producer_types: Vec<String>,
@@ -315,6 +317,7 @@ fn welcome(w: wire::Welcome<'_>) -> Result<WelcomeView, StreamError> {
         scenario: required(w.scenario(), "Welcome scenario name")?.to_owned(),
         content_hash: w.content_hash(),
         map_hash: defs.map_hash(),
+        map_dir: defs.map_dir().map(str::to_owned),
         goods: strings(defs.goods(), "Welcome goods")?,
         professions: strings(defs.professions(), "Welcome professions")?,
         producer_types: strings(defs.producer_types(), "Welcome producer_types")?,
@@ -330,6 +333,15 @@ fn welcome(w: wire::Welcome<'_>) -> Result<WelcomeView, StreamError> {
             .map(|n| required(n.markets(), "a nation's markets").map(|m| m.iter().collect()))
             .collect::<Result<_, _>>()?,
     };
+    // From protocol 1.1 the two travel together. A 1.0 server sends a hash without
+    // the directory: the client then has no map to draw, which is not an error.
+    if view.map_dir.is_some() && view.map_hash.is_none() {
+        return Err(invalid("StaticData has a map_dir without a map_hash".to_owned()));
+    }
+    // A server can't point the client outside its scenario directory.
+    if let Some(dir) = &view.map_dir {
+        pax_map::check_map_dir(dir).map_err(invalid)?;
+    }
     if view.province_market.len() != view.provinces.len() {
         return Err(invalid(format!(
             "{} provinces but {} province_market entries",
@@ -551,11 +563,11 @@ impl ServerStream {
         Ok(match kind {
             P::Rejected => {
                 let r = required(msg.payload_as_rejected(), "Rejected body")?;
-                ServerEvent::Rejected { reason: r.reason().unwrap_or_default().to_owned() }
+                ServerEvent::Rejected { reason: required(r.reason(), "Rejected reason")?.to_owned() }
             }
             P::Goodbye => {
                 let g = required(msg.payload_as_goodbye(), "Goodbye body")?;
-                ServerEvent::Goodbye { reason: g.reason().unwrap_or_default().to_owned() }
+                ServerEvent::Goodbye { reason: required(g.reason(), "Goodbye reason")?.to_owned() }
             }
             P::DayUpdate => {
                 let u = required(msg.payload_as_day_update(), "DayUpdate body")?;
@@ -589,9 +601,7 @@ impl ServerStream {
             }
             P::SaveList => {
                 let l = required(msg.payload_as_save_list(), "SaveList body")?;
-                ServerEvent::SaveList {
-                    names: l.names().map(|n| n.iter().map(str::to_owned).collect()).unwrap_or_default(),
-                }
+                ServerEvent::SaveList { names: strings(l.names(), "SaveList names")? }
             }
             _ => ServerEvent::Unknown(kind),
         })
@@ -647,6 +657,7 @@ mod tests {
                     markets: Some(markets),
                     nations: Some(nations),
                     map_hash: None,
+                    map_dir: None,
                 },
             )
         });

@@ -47,6 +47,7 @@ keys! {
     SCENARIO = "scenario",
     CONTENT_HASH = "content_hash",
     MAP_HASH = "map_hash",
+    MAP_DIR = "map_dir",
     GOODS = "goods",
     PROFESSIONS = "professions",
     PRODUCER_TYPES = "producer_types",
@@ -89,7 +90,7 @@ keys! {
     DEPRIVED = "deprived",
     LIFE_NEEDS = "life_needs",
     MILITANCY = "militancy",
-    // NationTable (`NATIONS` in a DayUpdate). Rates are raw Fixed integers (D3).
+    // NationTable columns (inside `NATION_TABLE`). Rates are raw Fixed integers (D3).
     TREASURY = "treasury",
     INCOME_TAX_RATE_RAW = "income_tax_rate_raw",
     TRANSFER_RATE_RAW = "transfer_rate_raw",
@@ -130,6 +131,12 @@ keys! {
     // SaveResult, SaveList.
     NAME = "name",
     NAMES = "names",
+
+    // A loaded map (PaxClient.load_map): ERROR, or the ID texture and labels.
+    WIDTH = "width",
+    HEIGHT = "height",
+    IDS = "ids",
+    LABELS = "labels",
 }
 
 /// `LifeNeeds` → `LIFE_NEEDS`.
@@ -182,6 +189,17 @@ pub fn gdscript() -> String {
         .map(|v| format!("\"{}\"", v.variant_name().expect("listed")))
         .collect();
     out.push_str(&format!("## CommandError names, by value.\nconst COMMAND_ERROR_NAMES := [{}]\n", names.join(", ")));
+    let intervals: Vec<String> = pax_protocol::wire::Speed::ENUM_VALUES
+        .iter()
+        .map(|&s| match pax_protocol::pacing(s) {
+            pax_protocol::Pacing::Every(d) => d.as_millis().to_string(),
+            pax_protocol::Pacing::Paused | pax_protocol::Pacing::Unknown => "null".to_owned(),
+        })
+        .collect();
+    out.push_str(&format!(
+        "## Milliseconds per day at each speed, by value (D23); null when paused.\nconst SPEED_DAY_MS := [{}]\n",
+        intervals.join(", ")
+    ));
     out.push_str("\n## Policy names for PaxClient.submit_policy.\n");
     for p in crate::encode::Policy::ALL {
         out.push_str(&format!("const POLICY_{} := \"{}\"\n", p.name().to_uppercase(), p.name()));
@@ -193,10 +211,13 @@ pub fn gdscript() -> String {
 mod tests {
     use super::*;
 
-    /// `COMMAND_ERROR_NAMES` is indexed by value, so the values must be 0, 1, 2, ….
+    /// `COMMAND_ERROR_NAMES` and `SPEED_DAY_MS` are indexed by value, so the values
+    /// must be 0, 1, 2, ….
     #[test]
-    fn command_error_values_are_contiguous() {
+    fn indexed_enums_are_contiguous() {
         let values: Vec<u8> = pax_protocol::wire::CommandError::ENUM_VALUES.iter().map(|v| v.0).collect();
+        assert_eq!(values, (0..values.len() as u8).collect::<Vec<_>>());
+        let values: Vec<u8> = pax_protocol::wire::Speed::ENUM_VALUES.iter().map(|v| v.0).collect();
         assert_eq!(values, (0..values.len() as u8).collect::<Vec<_>>());
     }
 

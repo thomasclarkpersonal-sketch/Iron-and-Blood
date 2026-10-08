@@ -35,7 +35,7 @@ mod window;
 #[cfg(feature = "fuzzing")]
 #[doc(hidden)]
 pub mod fuzzing {
-    pub use crate::net::RequestReader;
+    pub use crate::net::{ReadError, RequestReader};
     pub use crate::request::Request;
 }
 

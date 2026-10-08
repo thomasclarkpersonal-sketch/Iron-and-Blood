@@ -334,7 +334,7 @@ impl Sim {
             nation: seat.nation,
             scenario: &self.game.scenario().name,
             content_hash: self.game.scenario().content_hash,
-            map_hash: self.game.scenario().map.as_ref().map(|m| m.map_hash),
+            map: self.game.scenario().map.as_ref(),
             speed: self.clock.speed(),
         };
         self.send(session, Outbound::Frame(encode::welcome(self.game.world(), &info)));

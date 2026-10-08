@@ -2,7 +2,7 @@
 resolver = "3"
 # `fuzz/` is its own workspace (nightly only, M3-10).
 exclude = ["fuzz"]
-members = ["crates/pax_engine", "crates/pax_data", "crates/pax_cli", "crates/pax_server", "crates/pax_protocol", "crates/pax_godot", "crates/pax_content"]
+members = ["crates/pax_engine", "crates/pax_data", "crates/pax_cli", "crates/pax_server", "crates/pax_protocol", "crates/pax_godot", "crates/pax_content", "crates/pax_map"]
 
 [workspace.package]
 version = "0.1.0"
@@ -16,6 +16,7 @@ pax_engine = { path = "crates/pax_engine" }
 pax_data = { path = "crates/pax_data" }
 pax_protocol = { path = "crates/pax_protocol" }
 pax_content = { path = "crates/pax_content" }
+pax_map = { path = "crates/pax_map" }
 rayon = "1.12"
 serde = { version = "1", features = ["derive"] }
 toml = "1.1"

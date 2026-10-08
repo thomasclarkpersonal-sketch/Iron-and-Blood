@@ -285,7 +285,7 @@ version = "0.1.0"
 dependencies = [
  "pax_content",
  "pax_engine",
- "png",
+ "pax_map",
  "serde",
  "toml",
 ]
@@ -304,6 +304,16 @@ dependencies = [
  "libfuzzer-sys",
  "pax_protocol",
  "pax_server",
+]
+
+[[package]]
+name = "pax_map"
+version = "0.1.0"
+dependencies = [
+ "pax_content",
+ "png",
+ "serde",
+ "toml",
 ]
 
 [[package]]

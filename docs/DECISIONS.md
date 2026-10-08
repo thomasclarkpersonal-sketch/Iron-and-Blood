@@ -191,6 +191,8 @@ Reasons:
 
 All parsing lives in `pax_data`, so the format can change without touching the engine. File formats are specified in [DATA_FORMAT.md](DATA_FORMAT.md).
 
+**Exception (M3-8b, approved by the owner on 2026-10-08):** the province-map files (`provinces.toml`, `provinces.png`) are parsed by the side-neutral `pax_map` (D12), which `pax_data` calls. So the server validates a map with exactly the code the client draws it with. `scenario.toml` and every other file stay in `pax_data`: the client learns where the map is from the server (`StaticData.map_dir`), never by reading `scenario.toml`.
+
 ## D10. Network model: server-authoritative, deterministic core
 
 **Problem.** AGENTS.md assumed lockstep multiplayer, while BACKEND_SCHEMA described a server pushing state to clients.
@@ -244,6 +246,7 @@ All parsing lives in `pax_data`, so the format can change without touching the e
   - **The UI** (map, panels, menus) is in GDScript.
   - **A Rust GDExtension bridge** (`pax_godot`, using godot-rust/gdext) owns the connection. It reads and writes frames, verifies messages, checks the protocol version, converts `Fixed` for display, and turns map values into shader arrays.
   - The bridge depends on `pax_protocol` only, **never on `pax_engine`**, so the client cannot simulate (D10).
+  - *Side-neutral crates* are the exception to "`pax_protocol` only" (M3-8b). They carry neither engine nor wire types, so both sides may link them: `pax_content` (the hash scheme) and `pax_map` (the province-map reader the server validates with and the client draws with). Neither lets the client simulate, and CI checks that neither depends on `pax_engine` or `pax_protocol`. Anything else the bridge links must still be `pax_protocol`: CI allowlists the bridge's workspace dependencies (`pax_protocol`, `pax_map`, `pax_content`). Approved by the maintainer on 2026-10-08 (#45).
 - **Fallback: C# (Godot .NET)** with the official FlatBuffers C# library, if the M3-0 spike shows gdext can't do the job. gdext is pre-1.0 (0.5.x), so the spike is the risk gate.
 - **M3-0 spike: passed (2026-10-08), so the fallback isn't needed.**
   - godot-rust **0.5.5** (`api-4-7`, pinned exactly) loads in **Godot 4.7.2**.
@@ -404,7 +407,7 @@ The state → national → sphere → global roll-up in the old ECONOMY_SYSTEM w
 - **Threads:** one sim thread owns the `World` exclusively and runs ticks (rayon inside). Network tasks (tokio) exchange messages with it over channels. There are no locks around world state.
   - Inbound: a bounded `flume` queue of 1,024 events. Tasks await room in FIFO order, and the sim thread receives with a timeout for pacing.
   - Outbound: 256 frames per connection. A full outbound queue disconnects the client.
-- **Speed:** paused, or speeds 1–5 at 0.5, 1, 2 and 5 days per second, and as fast as the tick allows (about 10 days/s at the D13 budget). Speed and pause are **server controls, not engine commands**: they change no results, so they appear in neither the command log nor the state hash.
+- **Speed:** paused, or speeds 1–5 at 0.5, 1, 2 and 5 days per second, and as fast as the tick allows (about 10 days/s at the D13 budget). Speed and pause are **server controls, not engine commands**: they change no results, so they appear in neither the command log nor the state hash. The pacing table is `pax_protocol::pacing`: the server's clock runs on it, and the client labels its speed buttons from it (generated into `PaxKeys.SPEED_DAY_MS`), so the two can't disagree.
 - **Command order within a tick:** the scenario's own scripted commands for the day (`commands.toml`) apply first, then players' commands in stamp order `(day, player, sequence)` (D10). The applied-command log holds both kinds, with scripted commands marked as having no player. Saves are built from this log (below). The order lives in one function, `pax_data::step_day`, which `pax_cli`, the tests and the server all call. A server test pins it to every scenario's `golden.hashes` (D11).
 - **Replays apply the saved log alone.** The scenario's scripted commands for logged days are in it, so a replay never applies `commands.toml` again for those days. Scripted commands for later days still come from the scenario. The tick and the save loader therefore apply each command exactly once, and both run the day through `pax_data::step_day`.
 - **The clock stops when the player leaves.** When the welcomed session closes, the server pauses; a game never runs unobserved.
