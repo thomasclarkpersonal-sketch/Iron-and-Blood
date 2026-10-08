@@ -31,10 +31,10 @@ Found during M3 and left for M4, with the reason:
 - **Non-blocking server start in the bridge.** `PaxClient.launch` waits for the local server on the main thread (two_states starts in well under a second). A pollable start-up state keeps the UI responsive for large scenarios.
 - **The tick is over D13 at M2 content: task M4-11** (the owner closed M3 with it moved here, 2026-10-08). `two_states` (12 goods, nations) replicated to about 1M POP rows ticks in about 126 ms on 8 threads at 1,500 markets, over the 100 ms budget, while D13's 4-good reference world takes 44 ms on the same machine (D13, "Measured").
 - **A faster state hash.** The per-day `state_hash` costs about 31 ms at 1M POP rows (M3 kept it, by the owner's decision). FNV over 8-byte words would cut it to a few ms, but changes every golden file (D11).
-- **`pax_cli bench --scale` overflows at month end.** The copies `--scale` makes share their identities, so the month-end compaction merges them past `u32`. The default 30 days reaches month end, so the AGENTS.md D13 command panics as written; `--days 29` works (38 ms/day at 1M rows on 8 threads). The benchmark should give the copies distinct identities. Then `pax_server`'s `server_day_budget` test should build its world through the same `pax_data::bench` helper (one that picks the scale for a target row count), so D13's two "Measured" rows describe the same kind of world.
+- **`pax_cli bench --scale` overflows at month end.** The copies `--scale` makes share their identities, so the month-end compaction merges them past `u32`. The default 30 days reaches month end, so the AGENTS.md D13 command panics as written; `--days 29` works (38 ms/day at 1M rows on 8 threads). The benchmark should give the copies distinct identities (task M4-11). Then `pax_server`'s `server_day_budget` test should build its world through the same `pax_data::bench` helper (one that picks the scale for a target row count), so D13's two "Measured" rows describe the same kind of world.
 - **Saves record the scenario by path.** A save stops loading if the game or scenario directory moves. Record the scenario by name, resolved against the server's scenarios root, before saves are shared.
 
-## Design (D24, proposed)
+## Design (D24, accepted)
 
 **Authority.** A session commands at most one nation.
 - The server checks every command's `nation` against the session's nation before `World::validate`, and a mismatch gets `NotPermitted`. Permission and rule validity (D21) are separate checks, in that order.
@@ -61,6 +61,7 @@ Loading a save goes through the lobby, and players reclaim their nations.
 - **Drop:** after **30 s** of silence the session is dropped and the game continues. The nation keeps its current policies; nothing plays it.
 - **Rejoin:** `Hello { resume_token }` within the save's lifetime reclaims the nation.
 - The thresholds are server settings. The defaults above are for playtesting to confirm.
+- In multiplayer the 30 s drop replaces M3's 10 s idle timeout, so a silent client gets the fairness pause first. Single player keeps the 10 s rule.
 
 **Desync.** Not applicable: clients don't simulate (D10). `state_hash` in each `DayUpdate` identifies the state in bug reports. The server's command log replays any session exactly, which gives the same guarantee as lockstep desync detection.
 
@@ -79,7 +80,7 @@ Loading a save goes through the lobby, and players reclaim their nations.
 
 | ID | Task | Depends on | Notes |
 |---|---|---|---|
-| M4-0 | Accept D24 (this design) after review; confirm the lag thresholds | M3 done | |
+| M4-0 ✅ | Accept D24 (this design) after review; confirm the lag thresholds | M3 done | Accepted by the owner on 2026-10-08, with the thresholds as server settings whose defaults a playtest confirms |
 | M4-1 | **Several sessions:** session table on the sim thread; per-session subscriptions, flow-control windows and nations; broadcast of `ServerState` | M4-0 | Sessions are rows in a table, not objects holding references into `World` |
 | M4-2 | **Lobby:** protocol additions (`LobbyState`, `ClaimNation`, `Ready`, `StartGame`, new union members at the end), nation claims, host start | M4-1 | Minor protocol version bump |
 | M4-3 | **Authority:** permission check before `World::validate`; host-only controls; `NotPermitted`; `--sandbox` flag | M4-1 | Tests: a player can't change another nation's taxes; a non-host can't unpause or save |
