@@ -50,6 +50,12 @@ pub fn error_to_wire(e: &CommandError) -> wire::CommandError {
 mod tests {
     use super::*;
 
+    /// The client converts rates with `pax_protocol::FIXED_ONE`; it must be the engine's scale.
+    #[test]
+    fn the_wire_fixed_scale_is_the_engines() {
+        assert_eq!(pax_protocol::FIXED_ONE, pax_engine::Fixed::ONE.raw());
+    }
+
     #[test]
     fn wire_commands_become_engine_commands() {
         let c = to_engine(WireCommand::SetTransferRate { nation: 1, rate_raw: Some(50_000) }).unwrap();

@@ -23,6 +23,7 @@ static func percent(x: float) -> String:
 	return "%.1f%%" % (x * 100.0)
 
 
-## A raw Fixed rate (value × 10⁶) as a percentage.
+## A raw rate (`*_RATE_RAW`) as a percentage. The bridge converts it: GDScript never
+## does Fixed arithmetic.
 static func rate(raw: int) -> String:
-	return "%.1f%%" % (raw / 10_000.0)
+	return percent(PaxClient.rate_fraction(raw))

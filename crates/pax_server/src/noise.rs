@@ -1,6 +1,7 @@
 //! xorshift64*: deterministic noise for the hostile-input tests (M3-10), without a
-//! dependency. One source, compiled into both test layers: `src/hostile.rs` includes
-//! it with `#[path]` and the integration tests through `common`.
+//! dependency. One source, compiled into both test layers: the crate's unit tests
+//! (`#[cfg(test)] mod noise`) and the integration tests (`tests/common` includes this
+//! file with `#[path]`). Test code depends on the source tree, not the reverse.
 
 pub struct Noise(u64);
 

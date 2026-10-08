@@ -22,6 +22,8 @@ mod game;
 #[cfg(test)]
 mod hostile;
 mod net;
+#[cfg(test)]
+mod noise;
 mod queue;
 mod request;
 mod sim;

@@ -1,6 +1,7 @@
 //! A blocking test client for `pax_server`: real TCP, real frames.
 #![allow(dead_code)]
 
+#[path = "../../src/noise.rs"]
 pub mod noise;
 
 use std::io::{Read, Write};

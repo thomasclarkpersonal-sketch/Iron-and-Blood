@@ -21,9 +21,7 @@ use crate::net::{ConnHandle, Inbound, Outbound};
 use crate::request::{self, Request, WireCommand};
 use crate::sim::Sim;
 
-#[path = "../tests/common/noise.rs"]
-mod noise;
-use noise::Noise;
+use crate::noise::Noise;
 
 /// What a hostile client would send, on top of the shared generator.
 impl Noise {

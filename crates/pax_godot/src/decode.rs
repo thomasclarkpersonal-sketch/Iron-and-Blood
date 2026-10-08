@@ -11,14 +11,16 @@
 //!
 //! None of this is left to GDScript.
 
-use pax_protocol::{Direction, FrameDecoder, PROTOCOL_MAJOR, ProtocolError, read_server_message, wire};
+use pax_protocol::{Direction, FIXED_ONE, FrameDecoder, PROTOCOL_MAJOR, ProtocolError, read_server_message, wire};
+
+use crate::keys;
 
 /// A `Fixed` raw value (value × 10⁶) as a display number. This is the bridge's only
 /// float arithmetic. It is presentation (D3), and the lint stays on everywhere else,
 /// so code that builds commands (simulation input) can never use floats.
 #[allow(clippy::float_arithmetic)]
 pub fn display(fixed: wire::Fixed) -> f64 {
-    fixed.raw() as f64 / 1_000_000.0
+    fixed.raw() as f64 / FIXED_ONE as f64
 }
 
 /// Why the server's stream can't be used. Every case ends the session (D22).
@@ -237,19 +239,20 @@ impl ServerEvent {
     }
 }
 
-/// `snake_case` tag for a `ServerPayload` member: the only table of message names.
+/// The tag for a `ServerPayload` member: the `keys` constant GDScript matches on, so
+/// the two can't disagree.
 fn payload_tag(kind: wire::ServerPayload) -> &'static str {
     match kind {
-        wire::ServerPayload::Welcome => "welcome",
-        wire::ServerPayload::Rejected => "rejected",
-        wire::ServerPayload::DayUpdate => "day_update",
-        wire::ServerPayload::CommandResult => "command_result",
-        wire::ServerPayload::ServerState => "server_state",
-        wire::ServerPayload::Pong => "pong",
-        wire::ServerPayload::SaveResult => "save_result",
-        wire::ServerPayload::SaveList => "save_list",
-        wire::ServerPayload::Goodbye => "goodbye",
-        _ => "unknown",
+        wire::ServerPayload::Welcome => keys::WELCOME,
+        wire::ServerPayload::Rejected => keys::REJECTED,
+        wire::ServerPayload::DayUpdate => keys::DAY_UPDATE,
+        wire::ServerPayload::CommandResult => keys::COMMAND_RESULT,
+        wire::ServerPayload::ServerState => keys::SERVER_STATE,
+        wire::ServerPayload::Pong => keys::PONG,
+        wire::ServerPayload::SaveResult => keys::SAVE_RESULT,
+        wire::ServerPayload::SaveList => keys::SAVE_LIST,
+        wire::ServerPayload::Goodbye => keys::GOODBYE,
+        _ => keys::UNKNOWN,
     }
 }
 
@@ -324,8 +327,8 @@ fn welcome(w: wire::Welcome<'_>) -> Result<WelcomeView, StreamError> {
             .collect::<Result<_, _>>()?,
         nation_markets: nation_defs
             .iter()
-            .map(|n| n.markets().map(|m| m.iter().collect()).unwrap_or_default())
-            .collect(),
+            .map(|n| required(n.markets(), "a nation's markets").map(|m| m.iter().collect()))
+            .collect::<Result<_, _>>()?,
     };
     if view.province_market.len() != view.provinces.len() {
         return Err(invalid(format!(
@@ -817,6 +820,16 @@ mod tests {
         bytes.extend(pong());
         let tags: Vec<_> = s.push(&bytes).iter().map(ServerEvent::tag).collect();
         assert_eq!(tags, ["welcome", "day_update", "pong"]);
+    }
+
+    /// Every message this client decodes has its own tag, and it is a `keys` constant.
+    #[test]
+    fn every_message_has_a_generated_tag() {
+        for &kind in wire::ServerPayload::ENUM_VALUES.iter().filter(|&&k| k != wire::ServerPayload::NONE) {
+            let tag = payload_tag(kind);
+            assert_ne!(tag, keys::UNKNOWN, "{kind:?} has no tag");
+            assert!(keys::ALL.iter().any(|(_, v)| *v == tag), "{tag} is not in keys::ALL");
+        }
     }
 
     #[test]

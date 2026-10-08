@@ -16,6 +16,7 @@ pub mod connection;
 pub mod decode;
 pub mod encode;
 pub mod keys;
+pub mod rates;
 
 use std::path::Path;
 use std::time::Duration;
@@ -216,24 +217,48 @@ impl PaxClient {
         }
     }
 
+    /// Saves the game as `name` (D23); a `SaveResult` answers. Returns an error
+    /// message (the call sent nothing), or `""`.
     #[func]
-    fn save_game(&mut self, name: GString) {
-        if let Some(c) = &mut self.connection {
-            c.save_game(&name.to_string());
-        }
+    fn save_game(&mut self, name: GString) -> GString {
+        self.with_connection(|c| c.save_game(&name.to_string()))
     }
 
+    /// Loads the save `name`: a new `Welcome` answers, or a `SaveResult` with the
+    /// error. Returns an error message (the call sent nothing), or `""`.
     #[func]
-    fn load_game(&mut self, name: GString) {
-        if let Some(c) = &mut self.connection {
-            c.load_game(&name.to_string());
-        }
+    fn load_game(&mut self, name: GString) -> GString {
+        self.with_connection(|c| c.load_game(&name.to_string()))
     }
 
+    /// Asks for the saves; a `SaveList` answers. Returns an error message, or `""`.
     #[func]
-    fn list_saves(&mut self) {
-        if let Some(c) = &mut self.connection {
-            c.list_saves();
+    fn list_saves(&mut self) -> GString {
+        self.with_connection(Connection::list_saves)
+    }
+
+    /// A raw rate (`*_RATE_RAW`) as a fraction (0.15 for 15%), for display.
+    #[func]
+    fn rate_fraction(raw: i64) -> f64 {
+        rates::fraction(raw)
+    }
+
+    /// A raw rate in whole per mille: a policy slider's position.
+    #[func]
+    fn rate_per_mille(raw: i64) -> i64 {
+        rates::per_mille(raw)
+    }
+
+    /// A policy slider's per-mille position as the raw rate `submit_policy` takes,
+    /// or `null` (logged) if out of range.
+    #[func]
+    fn rate_from_per_mille(per_mille: i64) -> Variant {
+        match rates::from_per_mille(per_mille) {
+            Ok(raw) => raw.to_variant(),
+            Err(e) => {
+                rejected(e);
+                Variant::nil()
+            }
         }
     }
 }
