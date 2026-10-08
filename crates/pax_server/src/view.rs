@@ -4,16 +4,21 @@
 //! panel and the province panel are sent only to sessions that subscribed. The full
 //! POP and producer tables are never sent.
 //!
-//! The numbers come from the engine's own definitions: `pax_engine::views::ProvinceStats`
-//! for per-province aggregates, and the tick's `DayReport` for spending and markets.
+//! This module only serialises numbers the engine defines:
+//! * `pax_engine::views::ProvinceStats` and `province_pops` for per-province and
+//!   per-profession aggregates;
+//! * the tick's `DayReport` for spending and markets;
+//! * `World`'s own accessors for prices and geography.
+//!
 //! So the client and `pax_cli report` can't disagree about what a number means.
 
 use flatbuffers::{FlatBufferBuilder, WIPOffset};
-use pax_engine::views::ProvinceStats;
+use pax_engine::systems::market::GoodReport;
+use pax_engine::views::{self, ProvinceStats};
 use pax_engine::{DayReport, Fixed, World};
 use pax_protocol::wire;
 
-/// What a session asked to see (`Subscribe`), already checked against the world.
+/// What a session asked to see (`Subscribe`), as it arrived: not yet checked.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Subscription {
     pub map_mode: wire::MapMode,
@@ -29,19 +34,72 @@ impl Default for Subscription {
     }
 }
 
-impl Subscription {
-    /// A subscription is valid only if every id it names exists and its map mode is
-    /// one this server knows. Anything else is a protocol error (D22).
-    pub fn checked(self, world: &World) -> Result<Subscription, String> {
+/// What the map shows. The one place the server's supported map modes are listed:
+/// [`MapLayer::from_wire`] accepts exactly these, and [`map_view`] matches them
+/// exhaustively, so the two can't drift apart.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum MapLayer {
+    Hidden,
+    Nation,
+    Population,
+    Unemployment,
+    LifeNeeds,
+    Militancy,
+    Price { good: usize },
+}
+
+impl MapLayer {
+    fn from_wire(mode: wire::MapMode, good: u16, goods: usize) -> Result<MapLayer, String> {
         use wire::MapMode as M;
-        let known = [M::None, M::Nation, M::Population, M::Unemployment, M::LifeNeeds, M::Militancy, M::Price];
-        if !known.contains(&self.map_mode) {
-            return Err(format!("unknown map mode {}", self.map_mode.0));
+        Ok(match mode {
+            M::None => MapLayer::Hidden,
+            M::Nation => MapLayer::Nation,
+            M::Population => MapLayer::Population,
+            M::Unemployment => MapLayer::Unemployment,
+            M::LifeNeeds => MapLayer::LifeNeeds,
+            M::Militancy => MapLayer::Militancy,
+            M::Price if usize::from(good) < goods => MapLayer::Price { good: usize::from(good) },
+            M::Price => return Err(format!("Subscribe names good {good}, but there are {goods}")),
+            other => return Err(format!("unknown map mode {}", other.0)),
+        })
+    }
+
+    fn to_wire(self) -> (wire::MapMode, u16) {
+        use wire::MapMode as M;
+        match self {
+            MapLayer::Hidden => (M::None, 0),
+            MapLayer::Nation => (M::Nation, 0),
+            MapLayer::Population => (M::Population, 0),
+            MapLayer::Unemployment => (M::Unemployment, 0),
+            MapLayer::LifeNeeds => (M::LifeNeeds, 0),
+            MapLayer::Militancy => (M::Militancy, 0),
+            MapLayer::Price { good } => (M::Price, good as u16),
         }
-        let goods = world.defs.good_count();
-        if self.map_mode == M::Price && usize::from(self.map_good) >= goods {
-            return Err(format!("Subscribe names good {}, but there are {goods}", self.map_good));
-        }
+    }
+}
+
+/// A subscription known to be valid for the current world. It can only be made by
+/// [`Subscription::checked`], so [`day_update`] never sees an unknown mode or an
+/// out-of-range id. A load that changes the world resets every subscription (D23).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CheckedSubscription {
+    layer: MapLayer,
+    market: Option<usize>,
+    province: Option<usize>,
+}
+
+impl Default for CheckedSubscription {
+    /// Nothing subscribed: the summary and nation table only.
+    fn default() -> Self {
+        CheckedSubscription { layer: MapLayer::Hidden, market: None, province: None }
+    }
+}
+
+impl Subscription {
+    /// Valid only if every id it names exists and its map mode is one this server
+    /// knows. Anything else is a protocol error (D22).
+    pub fn checked(self, world: &World) -> Result<CheckedSubscription, String> {
+        let layer = MapLayer::from_wire(self.map_mode, self.map_good, world.defs.good_count())?;
         let markets = world.geography.market_count();
         if let Some(m) = self.market.filter(|&m| m as usize >= markets) {
             return Err(format!("Subscribe names market {m}, but there are {markets}"));
@@ -50,36 +108,25 @@ impl Subscription {
         if let Some(p) = self.province.filter(|&p| p as usize >= provinces) {
             return Err(format!("Subscribe names province {p}, but there are {provinces}"));
         }
-        Ok(self)
+        Ok(CheckedSubscription {
+            layer,
+            market: self.market.map(|m| m as usize),
+            province: self.province.map(|p| p as usize),
+        })
     }
 }
 
-/// Days between state-hash checkpoints (D23): saves verify against them, and
-/// `DayUpdate.state_hash` is sent only on these days.
-pub const CHECKPOINT_DAYS: u64 = 30;
-
-/// Everything views are built from, for one day. Computed once and shared by every
-/// session's update.
+/// Everything views are built from, for one day: the world, its report, and the
+/// day's derived numbers. The sim thread computes the stats and the checkpoint
+/// hash once per day and lends them to every session's update.
 pub struct DayViews<'w> {
     pub world: &'w World,
     /// The report of the day that just ran; `None` before the first tick.
     pub report: Option<&'w DayReport>,
-    pub stats: ProvinceStats,
+    pub stats: &'w ProvinceStats,
     /// `World::state_hash` on checkpoint days only: about 30 ms at 1M POP rows, far
-    /// over the 5 ms view budget, so it isn't computed every day (D22, D23).
+    /// over the 5 ms view budget, so the sim thread computes it once per checkpoint.
     pub state_hash: Option<u64>,
-}
-
-impl<'w> DayViews<'w> {
-    pub fn new(world: &'w World, report: Option<&'w DayReport>) -> Self {
-        let stats = ProvinceStats::of(world, report.map(|r| r.labour.as_slice()));
-        let state_hash = world.day.is_multiple_of(CHECKPOINT_DAYS).then(|| world.state_hash());
-        DayViews { world, report, stats, state_hash }
-    }
-
-    fn market_of(&self, province: usize) -> usize {
-        self.world.geography.province_market[province] as usize
-    }
 }
 
 fn fixed(v: Fixed) -> wire::Fixed {
@@ -95,43 +142,24 @@ fn fixeds<'a>(
 }
 
 fn world_summary<'a>(b: &mut FlatBufferBuilder<'a>, v: &DayViews<'_>) -> WIPOffset<wire::WorldSummary<'a>> {
-    let s = &v.stats;
-    let (unemployed, workforce) = s.unemployment.iter().fold((0, 0), |(u, w), &(pu, pw)| (u + pu, w + pw));
-    // Before the first tick there is no report: spending is zero, and life needs and
-    // militancy come from the POP table's current values.
-    let (life, militancy) = match v.report {
-        Some(r) => (r.life_needs, r.militancy),
-        None => s.life_needs.iter().zip(&s.militancy).fold(
-            Default::default(),
-            |(mut l, mut m): (
-                pax_engine::systems::market::LifeNeedsSummary,
-                pax_engine::systems::market::MilitancySummary,
-            ),
-             (pl, pm)| {
-                l.people += pl.people;
-                l.deprived += pl.deprived;
-                l.weighted_raw += pl.weighted_raw;
-                m.people += pm.people;
-                m.weighted_raw += pm.weighted_raw;
-                (l, m)
-            },
-        ),
-    };
-    let r = v.report;
-    let get = |f: fn(&DayReport) -> Fixed| r.map_or(Fixed::ZERO, f);
+    let totals = v.stats.totals();
+    // The report's life needs and militancy are the tick's own; before the first tick
+    // there is none, and the POP table's current values (the same rules) stand in.
+    let (life, militancy) = v.report.map_or((totals.life_needs, totals.militancy), |r| (r.life_needs, r.militancy));
+    let spending = |f: fn(&DayReport) -> Fixed| fixed(v.report.map_or(Fixed::ZERO, f));
     wire::WorldSummary::create(
         b,
         &wire::WorldSummaryArgs {
-            population: s.population.iter().sum(),
-            workforce,
-            unemployed,
-            household_spending: Some(&fixed(get(|r| r.household_spending))),
-            government_spending: Some(&fixed(get(|r| r.government_spending))),
-            input_spending: Some(&fixed(get(|r| r.input_spending))),
-            wages: Some(&fixed(get(|r| r.payouts.wages))),
-            dividends: Some(&fixed(get(|r| r.payouts.dividends))),
-            taxes: Some(&fixed(get(|r| r.payouts.taxes))),
-            transfers: Some(&fixed(get(|r| r.transfers))),
+            population: totals.population,
+            workforce: totals.workforce,
+            unemployed: totals.unemployed,
+            household_spending: Some(&spending(|r| r.household_spending)),
+            government_spending: Some(&spending(|r| r.government_spending)),
+            input_spending: Some(&spending(|r| r.input_spending)),
+            wages: Some(&spending(|r| r.payouts.wages)),
+            dividends: Some(&spending(|r| r.payouts.dividends)),
+            taxes: Some(&spending(|r| r.payouts.taxes)),
+            transfers: Some(&spending(|r| r.transfers)),
             deprived: life.deprived,
             life_needs: Some(&fixed(life.mean().unwrap_or(Fixed::ZERO))),
             militancy: Some(&fixed(militancy.mean().unwrap_or(Fixed::ZERO))),
@@ -140,12 +168,12 @@ fn world_summary<'a>(b: &mut FlatBufferBuilder<'a>, v: &DayViews<'_>) -> WIPOffs
 }
 
 fn nation_table<'a>(b: &mut FlatBufferBuilder<'a>, v: &DayViews<'_>) -> WIPOffset<wire::NationTable<'a>> {
-    let n = &v.world.nations;
-    let geo = &v.world.geography;
+    let w = v.world;
+    let n = &w.nations;
     let mut population = vec![0u64; n.key.len()];
     for (province, &people) in v.stats.population.iter().enumerate() {
-        if let Some(nation) = geo.market_nation[v.market_of(province)] {
-            population[nation as usize] += people;
+        if let Some(nation) = w.geography.nation_of_market(w.market_of_province(province as u32)) {
+            population[nation] += people;
         }
     }
     let treasury = fixeds(b, n.treasury.iter().copied());
@@ -168,27 +196,22 @@ fn nation_table<'a>(b: &mut FlatBufferBuilder<'a>, v: &DayViews<'_>) -> WIPOffse
 fn map_view<'a>(
     b: &mut FlatBufferBuilder<'a>,
     v: &DayViews<'_>,
-    sub: &Subscription,
+    layer: MapLayer,
 ) -> Option<WIPOffset<wire::MapView<'a>>> {
-    use wire::MapMode as M;
-    let s = &v.stats;
+    let s = v.stats;
+    let w = v.world;
     let provinces = 0..s.population.len();
-    let goods = v.world.defs.good_count();
-    let values = match sub.map_mode {
-        M::None => return None,
-        M::Nation => None, // drawn by the client from StaticData
-        M::Population => Some(fixeds(b, provinces.map(|p| Fixed::from_int(s.population[p] as i64)))),
-        M::Unemployment => Some(fixeds(b, provinces.map(|p| s.unemployment_rate(p)))),
-        M::LifeNeeds => Some(fixeds(b, provinces.map(|p| s.life_needs[p].mean().unwrap_or(Fixed::ZERO)))),
-        M::Militancy => Some(fixeds(b, provinces.map(|p| s.militancy[p].mean().unwrap_or(Fixed::ZERO)))),
-        M::Price => {
-            let good = usize::from(sub.map_good);
-            Some(fixeds(b, provinces.map(|p| v.world.markets.price[v.market_of(p) * goods + good])))
-        }
-        // Subscription::checked admits only the modes above.
-        other => unreachable!("unchecked map mode {}", other.0),
+    let values = match layer {
+        MapLayer::Hidden => return None,
+        MapLayer::Nation => None, // drawn by the client from StaticData
+        MapLayer::Population => Some(fixeds(b, provinces.map(|p| Fixed::from_int(s.population[p] as i64)))),
+        MapLayer::Unemployment => Some(fixeds(b, provinces.map(|p| s.unemployment_rate(p)))),
+        MapLayer::LifeNeeds => Some(fixeds(b, provinces.map(|p| s.life_needs[p].mean().unwrap_or(Fixed::ZERO)))),
+        MapLayer::Militancy => Some(fixeds(b, provinces.map(|p| s.militancy[p].mean().unwrap_or(Fixed::ZERO)))),
+        MapLayer::Price { good } => Some(fixeds(b, provinces.map(|p| w.price(w.market_of_province(p as u32), good)))),
     };
-    Some(wire::MapView::create(b, &wire::MapViewArgs { mode: sub.map_mode, good: sub.map_good, values }))
+    let (mode, good) = layer.to_wire();
+    Some(wire::MapView::create(b, &wire::MapViewArgs { mode, good, values }))
 }
 
 fn market_detail<'a>(
@@ -197,11 +220,11 @@ fn market_detail<'a>(
     market: usize,
 ) -> WIPOffset<wire::MarketDetail<'a>> {
     let goods = v.world.defs.good_count();
-    let range = market * goods..(market + 1) * goods;
-    let price = fixeds(b, v.world.markets.price[range.clone()].iter().copied());
-    let report = |f: fn(&pax_engine::systems::market::GoodReport) -> Fixed| -> Vec<Fixed> {
+    let price = fixeds(b, v.world.prices(market).iter().copied());
+    // The report's goods are row-major per market, like prices (DayReport::goods).
+    let report = |f: fn(&GoodReport) -> Fixed| -> Vec<Fixed> {
         match v.report {
-            Some(r) => r.goods[range.clone()].iter().map(f).collect(),
+            Some(r) => r.goods[market * goods..(market + 1) * goods].iter().map(f).collect(),
             None => vec![Fixed::ZERO; goods],
         }
     };
@@ -226,40 +249,24 @@ fn province_detail<'a>(
     province: usize,
 ) -> WIPOffset<wire::ProvinceDetail<'a>> {
     let w = v.world;
-    // POPs by profession: a POP's identity is (province, profession) (D7). Rows that
-    // share it between month-end compactions are shown merged, as compaction will merge them.
-    let professions = w.defs.professions.len();
-    let mut people = vec![0u64; professions];
-    let mut cash = vec![0i128; professions];
-    let mut life = vec![0i128; professions];
-    let mut militancy = vec![0i128; professions];
-    let p = &w.pops;
-    for i in (0..p.size.len()).filter(|&i| p.province[i] as usize == province && p.size[i] > 0) {
-        let (c, n) = (p.profession[i] as usize, p.size[i] as i128);
-        people[c] += p.size[i] as u64;
-        cash[c] += p.cash[i].raw() as i128;
-        life[c] += n * p.life_needs[i].raw() as i128;
-        militancy[c] += n * p.militancy[i].raw() as i128;
-    }
-    let present: Vec<usize> = (0..professions).filter(|&c| people[c] > 0).collect();
-    let mean = |sum: i128, c: usize| Fixed::from_raw((sum / people[c] as i128) as i64);
-    let profession = b.create_vector(&present.iter().map(|&c| c as u16).collect::<Vec<_>>());
-    let pop_people =
-        b.create_vector(&present.iter().map(|&c| u32::try_from(people[c]).unwrap_or(u32::MAX)).collect::<Vec<_>>());
-    let pop_cash = fixeds(
-        b,
-        present.iter().map(|&c| Fixed::from_raw(i64::try_from(cash[c]).expect("province cash fits in Fixed"))),
-    );
-    let pop_life = fixeds(b, present.iter().map(|&c| mean(life[c], c)));
-    let pop_militancy = fixeds(b, present.iter().map(|&c| mean(militancy[c], c)));
+    let groups = views::province_pops(w, province as u32);
+    let profession = b.create_vector(&groups.iter().map(|g| g.profession).collect::<Vec<_>>());
+    let people: Vec<u32> = groups
+        .iter()
+        .map(|g| u32::try_from(g.people).expect("a profession's people in one province fit the wire's u32"))
+        .collect();
+    let people = b.create_vector(&people);
+    let cash = fixeds(b, groups.iter().map(|g| g.cash));
+    let life_needs = fixeds(b, groups.iter().map(|g| g.life_needs.mean().unwrap_or(Fixed::ZERO)));
+    let militancy = fixeds(b, groups.iter().map(|g| g.militancy.mean().unwrap_or(Fixed::ZERO)));
     let pops = wire::PopRows::create(
         b,
         &wire::PopRowsArgs {
             profession: Some(profession),
-            people: Some(pop_people),
-            cash: Some(pop_cash),
-            life_needs: Some(pop_life),
-            militancy: Some(pop_militancy),
+            people: Some(people),
+            cash: Some(cash),
+            life_needs: Some(life_needs),
+            militancy: Some(militancy),
         },
     );
 
@@ -310,13 +317,13 @@ fn province_detail<'a>(
 }
 
 /// One session's `DayUpdate` frame for the current day.
-pub fn day_update(v: &DayViews<'_>, sub: &Subscription, speed: wire::Speed, skipped: u32) -> Vec<u8> {
+pub fn day_update(v: &DayViews<'_>, sub: &CheckedSubscription, speed: wire::Speed, skipped: u32) -> Vec<u8> {
     let mut b = FlatBufferBuilder::new();
     let world = world_summary(&mut b, v);
     let nations = nation_table(&mut b, v);
-    let map = map_view(&mut b, v, sub);
-    let market = sub.market.map(|m| market_detail(&mut b, v, m as usize));
-    let province = sub.province.map(|p| province_detail(&mut b, v, p as usize));
+    let map = map_view(&mut b, v, sub.layer);
+    let market = sub.market.map(|m| market_detail(&mut b, v, m));
+    let province = sub.province.map(|p| province_detail(&mut b, v, p));
     let update = wire::DayUpdate::create(
         &mut b,
         &wire::DayUpdateArgs {
@@ -364,13 +371,18 @@ mod tests {
     }
 
     fn update(v: &DayViews<'_>, sub: Subscription) -> Vec<u8> {
-        day_update(v, &sub, wire::Speed::Normal, 3)
+        day_update(v, &sub.checked(v.world).expect("a valid subscription"), wire::Speed::Normal, 3)
+    }
+
+    fn stats_of(world: &World, report: Option<&DayReport>) -> ProvinceStats {
+        ProvinceStats::of(world, report.map(|r| r.labour.as_slice()))
     }
 
     #[test]
     fn summary_matches_the_engines_own_numbers() {
         let (world, report) = world_after(45);
-        let v = DayViews::new(&world, Some(&report));
+        let stats = stats_of(&world, Some(&report));
+        let v = DayViews { world: &world, report: Some(&report), stats: &stats, state_hash: None };
         let frame = update(&v, Subscription::default());
         let u = read_server_message(&frame).unwrap().payload_as_day_update().unwrap();
         assert_eq!((u.day(), u.skipped()), (world.day, 3));
@@ -393,13 +405,14 @@ mod tests {
     }
 
     #[test]
-    fn the_state_hash_is_sent_on_checkpoint_days_only() {
-        for (days, expected) in [(45, false), (60, true)] {
-            let (world, report) = world_after(days);
-            let v = DayViews::new(&world, Some(&report));
+    fn the_checkpoint_hash_is_sent_only_when_there_is_one() {
+        let (world, report) = world_after(60);
+        let stats = stats_of(&world, Some(&report));
+        for state_hash in [None, Some(world.state_hash())] {
+            let v = DayViews { world: &world, report: Some(&report), stats: &stats, state_hash };
             let frame = update(&v, Subscription::default());
             let u = read_server_message(&frame).unwrap().payload_as_day_update().unwrap();
-            assert_eq!(u.state_hash(), expected.then(|| world.state_hash()), "day {}", world.day);
+            assert_eq!(u.state_hash(), state_hash);
         }
     }
 
@@ -407,7 +420,8 @@ mod tests {
     fn every_map_mode_has_one_value_per_province() {
         use wire::MapMode as M;
         let (world, report) = world_after(45);
-        let v = DayViews::new(&world, Some(&report));
+        let stats = stats_of(&world, Some(&report));
+        let v = DayViews { world: &world, report: Some(&report), stats: &stats, state_hash: None };
         let provinces = world.geography.province_count();
         for mode in [M::Population, M::Unemployment, M::LifeNeeds, M::Militancy, M::Price] {
             let frame = update(&v, Subscription { map_mode: mode, map_good: 2, ..Default::default() });
@@ -438,7 +452,8 @@ mod tests {
     #[test]
     fn market_and_province_panels_match_the_world() {
         let (world, report) = world_after(45);
-        let v = DayViews::new(&world, Some(&report));
+        let stats = stats_of(&world, Some(&report));
+        let v = DayViews { world: &world, report: Some(&report), stats: &stats, state_hash: None };
         let frame = update(&v, Subscription { market: Some(1), province: Some(0), ..Default::default() });
         let msg = read_server_message(&frame).unwrap();
         let u = msg.payload_as_day_update().unwrap();
@@ -470,7 +485,8 @@ mod tests {
     #[test]
     fn before_the_first_tick_spending_is_zero_but_the_map_works() {
         let world = two_states().world;
-        let v = DayViews::new(&world, None);
+        let stats = stats_of(&world, None);
+        let v = DayViews { world: &world, report: None, stats: &stats, state_hash: None };
         let sub = Subscription { map_mode: wire::MapMode::Population, market: Some(0), ..Default::default() };
         let frame = update(&v, sub);
         let msg = read_server_message(&frame).unwrap();
@@ -510,13 +526,15 @@ mod tests {
         let scale = (1_000_000 / (base.pops.size.len() as u32 * regions)).max(1);
         let mut world = pax_data::bench::replicate_with_nations(&base, scale, regions, Some(200));
         let report = pax_engine::step(&mut world);
-        assert!(!world.day.is_multiple_of(CHECKPOINT_DAYS), "measure an ordinary day, not a checkpoint");
-        let sub = Subscription { map_mode: wire::MapMode::LifeNeeds, map_good: 0, market: Some(7), province: Some(11) };
+        let sub = Subscription { map_mode: wire::MapMode::LifeNeeds, map_good: 0, market: Some(7), province: Some(11) }
+            .checked(&world)
+            .unwrap();
         let runs = 20;
         let start = std::time::Instant::now();
         let mut bytes = 0;
         for _ in 0..runs {
-            let views = DayViews::new(&world, Some(&report));
+            let stats = stats_of(&world, Some(&report));
+            let views = DayViews { world: &world, report: Some(&report), stats: &stats, state_hash: None };
             bytes = day_update(&views, &sub, wire::Speed::Normal, 0).len();
         }
         let ms = start.elapsed().as_secs_f64() * 1e3 / runs as f64;

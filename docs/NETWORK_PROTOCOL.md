@@ -142,6 +142,7 @@ FlatBuffers stays compatible across versions only if changes follow these rules.
 - **Never delete** a field; mark it `(deprecated)`.
 - **Add union members and enum values only at the end.** Never renumber them. Receivers must ignore an unknown union member or enum value, not crash on it.
 - A change that breaks these rules bumps `protocol_major`. A compatible addition bumps `protocol_minor`.
+- **Before the first release (protocol 1.0 has never shipped),** schema edits may still break these rules without a version bump, as `DayUpdate.state_hash` becoming optional did in M3-3. From the first release that includes a client, every change follows them.
 - Rust code is generated with **flatc 24.3.25**, matching the `flatbuffers` crate version, into the `pax_protocol` crate. It is checked in, and CI regenerates it and fails on any difference. Mismatched compiler and runtime versions produce code that doesn't compile.
 
 ## 9. Testing

@@ -9,17 +9,30 @@ use std::sync::mpsc::Receiver;
 
 use pax_data::Scenario;
 use pax_engine::DayReport;
+use pax_engine::views::ProvinceStats;
 use pax_protocol::{PROTOCOL_MAJOR, PROTOCOL_MINOR, wire};
 use tracing::{debug, info};
 
 use crate::encode::{self, WelcomeInfo};
 use crate::net::{ConnHandle, Inbound, Outbound};
 use crate::request::Request;
-use crate::view::{self, DayViews, Subscription};
+use crate::view::{self, CheckedSubscription, DayViews, Subscription};
+
+/// Days between state-hash checkpoints (D23): the hash goes in that day's `DayUpdate`.
+const CHECKPOINT_DAYS: u64 = 30;
+
+/// The derived numbers every session's update for one day shares: computed once
+/// per day, never per request (D22). Keyed by the day, so a tick invalidates it.
+struct DayCache {
+    day: u64,
+    stats: ProvinceStats,
+    /// `World::state_hash` on checkpoint days: ~30 ms at 1M POP rows, so once per day.
+    state_hash: Option<u64>,
+}
 
 struct Session {
     conn: ConnHandle,
-    subscription: Subscription,
+    subscription: CheckedSubscription,
     /// Set by `Welcome`. Until then the session may only say `Hello`: one choke
     /// point in [`Sim::handle`] drops anything else, so no request handler has to
     /// remember to check (a rejected session's queued requests never act).
@@ -46,6 +59,8 @@ pub(crate) struct Sim {
     speed: wire::Speed,
     /// The report of the last day that ran; `None` before the first tick.
     last_report: Option<DayReport>,
+    /// The current day's shared view inputs; see [`DayCache`].
+    day_cache: Option<DayCache>,
 }
 
 impl Sim {
@@ -57,6 +72,7 @@ impl Sim {
             exit_when_idle,
             speed: wire::Speed::Paused,
             last_report: None,
+            day_cache: None,
         }
     }
 
@@ -82,8 +98,24 @@ impl Sim {
         };
         let Some(s) = self.sessions.get_mut(&session) else { return };
         s.subscription = subscription;
-        let views = DayViews::new(&self.scenario.world, self.last_report.as_ref());
-        self.send(session, Outbound::Frame(view::day_update(&views, &subscription, self.speed, 0)));
+        let speed = self.speed;
+        let frame = view::day_update(&self.day_views(), &subscription, speed, 0);
+        self.send(session, Outbound::Frame(frame));
+    }
+
+    /// Today's views, computing the day's stats and checkpoint hash the first time
+    /// they're needed and reusing them for every later request that day.
+    fn day_views(&mut self) -> DayViews<'_> {
+        let world = &self.scenario.world;
+        if self.day_cache.as_ref().is_none_or(|c| c.day != world.day) {
+            self.day_cache = Some(DayCache {
+                day: world.day,
+                stats: ProvinceStats::of(world, self.last_report.as_ref().map(|r| r.labour.as_slice())),
+                state_hash: world.day.is_multiple_of(CHECKPOINT_DAYS).then(|| world.state_hash()),
+            });
+        }
+        let cache = self.day_cache.as_ref().expect("filled above");
+        DayViews { world, report: self.last_report.as_ref(), stats: &cache.stats, state_hash: cache.state_hash }
     }
 
     fn reject(&self, session: u64, reason: &str) {
@@ -129,7 +161,8 @@ impl Sim {
     fn handle(&mut self, event: Inbound) -> bool {
         match event {
             Inbound::Connected { session, conn } => {
-                self.sessions.insert(session, Session { conn, subscription: Subscription::default(), seat: None });
+                self.sessions
+                    .insert(session, Session { conn, subscription: CheckedSubscription::default(), seat: None });
             }
             Inbound::Request { session, request: Request::Hello { major, minor, name, requested_nation, .. } } => {
                 self.hello(session, major, minor, name.as_deref(), requested_nation);

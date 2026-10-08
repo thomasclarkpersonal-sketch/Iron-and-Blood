@@ -93,18 +93,29 @@ impl MilitancySummary {
     pub fn of(pops: &crate::world::Pops) -> MilitancySummary {
         let mut s = MilitancySummary::default();
         for (&n, &m) in pops.size.iter().zip(&pops.militancy) {
-            if n > 0 {
-                s.people += n as u64;
-                s.weighted_raw += n as i128 * m.raw() as i128;
-            }
+            s.record(n, m);
         }
         s
+    }
+
+    /// Counts one POP of `size` people at `militancy`: the size weighting, defined
+    /// once. Every militancy summary (the tick's, per-province views) goes through it.
+    pub fn record(&mut self, size: u32, militancy: Fixed) {
+        if size > 0 {
+            self.people += size as u64;
+            self.weighted_raw += size as i128 * militancy.raw() as i128;
+        }
     }
 
     /// Population-weighted mean militancy; `None` if nobody took part.
     pub fn mean(&self) -> Option<Fixed> {
         (self.people > 0).then(|| Fixed::from_raw((self.weighted_raw / self.people as i128) as i64))
     }
+}
+
+/// The summary of two disjoint groups of POPs.
+impl std::ops::Add for MilitancySummary {
+    type Output = MilitancySummary;
 
     fn add(mut self, other: MilitancySummary) -> MilitancySummary {
         self.people += other.people;
@@ -132,6 +143,24 @@ impl LifeNeedsSummary {
     pub fn mean(&self) -> Option<Fixed> {
         (self.people > 0).then(|| Fixed::from_raw((self.weighted_raw / self.people as i128) as i64))
     }
+
+    /// Counts one POP of `size` people at `life_needs` satisfaction: the size
+    /// weighting and the definition of *deprived* (`life_needs < 1`), written once.
+    /// The market's tally and every per-province view go through it.
+    pub fn record(&mut self, size: u32, life_needs: Fixed) {
+        if size > 0 {
+            self.people += size as u64;
+            self.weighted_raw += size as i128 * life_needs.raw() as i128;
+            if life_needs < Fixed::ONE {
+                self.deprived += size as u64;
+            }
+        }
+    }
+}
+
+/// The summary of two disjoint groups of POPs.
+impl std::ops::Add for LifeNeedsSummary {
+    type Output = LifeNeedsSummary;
 
     fn add(mut self, other: LifeNeedsSummary) -> LifeNeedsSummary {
         self.people += other.people;
@@ -711,22 +740,15 @@ fn settle(
                 assert!(spent <= *cash, "POP {i} overspent: {spent} > {cash}");
                 *cash -= spent;
                 *life = satisfaction;
-                if size[i] > 0 {
-                    tally.people += size[i] as u64;
-                    tally.weighted_raw += size[i] as i128 * satisfaction.raw() as i128;
-                    if satisfaction < Fixed::ONE {
-                        tally.deprived += size[i] as u64;
-                    }
-                    mil.people += size[i] as u64;
-                    mil.weighted_raw += size[i] as i128 * militancy[i].raw() as i128;
-                }
+                tally.record(size[i], satisfaction);
+                mil.record(size[i], militancy[i]);
                 (runs, x, tally, mil)
             },
         )
         .map(|(runs, _, tally, mil)| (runs, tally, mil))
         .reduce(
             || (MarketRuns::new(2 * goods), LifeNeedsSummary::default(), MilitancySummary::default()),
-            |(r1, t1, m1), (r2, t2, m2)| (r1.append(r2), t1.add(t2), m1.add(m2)),
+            |(r1, t1, m1), (r2, t2, m2)| (r1.append(r2), t1 + t2, m1 + m2),
         );
     let (bought_paid, life_needs, militancy_summary) =
         (bought_paid.0.into_dense(markets, |a, b| *a += *b), bought_paid.1, bought_paid.2);

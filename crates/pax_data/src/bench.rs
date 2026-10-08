@@ -1,5 +1,6 @@
 //! Benchmark worlds (D13): a scenario scaled up to target sizes, shared by
-//! `pax_cli bench` and the server's view benchmark (`pax_server/examples`).
+//! `pax_cli bench` and the server's view benchmark (`view_building_budget`, an ignored
+//! test in `pax_server/src/view.rs`).
 
 use pax_engine::World;
 
