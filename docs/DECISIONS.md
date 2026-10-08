@@ -432,7 +432,7 @@ The state → national → sphere → global roll-up in the old ECONOMY_SYSTEM w
   - A successful load pauses the game and sends every session a new `Welcome`. Commands queued for the next tick are discarded, because they never applied.
   - The scenario's scripted commands for days already played are in the log; later ones still come from the scenario, so nothing applies twice.
 - **Load time:** replay runs at tick speed, about 35 ms per day at the D13 long-term scale, so roughly 4 minutes for a 20-year game. That is over the 30-second limit, so each save also writes a binary snapshot of the saved day (D10, M3-6b).
-  - Loading reads the snapshot. Measured at 990k POP rows / 3,000 markets: 40 MB, written in 83 ms, loaded and verified in 51 ms, at any game length.
+  - Loading reads the snapshot. Measured at 990k POP rows / 3,000 markets: 40 MB, written in 74 ms, loaded and verified (hash and table rules) in 67 ms, at any game length.
   - The snapshot is always `<name>.world` next to `<name>.toml`, derived from the save's own name and never read from the file, so a save can't point the loader at another file. The TOML records only its `snapshot_hash`.
   - The snapshot's scenario tables (geography, nation keys, seed) must equal the scenario's, and the restored world must pass the engine's table rules (`World::check_tables`: lengths, ids, signs, rates; BACKEND_SCHEMA). The state hash is no defence against a crafted file, because its author can recompute it, so the rules are what refuse one.
   - Saving over an existing save writes both new files to temporary names first. A failed save (a full disk, say) leaves the old one loadable.

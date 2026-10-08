@@ -384,7 +384,7 @@ mod tests {
 #[cfg(all(test, feature = "bench"))]
 mod load_time {
     /// D23's 30-second rule at D13's long-term scale: a snapshot loads in tens of
-    /// milliseconds (68 ms measured at 990k rows), however long the game ran. Run by hand:
+    /// milliseconds, however long the game ran (D23 records the latest measurement). Run by hand:
     /// `cargo test -p pax_data --release --features bench -- --ignored snapshot_load_time --nocapture`
     #[test]
     #[ignore]
