@@ -141,9 +141,14 @@ CI then runs these checks:
 | Tests and determinism gate | Any test, or a golden-hash mismatch |
 | Determinism (Windows/macOS) | Cross-platform divergence |
 | Benchmark regression | The tick is more than 20% slower than `main` (same runner, `mini_valley` and `two_states`) |
-| Critic | Your PR changes 200+ lines (or is sampled, or labelled `critic`) and has a **CRITICAL** architectural finding |
+| Critic | Your PR changes 200+ lines (or changes `AGENTS.md`/`DECISIONS.md`, is sampled, or labelled `critic`) and has a **CRITICAL** architectural finding |
 
-The critic's DEBT warnings don't block, but read them: most are cheap to fix and worth fixing. To dispute a CRITICAL finding, reply on the PR citing the rule and ask an admin ([REPO_SETUP.md](REPO_SETUP.md)).
+Act on the critic's comment as [AGENTS.md §9](../AGENTS.md#9-critic-feedback) says:
+- Fix CRITICAL findings.
+- Fix DEBT warnings in the same PR. They don't block, but they're re-reported on every push until fixed or waived by a maintainer (`critic-waive: <finding title>, <reason>`).
+- Consider each suggestion. `/critic-followup` in Claude Code walks through a review for you.
+
+To dispute a CRITICAL finding, reply on the PR citing the rule and ask an admin ([REPO_SETUP.md](REPO_SETUP.md)).
 
 To have Claude draft a feature, open an issue with the *Feature request* template and label it `claude-plan` ([CLAUDE_FEATURE_PIPELINE.md](CLAUDE_FEATURE_PIPELINE.md)).
 

@@ -36,10 +36,16 @@ CI runs the same commands, and also the determinism gate on Windows and macOS.
 
 **The critic reviews a PR if any of these is true:**
 - it changes ≥ 200 lines or ≥ 20 files;
+- it changes the contract: `AGENTS.md`, `docs/DECISIONS.md` or `.claude/commands/critic.md`;
 - it was randomly sampled (1 in 5 PRs, decided once per PR number);
 - it carries the `critic` label.
 
-A selected PR is re-reviewed on every push. DEBT warnings and suggestions are advisory; only CRITICAL findings block. If you believe a CRITICAL finding is wrong, reply on the PR citing the rule and ask an admin. Do not remove the `critic` label to dodge a review.
+A selected PR is re-reviewed on every push, against the rules as they are on `main`. How to act on the findings ([AGENTS.md §9](AGENTS.md#9-critic-feedback)):
+- **CRITICAL:** blocks the merge; fix it. If you believe it's wrong, reply on the PR citing the rule and ask an admin.
+- **DEBT:** doesn't block, but fix it in the same PR. It is re-reported on every push until it's fixed or a maintainer waives it by commenting `critic-waive: <finding title>, <reason>`.
+- **SUGGESTION:** optional; consider each one.
+
+Do not remove the `critic` label to dodge a review.
 
 Repository admins: the one-time setup (GitHub App and its token secret, label, ruleset making the checks required) is in [docs/REPO_SETUP.md](docs/REPO_SETUP.md).
 

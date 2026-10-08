@@ -61,10 +61,11 @@ Skip this if step 4 created `CLAUDE_CODE_OAUTH_TOKEN`. Use an API key when the c
    - Value: the key
 3. In `.github/workflows/critic.yml`, replace the `claude_code_oauth_token:` line with `anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}` (the comment above it shows the exact line).
 
-## 6. Create the `critic` label
+## 6. Create the critic labels
 
 ```bash
 gh label create critic --color B60205 --description "Force an architectural critic review"
+gh label create contract-change --color D93F0B --description "Maintainer approves relaxing AGENTS.md / DECISIONS.md rules"
 ```
 
 or in the UI: **Issues → Labels → New label**.
@@ -98,16 +99,18 @@ Required status checks, as GitHub lists them:
 - `Tests and determinism gate`
 - `Determinism (windows-latest)`
 - `Determinism (macos-latest)`
+- `Benchmark regression`
 - `Critic`
 
-Click **Create**.
+Click **Create**. (`Benchmark regression` runs on every PR, so requiring it never leaves a PR waiting.)
 
 How the blocking works:
 
 | PR situation | `Critic` check | Merge |
 |---|---|---|
 | Not selected (under 200 lines and 20 files, not sampled, no label) | skipped, which counts as passing | allowed |
-| Selected, no CRITICAL findings | ✅ passes (DEBT warnings are shown but don't block) | allowed |
+| Selected, no CRITICAL findings, open DEBT | ✅ passes with a warning; the comment asks for the debt to be fixed or waived | allowed (but see AGENTS.md §9) |
+| Selected, no CRITICAL findings, no open DEBT | ✅ passes | allowed |
 | Selected, CRITICAL findings | ❌ fails | **blocked** until fixed; the critic re-runs on every push |
 | Critic errored or produced a malformed report | ❌ fails (fail-closed) | blocked; use **Re-run jobs** |
 | Draft PR or PR from a fork | skipped | allowed. Keep contributors on in-repo branches (forks get no secrets, so they can't be reviewed) |
@@ -130,6 +133,23 @@ The critic is an AI reviewer and can be wrong. If a team member believes a findi
    - If the critic is wrong, the admin merges using the ruleset bypass ("Merge without waiting for requirements to be met").
    - If the critic misreads a rule, fix the wording in `.claude/commands/critic.md` or `docs/DECISIONS.md` so it doesn't happen again.
 3. Do **not** remove the `critic` label to dodge a review. On a small PR, the next push would then skip the check and unblock the merge. Treat that as a process violation.
+
+## Waiving DEBT and approving contract changes
+
+**DEBT waivers.** DEBT findings don't block, but the critic re-reports them on every push until they're fixed. If one should not be fixed in this PR, a maintainer (anyone with write access) comments on the PR:
+
+```text
+critic-waive: Unbounded retry loop in parse_commands, tracked in #42
+```
+
+The waiver must name the finding's title and give a reason. On the next run (push, or **Re-run jobs**), the critic lists the finding under *Waived debt*, and it no longer counts as open. The critic sees only `critic-waive` lines from people with write access and ignores the rest of the thread. A waiver can never clear a CRITICAL finding.
+
+**Contract changes.** The critic judges a PR against `main`'s `AGENTS.md`, `docs/DECISIONS.md` and `.claude/commands/critic.md`, so a PR can't change the rules it is judged by.
+- Adding a new decision is normal.
+- Removing, relaxing or contradicting an existing rule is CRITICAL.
+- If the change is intended, add the `contract-change` label. The critic re-runs and reports the relaxation as DEBT instead, so it stays visible.
+
+PRs that touch these files are always reviewed.
 
 ## PRs that change `critic.yml` or `claude.yml`
 
