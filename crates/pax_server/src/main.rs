@@ -78,11 +78,7 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> Result<(Config, Option<
             "--admin" => admin_name = Some(it.next().ok_or("--admin needs a value")?),
             "--password-file" => config.password = Some(secret("--password-file", it.next())?),
             "--admin-password-file" => admin_password = Some(secret("--admin-password-file", it.next())?),
-            "--commands-per-second" => {
-                let value = it.next().ok_or("--commands-per-second needs a value")?;
-                config.commands_per_second =
-                    value.parse().map_err(|_| format!("--commands-per-second: '{value}' is not a number"))?;
-            }
+            "--commands-per-second" => config.commands_per_second = count("--commands-per-second", it.next())?,
             "--bind" => {
                 let value = it.next().ok_or("--bind needs a value")?;
                 config.bind =

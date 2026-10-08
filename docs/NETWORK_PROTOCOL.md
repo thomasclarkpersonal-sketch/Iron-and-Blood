@@ -149,7 +149,7 @@ sequenceDiagram
   - **The host** is the first player to join. When the host leaves, the remaining player with the lowest id becomes host. On a dedicated server, `--admin NAME --admin-password-file PATH` makes the client named `NAME` the host instead, whenever it joins with the admin password; while it is away there is no host (D24). A name alone proves nothing: a client that gives the admin's name without the admin password joins as an ordinary player (the server logs it), and `--admin` without `--admin-password-file` is refused (M4-6).
   - `--pause-after S` and `--drop-after S` set D24's lag thresholds (5 and 30 by default).
   - `--updates-per-second N` and `--map-every N` set D24's bandwidth for remote sessions (4 and 5 by default, M4-7).
-  - `--password-file PATH` makes players give a password in `Hello` (protocol 1.6). The admin password also admits the admin. `--commands-per-second N` sets the rate limit (20 by default). Passwords come from files so they never show in the process list.
+  - `--password-file PATH` makes players give a password in `Hello` (protocol 1.6). The admin password also admits the admin. `--commands-per-second N` sets the rate limit (20 by default). Passwords come from files so they never show in the process list. A password never crosses the network in clear: off localhost, a server with a password or an admin needs TLS (M4-6b), and is refused until then.
   - TLS is still to come (M4-6b). D24 requires TLS off localhost, so until then the server refuses `--players` above 1 on any other address: multiplayer is for testing on one machine until then.
 
 ## 7. Conversions and units

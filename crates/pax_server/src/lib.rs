@@ -127,7 +127,10 @@ impl Config {
     /// * the fairness pause is multiplayer only, and comes before the drop (D24), or
     ///   the connection task would drop a client when it should pause the game;
     /// * a remote session gets updates, and a map, at some rate (M4-7);
-    /// * D24's TLS rule: several players bind loopback only until M4-6 brings TLS.
+    /// * D24's TLS rule: several players bind loopback only until TLS (M4-6b);
+    /// * a password never crosses the network in clear: a server with a password or
+    ///   an admin binds loopback only until TLS (M4-6b);
+    /// * a rate limit of at least one command a second (D24).
     pub fn validate(&self) -> Result<(), ConfigError> {
         if let Some(pause) = self.pause_after {
             if self.max_players <= 1 {
@@ -142,6 +145,9 @@ impl Config {
         }
         if self.max_players > 1 && !self.bind.ip().is_loopback() {
             return Err(ConfigError::MultiplayerNeedsTls { players: self.max_players, bind: self.bind });
+        }
+        if (self.password.is_some() || self.admin.is_some()) && !self.bind.ip().is_loopback() {
+            return Err(ConfigError::PasswordNeedsTls { bind: self.bind });
         }
         if self.commands_per_second == 0 {
             return Err(ConfigError::NoCommandsAllowed);
@@ -196,8 +202,11 @@ pub enum ConfigError {
     /// `--updates-per-second` or `--map-every` is 0: a remote session would never
     /// get an update, or never a map.
     NoUpdates,
-    /// D24: TLS off localhost, and M4-6 hasn't brought it yet.
+    /// D24: TLS off localhost, which arrives with M4-6b.
     MultiplayerNeedsTls { players: u16, bind: SocketAddr },
+    /// A password in `Hello` would cross the network in clear: off localhost, a
+    /// server with a password or an admin needs TLS (D24, M4-6b).
+    PasswordNeedsTls { bind: SocketAddr },
     /// A rate limit of 0 commands per second would refuse every command.
     NoCommandsAllowed,
 }
@@ -212,7 +221,11 @@ impl std::fmt::Display for ConfigError {
             ConfigError::NoUpdates => write!(f, "--updates-per-second and --map-every must be at least 1"),
             ConfigError::MultiplayerNeedsTls { players, bind } => write!(
                 f,
-                "--players {players} on {bind} needs TLS (D24), which arrives with M4-6: until then, bind 127.0.0.1"
+                "--players {players} on {bind} needs TLS (D24), which arrives with M4-6b: until then, bind 127.0.0.1"
+            ),
+            ConfigError::PasswordNeedsTls { bind } => write!(
+                f,
+                "a password on {bind} would cross the network in clear: it needs TLS (D24), which arrives with M4-6b; until then, bind 127.0.0.1"
             ),
             ConfigError::NoCommandsAllowed => write!(f, "--commands-per-second must be at least 1"),
         }
@@ -368,7 +381,20 @@ mod tests {
         assert!(matches!(Server::start(config.clone()), Err(StartError::Config(ConfigError::PauseNotBeforeDrop))));
         config.pause_after = Some(Duration::from_secs(5));
         config.bind = SocketAddr::from(([0, 0, 0, 0], 0));
-        assert!(matches!(Server::start(config), Err(StartError::Config(ConfigError::MultiplayerNeedsTls { .. }))));
+        assert!(matches!(
+            Server::start(config.clone()),
+            Err(StartError::Config(ConfigError::MultiplayerNeedsTls { .. }))
+        ));
+        // One player, but a password: it would cross the network in clear.
+        config.max_players = 1;
+        config.pause_after = None;
+        config.password = Some(Secret::new("pw"));
+        assert!(matches!(config.validate(), Err(ConfigError::PasswordNeedsTls { .. })));
+        config.password = None;
+        config.admin = Some(Admin { name: "ada".into(), password: Secret::new("pw") });
+        assert!(matches!(config.validate(), Err(ConfigError::PasswordNeedsTls { .. })));
+        config.bind = SocketAddr::from(([127, 0, 0, 1], 0));
+        assert_eq!(config.validate(), Ok(()), "on loopback, a password is fine");
     }
 
     /// A panic on the sim thread reaches the client (Goodbye) and the caller (Err),
