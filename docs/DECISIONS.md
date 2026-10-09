@@ -542,7 +542,7 @@ The state → national → sphere → global roll-up in the old ECONOMY_SYSTEM w
 - **Rule:** national labour laws set what share of women and dependents (child labour) enters the effective workforce; the effective workforce is derived, never stored.
 - **Rule:** births add dependents out of a household's surplus income, and starvation kills dependents before workers, which **supersedes D26's band-aid**.
 - **Rule:** promotion and demotion between strata are deterministic fractional flows driven by literacy and wage premiums; movers take their cash share by largest remainder (D7).
-- **Amends:** D7 (splits and merges across the three columns), D2, D18, D20 and D25 (which column each reads: DATA_MODEL_M5_M6.md has the reader table), D26 (superseded).
+- **Amends:** D7 (splits and merges across the three columns), D2, D18, D20, D25 and D28 (which column each reads: D28's strikes act on the effective workforce, not `size`; DATA_MODEL_M5_M6.md has the reader table), D26 (superseded).
 
 ## D30. Endogenous inside money and sovereign debt
 
@@ -563,7 +563,7 @@ The state → national → sphere → global roll-up in the old ECONOMY_SYSTEM w
 - **Rule:** interest-group clout is **derived** each month from POPs' professions, wealth and literacy, through profession weights in data, never stored. Which groups exist, and each profession's weights, are data (POLITICS_SYSTEM.md), not this decision.
 - **Rule:** laws change only by parliamentary vote weighted by clout, checked in `World::validate`.
 - **Open** (DATA_MODEL_M5_M6.md, "Open questions"): the new professions M6 needs (clergy, clerks, perhaps merchants) and the groups they lean to.
-- **Amends:** D6, D15 and D19 (wage-floor and tax-bracket laws; consciousness beside militancy; group approval's effect on militancy), D21 (`SetLaw`).
+- **Amends:** D6, D15 and D19 (wage-floor and tax-bracket laws; consciousness beside militancy; group approval's effect on militancy), D21 (`PassReform`).
 
 ## D32. Political revolutions and breakaway markets
 

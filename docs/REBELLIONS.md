@@ -1,6 +1,6 @@
 # Unrest and Rebellions (M5, M6): Design
 
-**Status: design agreed with the owner (2026-10-09), not implemented yet; its decision is *Proposed* until accepted.** It gives [D19](DECISIONS.md#d19-militancy) militancy its consequences, in two milestones: **strikes and riots in M5**, **rebellions in M6**. Its rules are [D28](DECISIONS.md#d28-economic-unrest-strikes-and-riots) (M5) and [D32](DECISIONS.md#d32-political-revolutions-and-breakaway-markets) (M6 (binding once accepted); this document holds the mechanism. The owner's answers to the review questions are under [Decisions](#decisions-owner-2026-10-09).
+**Status: design agreed with the owner (2026-10-09), not implemented yet; its decision is *Proposed* until accepted.** It gives [D19](DECISIONS.md#d19-militancy) militancy its consequences, in two milestones: **strikes and riots in M5**, **rebellions in M6**. Its rules are [D28](DECISIONS.md#d28-economic-unrest-strikes-and-riots) (M5) and [D32](DECISIONS.md#d32-political-revolutions-and-breakaway-markets) (M6) (binding once accepted); this document holds the mechanism. The owner's answers to the review questions are under [Decisions](#decisions-owner-2026-10-09).
 
 ## Where we are
 

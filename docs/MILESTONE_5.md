@@ -47,57 +47,13 @@ Milestone 5 builds on the single-player and multiplayer foundation established i
 
 ## 🏛️ System Design & Decisions
 
-The tick order D4 must be amended to (from [DATA_MODEL_M5_M6.md](DATA_MODEL_M5_M6.md), "Tick order"):
+This milestone's rules live in their decisions and designs; this section only says where. Each is *Proposed* until accepted.
 
-```mermaid
-flowchart TD
-    C[0. Commands, D21] --> A[1. Arrival: cargo lands, iceberg loss, tariff paid]
-    A --> L[2. Labour: effective workforce, strikes]
-    L --> P[3. Production, and construction goods delivered to projects]
-    P --> M[4. Market: orders from households, producers, projects, governments and merchants, then discovery, then settlement: purchases become cargo in transit]
-    M --> F[5. Firms: wages, then dividends above wage, restart and project reserves]
-    F --> G[5b. Government transfers]
-    G --> E{Month end?}
-    E -- no --> Done[Conservation assert]
-    E -- yes --> Mob[6. Mobility: D18, D20, D25]
-    Mob --> Pol[7. Politics: militancy]
-    Pol --> R[8. Riots, on this month's militancy]
-    R --> I[9. Investment: start, complete and depreciate projects]
-    I --> Dem[10. Demographics, then compaction]
-    Dem --> Done
-```
-
-### 1. Inter-Market Trade (D17, Proposed)
-* **Merchants:** Stored in a dense SoA table `Merchants` with `route`, `cash`, `transit` (per good), `stock` (per good), and `cost_basis` (per good).
-* **Price Gap Arbitrage:** At opening prices, merchants order volume $q^* = \text{capacity\_share} \times \min(1, \Delta p / (k \cdot p_A))$ if netback $p_B(1 - \tau) - t \cdot p_A > p_A(1 + \text{margin})$.
-* **Preserving Parallelism:** A merchant purchases goods in Market $A$ on day $T$ and lands them in Market $B$ on day $T+1$. Because transactions are separated by a 1-day transit delay, Market $A$ and Market $B$ clear strictly independently during day $T$, maintaining full rayon parallelism and zero lock contention.
-* **Pro-Rata Rationing:** Merchants place standard D1 `BuyOrder`s and `SellOffer`s. When supply in Market $A$ is scarce, exporters and local POPs are rationed by the exact same fraction $S/D$.
-* **Merchant Institutional Kinds:**
-  * `Private`: Owned by origin-market Capitalists; dividends paid into the origin market's capitalist owner pool.
-  * `Commercial`: Owned by a specialized Merchant POP profession; profits accrue directly to merchant households.
-  * `Chartered`: State-chartered company; profits pay directly into the national treasury.
-* **Per-Route Tuning:** Each `[[route]]` sets its own `margin` and flow speed `k`.
-* **Tariff Base:** Ad-valorem on the origin price (yesterday's price in market $A$), known when the goods are bought.
-* **Entry and Exit:** Merchants are founded when a route's gap persists and its merchants' cash can't use its capacity (funded like new producers, D27; Chartered only by command), and wound up when loss-making. A scenario may seed starting merchants per route, so trade works from day 1.
-* **Precomputed Trade Horizon:** Sparse route matrix computed via per-source Dijkstra over retention $\prod(1 - \tau) \ge \text{min\_retention}$. Avoids storing a dense $3000 \times 3000$ matrix ($72\text{ MB}$) in memory.
-
-### 2. Capital Investment & Construction (D27, Proposed)
-* **Decentralized Expansion:** Profitable producers reserve cash ahead of D6 dividend distribution to fund expansion projects of size `step` worker slots.
-* **Three Gating Conditions:** Project initiates only when:
-  1. *Profitable:* Smoothed value added $\bar{V}$ exceeds wage bill by required margin.
-  2. *Labour Available:* Unemployed workforce in province labour pool $\ge \text{step}$.
-  3. *Liquid:* Retained cash above restart and dividend reserves covers construction costs at current prices.
-* **Physical Construction Demand:** Daily buy orders are placed for intermediate inputs (tools, timber, steel). Completed construction increases `capacity += step` and consumes the delivered goods.
-* **Founding New Producers:** Provinces with persistent unemployment can establish unbuilt factory types using funds from the Capitalist Investment Pool (or state subsidies).
-* **Depreciation:** Capacity unused for `idle_months_before_shrink` shrinks by `step` to prevent zombie factories.
-
-### 3. Economic Unrest (D28, Proposed)
-* **Strikes:** When POP militancy exceeds `strike_threshold`, effective labour supply is scaled down:
-  $$\text{effective\_workers} = \text{size} \times (1 - \text{strike\_rate} \times (\text{militancy} - \text{threshold}))$$
-  Reduces production volume and drives up prices, creating natural economic feedback before political institutions exist.
-* **Riots:** If province-wide population-weighted militancy exceeds `riot_threshold` at month end:
-  * A percentage of local producer output stock is destroyed (destroying goods, never money).
-  * The national treasury pays an emergency security/repression transfer to local POPs, providing temporary militancy relief.
+- **Tick order:** D4 is amended to the order in [DATA_MODEL_M5_M6.md](DATA_MODEL_M5_M6.md), "Tick order" (arrival before labour; riots after politics; investment before demographics).
+- **1. Inter-market trade:** rules in [D17](DECISIONS.md#d17-inter-market-trade-routes-merchants-and-tariffs); mechanism, the owner's answers and acceptance tests in [TRADE.md](TRADE.md). In brief: merchants arbitrage price gaps with one day of transit, three ownership kinds, per-route tuning, tariffs on the origin price, dynamic entry and exit with seeded merchants, a sparse trade horizon.
+- **2. Capital investment and construction:** rules in [D27](DECISIONS.md#d27-capital-investment-and-capacity-expansion); mechanism in [INVESTMENT.md](INVESTMENT.md). In brief: producers expand from retained earnings, buying real construction goods; new producers are founded by capitalists or the state; idle capacity shrinks.
+- **3. Economic unrest:** rules in [D28](DECISIONS.md#d28-economic-unrest-strikes-and-riots); mechanism in [REBELLIONS.md](REBELLIONS.md). In brief: strikes cut labour supply above a threshold; riots destroy stock and trigger an automatic security transfer. **Open (D28):** how strikers are paid, and whether the riot transfer relieves militancy directly.
+- **Data model:** [DATA_MODEL_M5_M6.md](DATA_MODEL_M5_M6.md).
 
 ---
 

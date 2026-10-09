@@ -47,46 +47,14 @@ Milestone 6 builds directly on the global trade and industrial expansion deliver
 
 ## 🏛️ System Design & Decisions
 
-```mermaid
-flowchart TD
-    subgraph Politics_Flow [Political & Societal Feedback Loop]
-        Material["Material Conditions: Wages, Needs, Taxation"] --> Clout["Interest Group Alignment & Clout"]
-        Literacy["Education & Literacy"] --> Con["Consciousness & Reform Agitation"]
-        Con --> Parliament["Legislative Reforms (Voting, Welfare, Labor)"]
-        Parliament --> Laws["National Laws & Regulations"]
-        Laws --> Workforce["Effective Workforce & Tax Brackets"]
-        Workforce --> Material
-        Unmet["Unmet Demands + High Militancy"] --> Revolt["Armed Revolution / Stateless Markets"]
-    end
-```
+This milestone's rules live in their decisions and designs; this section only says where. Each is *Proposed* until accepted.
 
-### 1. Workforce Structure & Strata Mobility (D29, Proposed)
-* **Tripartite POP Split:** Each POP row tracks `workforce_male`, `workforce_female`, and `dependents`.
-* **Labor Participation:** National laws determine what fraction of `dependents` (child labor) and `workforce_female` are available for employment.
-* **Strata Promotion:** At month end, deterministic fractional promotion moves workers up or down the social ladder based on literacy thresholds and relative wage expectations:
-  $$\text{promoted} = \lfloor \text{workforce} \times \text{promotion\_rate}(\text{literacy}, \Delta w) \rfloor$$
-  Moving POP members carry their pro-rata share of cash under the D7 largest-remainder rule.
-
-### 2. Endogenous Inside Money (D30, Proposed)
-* **Double-Entry Balance Sheets:** Banks maintain deposit liabilities and loan assets.
-* **Commercial Credit:** Expanding producers with positive net worth can borrow up to a credit limit to finance project construction.
-* **Sovereign Debt:** When government spending exceeds revenue, the treasury issues bonds bearing a coupon interest rate. Who buys them, banks only or capitalist POPs too, is open (D30; DATA_MODEL_M5_M6.md, "Open questions").
-* **Default:** If a nation or borrower defaults, the debt is written off: borrower liabilities drop and creditor assets drop by the exact same amount. Net worth is destroyed, but zero cash is deleted from the outside money supply (preserving D5).
-
-### 3. Interest Groups & Reforms (D31, Proposed)
-* **Clout Weighting:** POPs align with interest groups based on material status, through profession weights in data (D31). A starting mapping, which needs new professions (clergy, clerks, merchants; open in DATA_MODEL_M5_M6.md):
-  * Capitalists & Merchants $\to$ **Industrialists**
-  * Craftsmen & Labourers $\to$ **Trade Unions**
-  * Aristocrats & Farmers $\to$ **Landowners / Agrarians**
-  * Clergy $\to$ **The Devout**
-  * Clerks & Literate POPs $\to$ **Intelligentsia**
-* **Political Agitation:** Clout determines parliamentary voting power. High consciousness generates pressure for specific reforms (e.g. Trade Unions demanding minimum wage and 8-hour workdays; Intelligentsia demanding compulsory schooling).
-* **Enacting Reforms:** Enacting reforms placates target interest groups and reduces consciousness/militancy, but angers opposing entrenched elites.
-
-### 4. Revolutions & Secessions (D32, Proposed)
-* **Rebellion Threshold:** When a market's militancy exceeds critical thresholds, a rebellion triggers probabilistically using `rng::Stream::REBELLION` keyed by `(seed, day, market)`. Revolts take whole markets, because nation ownership is per market (D15).
-* **Breakaway Markets:** A revolting market becomes stateless, withholding all tax revenues from the central government. Market ownership becomes saved state, and a revolt record keeps the nation to restore and the demanded reform (D32).
-* **Resolution:** Revolts stand down if the government enacts the demanded legislative reform, or expire after a protracted period of attrition (until direct military suppression in Milestone 7).
+- **The politics loop:** [DATA_MODEL_M5_M6.md](DATA_MODEL_M5_M6.md), "The politics loop".
+- **1. Workforce structure and strata mobility:** rules in [D29](DECISIONS.md#d29-workforce-composition-and-strata-mobility); mechanism in [POP_SYSTEM.md](POP_SYSTEM.md) ("Workforce Composition", "Future: dependents and births"). In brief: working men, working women and dependents with a derived `size`; labour laws set the effective workforce; births and child deaths follow income, superseding D26; promotion and demotion as deterministic flows.
+- **2. Endogenous inside money:** rules in [D30](DECISIONS.md#d30-endogenous-inside-money-and-sovereign-debt); mechanism in [MACROECONOMICS.md](MACROECONOMICS.md). In brief: banks create loans and deposits together under D5's invariant; producers borrow for projects; treasuries issue bonds. **Open (D30):** bank granularity, means of payment, who holds bonds.
+- **3. Interest groups and reforms:** rules in [D31](DECISIONS.md#d31-interest-groups-consciousness-and-legislative-reforms); mechanism in [POLITICS_SYSTEM.md](POLITICS_SYSTEM.md). In brief: consciousness beside militancy; clout derived from profession weights in data; laws change by parliamentary vote (`PassReform`). **Open (D31):** the new professions and their groups, and how group approval acts on militancy (against D19).
+- **4. Revolutions:** rules in [D32](DECISIONS.md#d32-political-revolutions-and-breakaway-markets); mechanism in [REBELLIONS.md](REBELLIONS.md). In brief: seeded revolts take markets, which become stateless until the demanded reform passes or the revolt times out; market ownership becomes saved state.
+- **Data model:** [DATA_MODEL_M5_M6.md](DATA_MODEL_M5_M6.md).
 
 ---
 
@@ -100,7 +68,7 @@ flowchart TD
 | **M6-4** | **`Banks` table & commercial credit** | — | Bank SoA table; simultaneous asset/liability creation for loans and deposits; SFC balance sheet invariant tests. |
 | **M6-5** | **Sovereign debt & treasury bonds** | M6-4 | Deficit financing via bond issuance; coupon interest payments to bondholders; debt ceiling validation. |
 | **M6-6** | **Financial distress & default write-offs** | M6-5 | Debt default mechanics; symmetrical balance sheet write-downs; wealth destruction without cash destruction. |
-| **M6-7** | **POP consciousness & interest group clout** | M6-1 | Add `consciousness` to `Pops`; calculate political clout across the 6 major interest groups from POP attributes. |
+| **M6-7** | **POP consciousness & interest group clout** | M6-1 | Add `consciousness` to `Pops`; calculate political clout across the interest groups defined in data (D31) from POP attributes. |
 | **M6-8** | **Legislative reform system** | M6-7 | Voting franchise, labor laws, social welfare, and education laws; command `PassReform`; interest group approval and anger. |
 | **M6-9** | **Stochastic rebellions & breakaway markets** | M6-8 | Probabilistic rebellion triggering via `rng::Stream::REBELLION`, keyed by market; market ownership as hashed, saved state with a revolt record (nation to restore, demanded reform); breakaway stateless markets; tax revenue cutoff and reconciliation. |
 | **M6-10** | **Wire protocol additions (`pax_protocol`)** | M6-5, M6-8 | Add `PoliticsSummary`, `InterestGroupTable`, `BankSummary`, `PassReformCommand`, and `IssueBondsCommand` to FlatBuffers schemas. |
@@ -114,15 +82,14 @@ flowchart TD
 ## 🎯 Definition of Done
 
 1. **Stock-Flow Consistent Inside Money:**
-   * Commercial loans, bank deposits, and sovereign bonds maintain double-entry conservation on every tick:
-     $$\sum \text{financial assets} - \sum \text{financial liabilities} = \sum \text{outside money}$$
+   * Commercial loans, bank deposits, and sovereign bonds keep D5's invariant on every tick (D30).
    * Governments can finance sustained deficits through debt issuance, and debt default writes down claims without altering total outside money.
 2. **Dynamic Social Mobility:**
    * POPs promote into literate and skilled professions (Craftsmen, Clerks, Capitalists) as literacy rises and factory wages provide an attractive premium.
    * Compulsory education laws measurably accelerate literacy growth at the cost of short-term child labor output shocks.
 3. **Responsive Politics & Interest Groups:**
    * Industrialization organically shifts national political power from traditional Landowners towards rising Industrialists and Trade Unions.
-   * Enacting social and political reforms appeases agitated interest groups, lowering national militancy and consciousness.
+   * Enacting a reform a group demands raises that group's approval; how approval acts on militancy and consciousness is settled in D31 before this item is tested (open against D19).
 4. **Revolutionary Consequences:**
    * Extreme unrest triggers breakaway rebellions that deprive the national treasury of regional tax revenue until political settlement or timeout.
 5. **Authoritative Client & Multiplayer Controls:**
