@@ -99,7 +99,7 @@ Rows are stored grouped by market: the loader sorts them stably. The market's pa
 Orders and offers are **not** stored in state: they exist only during the market phase. The old `MarketNode { buy_orders: HashMap, … }` design is retired, because HashMap iteration order is non-deterministic (D3).
 
 ### *Planned tables*
-- Tariffs on `Nations` (trade proposal, [#18](https://github.com/thomasclarkpersonal-sketch/Iron-and-Blood/pull/18)).
+- Tariffs on `Nations` (planned, D17).
 - Laws on `Nations` (needs a decision, none drafted).
 - `Accounts` for inside money: deposits, loans and bonds as asset/liability pairs (D5; needs a decision, none drafted).
 - `Shares` (owner POP/nation → producer; raised by the investment proposal, [#21](https://github.com/thomasclarkpersonal-sketch/Iron-and-Blood/pull/21), question 1).

@@ -37,7 +37,7 @@ Mechanism (module layouts, file formats, flag names, step-by-step algorithms) be
 | [D14](#d14-market-hierarchy-and-inter-market-trade) | Market hierarchy | Accepted (principle), M2 |
 | [D15](#d15-nations-treasuries-income-tax-and-transfers) | Nations and fiscal policy | Accepted (M2-1) |
 | [D16](#d16-government-consumption) | Government consumption | Accepted (M2-2) |
-| [D17](#d17-inter-market-trade-routes-merchants-and-tariffs) | Inter-market trade and merchants | Proposed (M5) |
+| [D17](#d17-inter-market-trade-routes-merchants-and-tariffs) | Inter-market trade and merchants | Accepted (2026-10-10, by the maintainer for M5) |
 | [D18](#d18-labour-mobility) | Labour mobility | Accepted (M2-4) |
 | [D19](#d19-militancy) | Militancy | Accepted (M2-5) |
 | [D20](#d20-migration-within-a-market) | Migration within a market | Accepted (M2-6) |
@@ -47,8 +47,8 @@ Mechanism (module layouts, file formats, flag names, step-by-step algorithms) be
 | [D24](#d24-multiplayer-authority) | Multiplayer authority | Accepted (M4-0) |
 | [D25](#d25-occupational-migration-within-a-market) | Occupational migration within a market | Accepted (M2 fix) |
 | [D26](#d26-births-follow-employment-band-aid) | Births follow employment (band-aid) | Accepted, temporary |
-| [D27](#d27-capital-investment-and-capacity-expansion) | Capital investment | Proposed (M5) |
-| [D28](#d28-economic-unrest-strikes-and-riots) | Economic unrest: strikes and riots | Proposed (M5) |
+| [D27](#d27-capital-investment-and-capacity-expansion) | Capital investment | Accepted (2026-10-10, by the maintainer for M5) |
+| [D28](#d28-economic-unrest-strikes-and-riots) | Economic unrest: strikes and riots | Accepted (2026-10-10, by the maintainer for M5) |
 | [D29](#d29-workforce-composition-and-strata-mobility) | Workforce and strata mobility | Proposed (M6) |
 | [D30](#d30-endogenous-inside-money-and-sovereign-debt) | Banking and sovereign debt | Proposed (M6) |
 | [D31](#d31-interest-groups-consciousness-and-legislative-reforms) | Politics and legislative reforms | Proposed (M6) |
@@ -498,7 +498,7 @@ The state → national → sphere → global roll-up in the old ECONOMY_SYSTEM w
 
 ## D17. Inter-market trade: routes, merchants and tariffs
 
-**Proposed (M5).** Mechanism: [TRADE.md](TRADE.md); data model: [DATA_MODEL_M5_M6.md](DATA_MODEL_M5_M6.md); tasks: [MILESTONE_5.md](MILESTONE_5.md). The owner's answers to the design review (2026-10-09) are recorded in TRADE.md.
+**Accepted (2026-10-10, by the maintainer for M5).** Mechanism: [TRADE.md](TRADE.md); data model: [DATA_MODEL_M5_M6.md](DATA_MODEL_M5_M6.md); tasks: [MILESTONE_5.md](MILESTONE_5.md). The owner's answers to the design review (2026-10-09) are recorded in TRADE.md.
 
 - **Rule:** goods move between markets only through **merchants**, ordinary D1 buyers in the origin and sellers in the destination, so every market still clears by itself and scarce exports are rationed pro rata with local buyers (D14).
 - **One day of transit:** goods bought on day T land on day T+1. That keeps markets independent within a tick, so they clear in parallel with no cross-market locks.
@@ -510,11 +510,11 @@ The state → national → sphere → global roll-up in the old ECONOMY_SYSTEM w
 - **Routes** are precomputed at load and when infrastructure changes, as a sparse **trade horizon** (pairs whose retention `Π(1 − τ)` is at least `min_retention`), never pathfinding in the tick and never a dense all-pairs matrix.
 - **Invariants:** merchant cash is in `World::total_money` and the state hash; goods in transit and in merchant stock change exactly by purchases − sales − iceberg loss.
 - **Amends:** D4 (arrival step and merchant orders; the tick order in DATA_MODEL_M5_M6.md), D14 rule 5 (a sparse horizon instead of a dense matrix), D5 and D6 (merchant cash; merchant dividends), D21 and D24 (`SetTariff` and its validation).
-- **Open** (DATA_MODEL_M5_M6.md, "Open questions"): whether routes take their bottleneck link's capacity or share link capacity pro rata.
+- **Route capacity** (the maintainer, 2026-10-10): each route takes its bottleneck link's capacity (routes do not share link capacity pro rata).
 
 ## D27. Capital investment and capacity expansion
 
-**Proposed (M5).** Mechanism: [INVESTMENT.md](INVESTMENT.md); data model: [DATA_MODEL_M5_M6.md](DATA_MODEL_M5_M6.md); tasks: [MILESTONE_5.md](MILESTONE_5.md).
+**Accepted (2026-10-10, by the maintainer for M5).** Mechanism: [INVESTMENT.md](INVESTMENT.md); data model: [DATA_MODEL_M5_M6.md](DATA_MODEL_M5_M6.md); tasks: [MILESTONE_5.md](MILESTONE_5.md).
 
 - **Problem:** producer capacity is fixed at load, so output can never grow beyond what a scenario starts with, and capital has no productive use. (The unemployment drift once blamed on this was a profession/province mismatch, fixed by D25; MILESTONE_2, "Measured state".)
 - **Rule, expansion:** a producer starts a project from **retained earnings** only when it is profitable (smoothed value added above the wage bill by a margin), its labour pool has unemployed workers for the new slots, and its cash covers the project above its reserves. The budget is reserved **before** dividends.
@@ -526,13 +526,14 @@ The state → national → sphere → global roll-up in the old ECONOMY_SYSTEM w
 
 ## D28. Economic unrest: strikes and riots
 
-**Proposed (M5).** Mechanism: [REBELLIONS.md](REBELLIONS.md); tasks: [MILESTONE_5.md](MILESTONE_5.md).
+**Accepted (2026-10-10, by the maintainer for M5).** Mechanism: [REBELLIONS.md](REBELLIONS.md); tasks: [MILESTONE_5.md](MILESTONE_5.md).
 
 - **Rule, strikes (deterministic, continuous):** a POP whose militancy exceeds `strike_threshold` supplies less labour, `size × (1 − strike_rate × (militancy − threshold))`, so output falls and prices rise.
 - **Rule, riots (deterministic, monthly):** a province whose population-weighted militancy exceeds `riot_threshold` loses a share of its producers' output stock (goods, never money, D5), and its nation's treasury pays a security transfer to its POPs, **automatically**: M5 has no repression command.
 - **Order:** riots run at month end **after** politics, on this month's militancy.
 - Revolts are M6 (D32).
-- **Open:** how striking workers are paid (the pool's wages split by its working members, or strikes cost the strikers nothing), and whether the riot transfer relieves militancy directly (today it acts only through life needs).
+- **Striking workers' pay** (the maintainer, 2026-10-10): striking workers forgo wages. The pool's wages are split, by `alloc::allocate`, among its working (non-striking) members only (amends D6).
+- **Riot relief** (the maintainer, 2026-10-10): the riot security transfer does **not** relieve militancy directly. It acts only through life needs, as today, so D19 is unchanged.
 - **Amends:** D6 (striking workers' pay, once settled), D19 (the riot transfer's militancy relief, once settled), D4 (riots after politics).
 
 ## D29. Workforce composition and strata mobility
