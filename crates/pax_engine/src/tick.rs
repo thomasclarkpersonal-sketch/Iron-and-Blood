@@ -55,6 +55,9 @@ pub struct DayReport {
     pub moved: u64,
     /// People who moved to another province of their market today (month end only, D20).
     pub migrated: u64,
+    /// People who moved to another profession in another province of their market
+    /// today (month end only, D25).
+    pub retrained: u64,
     /// POP rows removed by month-end compaction (D7).
     pub compacted: usize,
     pub total_money: Fixed,
@@ -87,7 +90,7 @@ fn step_systems(world: &mut World) -> DayReport {
     let outcome = market::clear_markets(world, &layout);
     let payouts = firms::pay_wages_and_dividends(world, &layout, &outcome.revenue, &outcome.input_cost);
     let transfers = government::pay_transfers(world, &layout);
-    let (mut moved, mut migrated, mut compacted) = (0, 0, 0);
+    let (mut moved, mut migrated, mut retrained, mut compacted) = (0, 0, 0, 0);
     let mut militancy = outcome.militancy;
     if demographics::is_month_end(world) {
         moved = mobility::reassign_workers(world, &layout, &labour);
@@ -96,6 +99,9 @@ fn step_systems(world: &mut World) -> DayReport {
         // demographics, compaction) do not read the layout.
         let regrouped = world.pop_layout();
         migrated = mobility::migrate_within_markets(world, &regrouped);
+        // Migration may have appended rows too: a fresh layout again (D25).
+        let regrouped = world.pop_layout();
+        retrained = mobility::retrain_within_markets(world, &regrouped);
         politics::update_militancy(world);
         demographics::update_population(world);
         compacted = world.compact_pops();
@@ -119,6 +125,7 @@ fn step_systems(world: &mut World) -> DayReport {
         government_spending: outcome.government_spending,
         moved,
         migrated,
+        retrained,
         compacted,
         goods: outcome.goods,
         iterations: outcome.iterations,

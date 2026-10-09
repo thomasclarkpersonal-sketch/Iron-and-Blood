@@ -20,7 +20,7 @@
 use crate::alloc::allocate_raw;
 use crate::fixed::Fixed;
 use crate::layout::{PopLayout, pool_count, pool_key};
-use crate::systems::labor::LabourReport;
+use crate::systems::labor::{LabourReport, Pools};
 use crate::world::World;
 
 /// A planned flow of `n` people from identity `from` to identity `to`, each a
@@ -54,22 +54,42 @@ pub fn reassign_workers(world: &mut World, layout: &PopLayout, labour: &[LabourR
             pools.iter().filter(|p| p.jobs > p.workforce).map(|p| (p.profession, p.jobs - p.workforce)).collect();
         vacancies.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
         for source in pools.iter().filter(|p| p.unemployed() > 0) {
-            let mut movers = Fixed::from_int(source.unemployed() as i64).mul(rate).floor_int() as u64;
-            for (dest, open) in vacancies.iter_mut() {
-                if movers == 0 {
-                    break;
-                }
-                if *dest == source.profession || *open == 0 {
-                    continue;
-                }
-                let n = movers.min(*open);
-                moves.push(Move { from: (province, source.profession as usize), to: (province, *dest as usize), n });
-                *open -= n;
-                movers -= n;
-            }
+            let movers = Fixed::from_int(source.unemployed() as i64).mul(rate).floor_int() as u64;
+            fill(
+                movers,
+                &mut vacancies,
+                |dest| dest != source.profession,
+                |dest, n| {
+                    moves.push(Move { from: (province, source.profession as usize), to: (province, dest as usize), n });
+                },
+            );
         }
     }
     execute_moves(world, layout, &moves)
+}
+
+/// Sends `movers` people to `vacancies` in their order (each flow sorts them, largest
+/// first), skipping destinations `eligible` refuses and never going beyond a
+/// destination's vacancies, which shrink as they fill. `push` records each move. The
+/// one allocation rule D18, D20 and D25 share.
+fn fill<D: Copy>(
+    mut movers: u64,
+    vacancies: &mut [(D, u64)],
+    eligible: impl Fn(D) -> bool,
+    mut push: impl FnMut(D, u64),
+) {
+    for (dest, open) in vacancies.iter_mut() {
+        if movers == 0 {
+            break;
+        }
+        if !eligible(*dest) || *open == 0 {
+            continue;
+        }
+        let n = movers.min(*open);
+        push(*dest, n);
+        *open -= n;
+        movers -= n;
+    }
 }
 
 /// Executes planned moves, in order, with the D7 split rules. Returns the
@@ -140,16 +160,7 @@ pub fn migrate_within_markets(world: &mut World, layout: &PopLayout) -> u64 {
     }
     let profs = world.defs.professions.len();
     let provinces = world.geography.province_count();
-    let mut workforce = vec![0u64; provinces * profs];
-    for i in 0..world.pops.len() {
-        workforce[world.pops.province[i] as usize * profs + world.pops.profession[i] as usize] +=
-            world.pops.size[i] as u64;
-    }
-    let mut jobs = vec![0u64; provinces * profs];
-    for i in 0..world.producers.len() {
-        let worker = world.defs.producer_types[world.producers.kind[i] as usize].worker;
-        jobs[world.producers.province[i] as usize * profs + worker] += world.producers.capacity[i] as u64;
-    }
+    let pools = Pools::count(world);
     let is_worker = world.defs.worker_professions();
     let mut moves = Vec::new();
     for market in 0..world.geography.market_count() {
@@ -159,28 +170,71 @@ pub fn migrate_within_markets(world: &mut World, layout: &PopLayout) -> u64 {
             continue;
         }
         for c in (0..profs).filter(|&c| is_worker.contains(c)) {
-            let key = |p: u32| p as usize * profs + c;
-            let mut vacancies: Vec<(u32, u64)> = members
-                .iter()
-                .filter(|&&p| jobs[key(p)] > workforce[key(p)])
-                .map(|&p| (p, jobs[key(p)] - workforce[key(p)]))
-                .collect();
+            let mut vacancies: Vec<(u32, u64)> =
+                members.iter().filter_map(|&p| pools.vacancy(world, p, c).map(|v| (p, v))).collect();
             vacancies.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
             for &source in &members {
-                let surplus = workforce[key(source)].saturating_sub(jobs[key(source)]);
-                let mut movers = Fixed::from_int(surplus as i64).mul(rate).floor_int() as u64;
-                for (dest, open) in vacancies.iter_mut() {
-                    if movers == 0 {
-                        break;
-                    }
-                    if *dest == source || *open == 0 {
-                        continue;
-                    }
-                    let n = movers.min(*open);
-                    moves.push(Move { from: (source, c), to: (*dest, c), n });
-                    *open -= n;
-                    movers -= n;
-                }
+                let movers = Fixed::from_int(pools.surplus(world, source, c) as i64).mul(rate).floor_int() as u64;
+                fill(
+                    movers,
+                    &mut vacancies,
+                    |dest| dest != source,
+                    |dest, n| {
+                        moves.push(Move { from: (source, c), to: (dest, c), n });
+                    },
+                );
+            }
+        }
+    }
+    execute_moves(world, layout, &moves)
+}
+
+/// Month-end occupational migration within a market (D25).
+///
+/// D18 changes profession inside a province, and D20 changes province inside a
+/// profession, so neither can move an unemployed farmer of one province into a
+/// mine of another. This flow does exactly that, after both have run: for each
+/// market, every worker pool with a surplus (workforce over jobs) sends
+/// `⌊surplus × occupational_migration_rate⌋` people to vacancies of **another
+/// profession in another province** of the same market. Destinations are taken by
+/// vacancy (largest first), then province, then profession; none beyond its
+/// vacancies. Movers take their cash under the D7 split rules, through the same
+/// `execute_moves` as D18 and D20. People and money are conserved. `layout` must be
+/// current (the tick passes a fresh one). Returns the number of people moved.
+pub fn retrain_within_markets(world: &mut World, layout: &PopLayout) -> u64 {
+    let rate = world.defs.rules.demographics.occupational_migration_rate;
+    if !rate.is_positive() {
+        return 0;
+    }
+    let profs = world.defs.professions.len();
+    let provinces = world.geography.province_count();
+    let pools = Pools::count(world);
+    let is_worker = world.defs.worker_professions();
+    let mut moves = Vec::new();
+    for market in 0..world.geography.market_count() {
+        let members: Vec<u32> =
+            (0..provinces as u32).filter(|&p| world.geography.province_market[p as usize] as usize == market).collect();
+        if members.len() < 2 {
+            continue;
+        }
+        // Every vacancy in the market, shared by all of its sources.
+        let mut vacancies: Vec<((u32, usize), u64)> = members
+            .iter()
+            .flat_map(|&p| (0..profs).filter(|&c| is_worker.contains(c)).map(move |c| (p, c)))
+            .filter_map(|(p, c)| pools.vacancy(world, p, c).map(|v| ((p, c), v)))
+            .collect();
+        vacancies.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+        for &source in &members {
+            for c in (0..profs).filter(|&c| is_worker.contains(c)) {
+                let movers = Fixed::from_int(pools.surplus(world, source, c) as i64).mul(rate).floor_int() as u64;
+                fill(
+                    movers,
+                    &mut vacancies,
+                    |(p, dc)| p != source && dc != c,
+                    |to, n| {
+                        moves.push(Move { from: (source, c), to, n });
+                    },
+                );
             }
         }
     }

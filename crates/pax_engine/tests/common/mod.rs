@@ -65,6 +65,8 @@ pub fn rules() -> Rules {
             starvation_rate: d("0.3"),
             mobility_rate: d("0.2"),
             migration_rate: d("0.1"),
+            occupational_migration_rate: Fixed::ZERO,
+            births_need_employment: false,
         },
     }
 }
@@ -100,7 +102,14 @@ pub fn random_world(seed: u64) -> World {
                 input_spend_rate: r.fixed(1_000_000),
             })
             .collect(),
-        rules: rules(),
+        // Every month-end flow and the births band-aid on, so the conservation and
+        // determinism properties cover them (D25, D26).
+        rules: {
+            let mut r = rules();
+            r.demographics.occupational_migration_rate = d("0.1");
+            r.demographics.births_need_employment = true;
+            r
+        },
     };
     let markets = 1 + r.below(3) as usize;
     let provinces = markets + r.below(3) as usize;

@@ -1,4 +1,5 @@
-//! Monthly labour mobility (DECISIONS.md D18).
+//! Monthly labour mobility (DECISIONS.md D18), migration (D20) and occupational
+//! migration (D25).
 
 mod common;
 
@@ -7,7 +8,7 @@ use std::sync::Arc;
 use common::{d, random_world, rules};
 use pax_engine::defs::{Defs, GoodDef, ProducerTypeDef, ProfessionDef};
 use pax_engine::systems::labor::assign_employment;
-use pax_engine::systems::mobility::{migrate_within_markets, reassign_workers};
+use pax_engine::systems::mobility::{migrate_within_markets, reassign_workers, retrain_within_markets};
 use pax_engine::world::{Geography, NewProducer};
 use pax_engine::{Fixed, World};
 
@@ -160,6 +161,86 @@ fn migration_conserves_people_and_money_in_random_worlds() {
         }
     }
     assert!(moves > 0, "random worlds should exercise migration");
+}
+
+/// Two provinces of one market, D25's case: 1,000 farmers and 100 farm jobs in
+/// province 0, 300 labourer jobs and nobody in province 1. D18 can't help (no other
+/// jobs in province 0), nor can D20 (no farm jobs in province 1).
+fn farm_and_camp_world(rate: &str) -> World {
+    let mut world = two_province_world();
+    world.producers.kind[2] = 1; // province 1's 300 jobs hire labourers, not farmers
+    let mut defs = (*world.defs).clone();
+    defs.rules.demographics.occupational_migration_rate = d(rate);
+    world.defs = Arc::new(defs);
+    world
+}
+
+#[test]
+fn surplus_workers_retrain_for_vacancies_elsewhere_in_their_market() {
+    let mut world = farm_and_camp_world("0.1");
+    let (people, money) = (world.population(), world.total_money());
+    let layout = world.pop_layout();
+    let labour = assign_employment(&mut world, &layout.labour);
+    assert_eq!(reassign_workers(&mut world, &layout, &labour), 0, "no other jobs in province 0: D18 can't help");
+    let layout = world.pop_layout();
+    assert_eq!(migrate_within_markets(&mut world, &layout), 0, "no farm jobs elsewhere: D20 can't help");
+    let layout = world.pop_layout();
+    let moved = retrain_within_markets(&mut world, &layout);
+    // Surplus 900 farmers × 0.1 = 90, well within 300 vacancies.
+    assert_eq!(moved, 90);
+    let dest = (0..world.pops.len()).find(|&i| world.pops.province[i] == 1).expect("a row in province 1");
+    assert_eq!(world.pops.profession[dest], 1, "movers take the vacancy's profession");
+    assert_eq!(world.pops.size[dest], 90);
+    assert_eq!(world.pops.cash[dest], d("9"), "movers take 90/1000 of the cash");
+    assert_eq!((world.population(), world.total_money()), (people, money));
+}
+
+#[test]
+fn retraining_needs_another_province_and_another_profession() {
+    // Same province only (D18's case): nothing to do for D25.
+    let mut world = mismatched_world();
+    let mut defs = (*world.defs).clone();
+    defs.rules.demographics.occupational_migration_rate = d("0.1");
+    world.defs = Arc::new(defs);
+    let layout = world.pop_layout();
+    assert_eq!(retrain_within_markets(&mut world, &layout), 0, "one province: D18's job");
+    // Same profession elsewhere (D20's case): nothing for D25 either.
+    let mut world = two_province_world();
+    let mut defs = (*world.defs).clone();
+    defs.rules.demographics.occupational_migration_rate = d("0.1");
+    world.defs = Arc::new(defs);
+    let layout = world.pop_layout();
+    assert_eq!(retrain_within_markets(&mut world, &layout), 0, "same profession: D20's job");
+    // Rate 0 (mini_valley's frozen rules): off.
+    let mut world = farm_and_camp_world("0");
+    let layout = world.pop_layout();
+    assert_eq!(retrain_within_markets(&mut world, &layout), 0);
+}
+
+#[test]
+fn retraining_never_crosses_markets() {
+    let mut world = farm_and_camp_world("0.1");
+    world.geography.market_keys.push("other".into());
+    world.geography.province_market[1] = 1;
+    let goods = world.defs.good_count();
+    world.markets.price.extend(std::iter::repeat_n(Fixed::ONE, goods));
+    let layout = world.pop_layout();
+    assert_eq!(retrain_within_markets(&mut world, &layout), 0);
+}
+
+#[test]
+fn retraining_conserves_people_and_money_in_random_worlds() {
+    let mut moves = 0;
+    for seed in 4300..4400 {
+        let mut world = random_world(seed);
+        for _ in 0..3 {
+            let (people, money) = (world.population(), world.total_money());
+            let layout = world.pop_layout();
+            moves += retrain_within_markets(&mut world, &layout);
+            assert_eq!((world.population(), world.total_money()), (people, money), "seed {seed}");
+        }
+    }
+    assert!(moves > 0, "random worlds should exercise occupational migration");
 }
 
 #[test]

@@ -98,3 +98,47 @@ pub fn unemployment(defs: &crate::defs::Defs, labour: &[LabourReport]) -> (u64, 
 pub fn pool_unemployment(worker: &WorkerProfessions, pool: &LabourReport) -> (u64, u64) {
     if worker.contains(pool.profession as usize) { (pool.unemployed(), pool.workforce) } else { (0, 0) }
 }
+
+/// Workforce and jobs of every labour pool `(province, profession)` as the tables
+/// stand now, by [`pool_key`]. Not state (D7): counted from the POP and producer
+/// tables whenever a month-end rule needs them after earlier flows moved people
+/// (D20 and D25 in `mobility`, D26's births in `demographics`). Callers ask by
+/// `(province, profession)`, never by index, so the key is `layout`'s alone.
+pub(crate) struct Pools {
+    workforce: Vec<u64>,
+    jobs: Vec<u64>,
+}
+
+impl Pools {
+    pub(crate) fn count(world: &World) -> Pools {
+        let mut workforce = vec![0u64; pool_count(world)];
+        for i in 0..world.pops.len() {
+            workforce[pool_key(world, world.pops.province[i], world.pops.profession[i] as usize)] +=
+                world.pops.size[i] as u64;
+        }
+        let mut jobs = vec![0u64; pool_count(world)];
+        for i in 0..world.producers.len() {
+            let worker = world.defs.producer_types[world.producers.kind[i] as usize].worker;
+            jobs[pool_key(world, world.producers.province[i], worker)] += world.producers.capacity[i] as u64;
+        }
+        Pools { workforce, jobs }
+    }
+
+    /// `(workforce, jobs)` of a pool.
+    pub(crate) fn of(&self, world: &World, province: u32, profession: usize) -> (u64, u64) {
+        let k = pool_key(world, province, profession);
+        (self.workforce[k], self.jobs[k])
+    }
+
+    /// People beyond the pool's jobs (0 if none).
+    pub(crate) fn surplus(&self, world: &World, province: u32, profession: usize) -> u64 {
+        let (workforce, jobs) = self.of(world, province, profession);
+        workforce.saturating_sub(jobs)
+    }
+
+    /// Jobs beyond the pool's workforce, or `None` if it has no vacancy.
+    pub(crate) fn vacancy(&self, world: &World, province: u32, profession: usize) -> Option<u64> {
+        let (workforce, jobs) = self.of(world, province, profession);
+        (jobs > workforce).then(|| jobs - workforce)
+    }
+}

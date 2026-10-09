@@ -73,7 +73,7 @@ One tick is one day. Commands are applied first, in order (D21). Then systems ru
 | 3 | **Market:** input orders and sell offers → POP aggregation (map) → price discovery (reduce) → settlement | daily | `systems/market.rs` |
 | 4 | **Firms:** update value added, adjust sticky wages, pay wages and dividends, withhold income tax | daily | `systems/firms.rs` |
 | 4b | **Government:** transfers from treasuries to POPs | daily | `systems/government.rs` |
-| 5 | **Labour mobility:** unemployed workers move to vacancies in their province (D18), then migrate to other provinces of their market (D20) | month end | `systems/mobility.rs` |
+| 5 | **Labour mobility:** unemployed workers move to vacancies in their province (D18), then migrate to other provinces of their market (D20), then to another profession's vacancies elsewhere in their market (D25) | month end | `systems/mobility.rs` |
 | 6 | **Politics:** militancy (D19) | month end | `systems/politics.rs` |
 | 7 | **Demographics:** births/deaths from life-needs satisfaction, then POP row compaction (D7) | month end | `systems/demographics.rs`, `World::compact_pops` |
 

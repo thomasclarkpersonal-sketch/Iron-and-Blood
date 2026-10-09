@@ -146,6 +146,8 @@ pub struct DemographicRulesEntry {
     pub starvation_rate: Dec,
     pub mobility_rate: Dec,
     pub migration_rate: Dec,
+    pub occupational_migration_rate: Dec,
+    pub births_need_employment: bool,
 }
 
 #[derive(Deserialize)]

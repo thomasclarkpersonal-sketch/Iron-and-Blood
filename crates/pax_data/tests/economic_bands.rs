@@ -2,7 +2,8 @@
 //!
 //! Golden hashes catch *any* change; this test says whether the economy still
 //! *behaves* the same: year-20 aggregates must stay within bands around the
-//! values measured when the bands were set (2026-10-08, after D21). When a PR
+//! values measured when the bands were set (2026-10-08, after D21; unemployment,
+//! employment and population re-set 2026-10-09 after D25 and D26). When a PR
 //! changes economic behaviour on purpose (investment will lower unemployment,
 //! for instance), it updates these bands and says why.
 //!
@@ -23,6 +24,7 @@ fn two_states_year_20_aggregates_stay_in_band() {
     let (days, window) = (7200u64, 360u64);
     let (mut final_demand, mut taxes, mut gross_income) = (Fixed::ZERO, Fixed::ZERO, Fixed::ZERO);
     let mut last = None;
+    let mut employed_year_5 = None;
     for day in 0..days {
         let (report, rejected) = pax_data::step_logged(&mut world, &log);
         assert!(rejected.is_empty(), "day {day}: logged commands rejected: {rejected:?}");
@@ -30,6 +32,9 @@ fn two_states_year_20_aggregates_stay_in_band() {
             final_demand += report.household_spending + report.government_spending;
             taxes += report.payouts.taxes;
             gross_income += report.payouts.wages + report.payouts.dividends;
+        }
+        if day + 1 == 1800 {
+            employed_year_5 = Some(employed(&world.defs, &report.labour));
         }
         last = Some(report);
     }
@@ -39,13 +44,23 @@ fn two_states_year_20_aggregates_stay_in_band() {
     let gdp = final_demand.div_int(window as i64);
     assert!(gdp >= Fixed::from_int(4500) && gdp <= Fixed::from_int(5500), "GDP/day {gdp} outside [4500, 5500]");
 
-    // Unemployment among worker professions on the last day: 5%..15% (structural
-    // drift from fixed capacity; investment, INVESTMENT.md, will move this band).
+    // Unemployment among worker professions on the last day: 0.3%..2% (0.8% when
+    // set, 2026-10-09). Before D25 it drifted to 9.6%: workers could not change
+    // profession and province together, so farm unemployment and mine vacancies
+    // coexisted (MILESTONE_2, "Measured state").
     let (unemployed, workforce) = pax_engine::systems::labor::unemployment(&world.defs, &last.labour);
     assert!(
-        unemployed * 100 >= workforce * 5 && unemployed * 100 <= workforce * 15,
-        "unemployment {unemployed}/{workforce} outside 5%..15%"
+        unemployed * 1000 >= workforce * 3 && unemployed * 100 <= workforce * 2,
+        "unemployment {unemployed}/{workforce} outside 0.3%..2%"
     );
+
+    // Jobs are not lost over time: employment at year 20 is within 0.5% of year 5
+    // (−0.1% when set). The pre-D25 economy lost about 0.5% of its employment a year,
+    // ~7% over these 15 years, which showed up as real GDP falling ~9% over 20 years
+    // (the "GDP bug"). Years 1-5 still settle after the miners' year-1 famine
+    // (MILESTONE_2, "Known issues"), so the band starts at year 5.
+    let (then, now) = (employed_year_5.expect("ran past year 5"), employed(&world.defs, &last.labour));
+    assert!(now * 1000 >= then * 995, "employment fell from {then} (year 5) to {now} (year 20)");
 
     // Tax take over the final year: 11.5%..12.5% (12% policy after the day-360 command).
     let take = taxes.div(gross_income);
@@ -66,6 +81,13 @@ fn two_states_year_20_aggregates_stay_in_band() {
         "militancy {militancy} outside [0.10, 0.15]"
     );
 
-    // Population: 250k..275k (≈ 262k when set).
-    assert!((250_000..=275_000).contains(&population), "population {population} outside [250k, 275k]");
+    // Population: 245k..256k (≈ 250.5k when set, 2026-10-09; the births band-aid,
+    // D26, stops growth into unemployment, so it no longer drifts up to ≈ 262k).
+    assert!((245_000..=256_000).contains(&population), "population {population} outside [245k, 256k]");
+}
+
+/// People employed in worker professions, from a day's labour report.
+fn employed(defs: &pax_engine::defs::Defs, labour: &[pax_engine::systems::labor::LabourReport]) -> u64 {
+    let (unemployed, workforce) = pax_engine::systems::labor::unemployment(defs, labour);
+    workforce - unemployed
 }

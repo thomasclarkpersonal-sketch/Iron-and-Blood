@@ -140,6 +140,13 @@ pub struct DemographicRules {
     /// Share of a province's surplus workers of one profession who migrate each
     /// month to provinces of the same market with vacancies (D20).
     pub migration_rate: Fixed,
+    /// Share of a pool's surplus workers who move each month to vacancies of another
+    /// profession in another province of the same market (D25).
+    pub occupational_migration_rate: Fixed,
+    /// **Band-aid** (D26): a worker POP's births scale with its pool's employed
+    /// share, a stand-in for "people can't raise children without an income" until
+    /// POPs model dependents (POP_SYSTEM.md, "Future: dependents").
+    pub births_need_employment: bool,
 }
 
 /// Monthly militancy dynamics (D19).
