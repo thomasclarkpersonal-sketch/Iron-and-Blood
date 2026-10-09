@@ -10,10 +10,10 @@ The ongoing record of the run that plans and builds [Milestone 5](../../MILESTON
 | Deliverable | File | SDLC phase | Status | Last reviewed at |
 |---|---|---|---|---|
 | Project Workbook | `README.md` (this page) | 1. Initiation; kept up to date all run | approved for Initiation; kept up to date | `041d9e5` (Initiation round 2: approve) |
-| System Service Request | [01-system-service-request.md](01-system-service-request.md) | 1. Initiation | approved; corrected in Analysis round 1 (minor finding 6, [below](#initiation-round-2-minor-findings)); its count of the requirements' choices kept current in rounds 2 and 3 | `041d9e5` (Initiation round 2: approve) |
+| System Service Request | [01-system-service-request.md](01-system-service-request.md) | 1. Initiation | approved; corrected in Analysis round 1 (minor finding 6, [below](#initiation-round-2-minor-findings)); its count of the requirements' choices kept current in rounds 2 and 3, and the design's added in Design round 1 | `041d9e5` (Initiation round 2: approve) |
 | Project Charter | [02-project-charter.md](02-project-charter.md) | 1. Initiation | approved | `041d9e5` (Initiation round 2: approve) |
-| Requirements specification | [03-requirements-specification.md](03-requirements-specification.md) | 2. Analysis | revised in Analysis round 3; under review | `933bbd1` (Analysis round 2: revise) |
-| System specification | `04-system-specification.md` | 3. Design | planned | — |
+| Requirements specification | [03-requirements-specification.md](03-requirements-specification.md) | 2. Analysis | approved; corrected in Design round 1 for round 3's six minor findings ([below](#analysis-round-3-minor-findings)) | `1104c9f` (Analysis round 3: approve) |
+| System specification | [04-system-specification.md](04-system-specification.md) | 3. Design | written in Design round 1; under review | — |
 | Baseline project plan, with the project scope statement | `05-baseline-project-plan.md` | 4. Baseline plan | planned | — |
 | Task DAG: the task queue, one pull request per task | `tasks.json` | 4. Baseline plan | planned | — |
 | User and technical documentation | `06-user-and-technical-documentation.md` | 4. Baseline plan (outline); finished at close-out | planned | — |
@@ -60,6 +60,14 @@ Append-only, oldest first. Times are +08:00.
 | 2026-10-10 04:40 | **Noted for the maintainer.** A merchant's loss is its realized profit summed over each month, not `TRADE.md`'s smoothed profit, which rounding would hold a few ulps below 0 for a merchant that stopped trading; M5-4 updates `TRADE.md` ([requirements](03-requirements-specification.md#choices-this-page-makes-within-the-contract), C28) |
 | 2026-10-10 04:40 | **Noted for the maintainer.** `pax_cli bench`'s print of the first month-end and slowest days is M5-1's first commit, and the baseline plan makes M5-7 and M5-12 depend on M5-1, so every task that adds month-end work is measured against one baseline taken on `aa2133a`'s engine (C29) |
 | 2026-10-10 04:40 | **Review round.** Analysis round 3 (the requirements specification, this page, and the SSR's count of choices) submitted to the reviewer |
+| 2026-10-10 04:45 | **Review round.** Analysis round 3 at `1104c9f`: approve, with 0 blocking, 0 major and 6 minor findings. Each minor finding is handled in Design round 1 ([below](#analysis-round-3-minor-findings)) |
+| 2026-10-10 04:48 | **Planning.** Design round 1 started on `m5/plan` at `1104c9f` |
+| 2026-10-10 05:13 | **Measured.** `two_states` on `aa2133a`'s engine, through an uncommitted probe built outside the worktree from `m5/plan`: at 12% tax fed POPs settle at militancy 0.120, the miners, short of life needs, reach 0.355 (peaks, around day 630) and 0.251 (coast), and province means peak at 0.188; with both nations' income tax at 40% from day 1080 and 12% again from day 1800, province means reach 0.377 to 0.433 on day 1800 and fall to 0.141 to 0.175 by day 2520 and 0.126 to 0.153 by day 2880; on day 7200 the unemployed workers are farmers (880 in the riverlands, 740 in the dale) and craftsmen (220, 140), and the farms' smoothed value added is 1.25 times their wage bill, with 52,507 and 35,298 in cash ([system specification](04-system-specification.md#37-planned-data-values-and-the-measurements-behind-them)) |
+| 2026-10-10 05:35 | **Documents.** [System specification](04-system-specification.md): the architecture and the amended tick, the decisions the design relies on, the amended texts of D4, D5, D6, D14 rule 5, D21 and D24 (Proposed), 25 choices within the contract (S1 to S25), the physical data design, the interfaces by task, two class diagrams, the dialogue diagram with wireframes, and the test design; and the requirements specification corrected for round 3's minor findings |
+| 2026-10-10 05:35 | **Noted for the maintainer.** No new decision is needed. Every change M5 makes to an accepted decision is named by D17's, D27's or D28's Amends line, or is descriptive; each text lands in the pull request that implements it, as DECISIONS.md says, not in the plan PR, whose description lists them ([system specification](04-system-specification.md#24-choices-this-design-makes-within-the-contract), S1) |
+| 2026-10-10 05:35 | **Noted for the maintainer.** With a strike threshold of 0.3, the peaks' starving miners strike in `two_states`' famine years at today's 12% tax, so M5-11 changes `two_states`' results and re-records them under the bands clause; the riot threshold of 0.3 keeps the baseline riot-free (S18). M5-11 also updates D19's status sentence, "It has no effects yet", leaving its rule as run decision 4 keeps it (S20) |
+| 2026-10-10 05:35 | **Noted for the maintainer.** The DAG gains edges: every task depends on M5-1, so its baseline times `aa2133a`'s engine (S8), and M5-7 depends on M5-11, so investment counts working members from its first commit (S7) |
+| 2026-10-10 05:35 | **Review round.** Design round 1 (the system specification, this page, and the requirements specification's corrections) submitted to the reviewer |
 
 ## Change requests
 
@@ -77,7 +85,8 @@ A change to a task's contract after the plan is approved, and who decided it.
 | Initiation | 2 | `ff14d1b` (data model) and `041d9e5` (workbook) | approve | 7 minor; each carried into Analysis round 1 ([below](#initiation-round-2-minor-findings)) |
 | Analysis | 1 | `96e8084` | revise | 2 major, 13 minor; each handled in round 2 ([below](#analysis-round-1-findings)) |
 | Analysis | 2 | `933bbd1` | revise | 1 major, 7 minor; each handled in round 3 ([below](#analysis-round-2-findings)) |
-| Analysis | 3 | this round's workbook commit | pending | — |
+| Analysis | 3 | `1104c9f` | approve | 6 minor; each handled in Design round 1 ([below](#analysis-round-3-minor-findings)) |
+| Design | 1 | this round's workbook commit | pending | — |
 
 ### Initiation, round 1: findings
 
@@ -144,6 +153,19 @@ All 8 were relayed and each is handled in round 3 of the [requirements specifica
 | 6 | minor | Five DFD flows were missing: the scripted command log, 3.5's investment rule and spend rates, 3.3's and 3.4's owner-pool sizes, 4.3's recipes, 4.4's geography | All five added: `1.0 → D4` the scripted commands, with `D4` now naming `Scenario.commands`; `D1 → 3.5` the investor reserve days and spend rates, with level 0's `D1 → 3.0` widened; `D3.5 → 3.3` and `→ 3.4` the owner pools' sizes; `D1 → 4.3` the production recipes, with level 0's `D1 → 4.0` widened; `D2 → 4.4` each province's market and nation. Checking every process the same way added the geography to 3.0, 5.0, 6.0 (at level 1: 6.1 and 6.4 to 6.6), 7.0, 8.0 and 9.0, `D1 → 4.2` the producer types' worker professions, and `5.0 → 3.0` (`→ 3.3` at level 1) the day's merchant purchases, a figure settlement hands the firms step, never a column |
 | 7 | minor | UC1's out-of-range market was "refused", but the server says goodbye | UC1 and UC3: an out-of-range market, province or new nation id in `Subscribe` closes the session with `Goodbye`, as `Subscription::checked` and `sim.rs:340-344` do today. R-N21 requires the same of the new nation field, with a test |
 | 8 | minor | The activity diagram had no reply for an accepted command | A fork after V3: V7, "Reply CommandResult None with the day it applies", reaches the client's C9, and the "next tick" edge goes on to V5; the day's views have their own step, C10. V1 now names the rate limit and the lobby check in the server's order (`sim.rs:368-388`) |
+
+### Analysis, round 3: minor findings
+
+The stage was approved with these six minor findings, from the reviewer's log line. Each is handled in Design round 1, in the [system specification](04-system-specification.md) and by corrections to the [requirements specification](03-requirements-specification.md); no requirement id changed.
+
+| # | Finding | How it was handled |
+|---|---|---|
+| 1 | R-F56 lets a second ms/day figure onto the summary line, which `bench-compare.sh`'s greedy pattern would read instead of the run's mean | R-F56 now puts the new figures on lines of their own, in ms, never ms/day. The system specification fixes the output (4.3): the summary line unchanged, then `slowest day: day D, X ms` and `first month end: day D, X ms; the N days before it: Y ms mean`; and its test `bench_has_one_ms_per_day_line` checks that the gate's pattern matches exactly one line (S9) |
+| 2 | C29's `aa2133a`-engine baseline holds only if M5-1 lands before M5-6 and M5-11 | Every task depends on M5-1, directly or through others: the DAG gains M5-1 → M5-6 and M5-1 → M5-11 beside C29's edges (S8; C29 updated) |
+| 3 | R-N26 has no cumulative check against M5-1's baseline | R-N26 now also asks a month-end task to say why when its median is more than 20% above M5-1's baseline, not only above its own "before" (S9; the performance table in the system specification's 8.4) |
+| 4 | M5-4's `month_profit` needs PL-3's and PL-4's hooks in settlement and arrival, which no M5-4 trace names | All merchant bookkeeping is in `systems/trade.rs`: settlement hands sales to `trade::book_sales`, and arrival is `trade::land_cargo`, so M5-4's two hooks are edits to that file, named in its interfaces (S6; R-F5's verification updated) |
+| 5 | PL-3 reuses `r`, the route's retention, for the reservation price | PL-3 now writes `stock × p ÷ reservation`, and says that `r` is the retention throughout |
+| 6 | The level-0 DFD's `D3` label omits route gaps and founding requests | `D3` now lists them |
 
 ## Run rules
 
