@@ -24,11 +24,17 @@ cargo run --release -p pax_cli -- verify scenarios/mini_valley
 
 CI runs the same commands, and also the determinism gate on Windows and macOS.
 
+If you changed a Mermaid diagram, render it before pushing (needs Docker; output in `out/mermaid/`, git-ignored). GitHub shows a diagram that doesn't parse as an error box:
+
+```bash
+scripts/render-mermaid.sh docs/ARCHITECTURE.md     # or no arguments for every doc with a diagram; --format png to view them
+```
+
 ## CI/CD pipelines (`.github/workflows/`)
 
 | Workflow | Runs on | What it does |
 |---|---|---|
-| `ci.yml` | every PR and push to `main` | fmt, clippy, rustdoc, debug and release tests, the determinism gate (Linux at 1 and 4 threads, plus Windows and macOS), the session replay through `pax_cli replay` (all three platforms), and on PRs a benchmark regression gate (head vs base, fails above +20%) and 60 s of `cargo fuzz` on the client frame reader (not required; a crash uploads its input as an artifact; run it locally with `cd fuzz && cargo +nightly fuzz run client_frames`) |
+| `ci.yml` | every PR and push to `main` | fmt, clippy, rustdoc, debug and release tests, the determinism gate (Linux at 1 and 4 threads, plus Windows and macOS), the session replay through `pax_cli replay` (all three platforms), and on PRs a benchmark regression gate (head vs base, fails above +20%) and 60 s of `cargo fuzz` on the client frame reader (not required; a crash uploads its input as an artifact; run it locally with `cd fuzz && cargo +nightly fuzz run client_frames`), and renders the Mermaid diagrams in changed Markdown files (not required; the images are an artifact) |
 | `critic.yml` | selected PRs | AI architectural review with [`/critic`](.claude/commands/critic.md), posted as a PR comment. **CRITICAL findings fail the `Critic` check and block the merge** |
 | `claude.yml` | a comment, issue or review mentioning `@claude` | Claude answers questions or investigates on request (read-only repo access) |
 | `claude-feature.yml` | label `claude-plan` / `claude-implement` on an issue | Claude plans a feature, then writes docs, code and tests on `claude/issue-<n>` ([guide](docs/CLAUDE_FEATURE_PIPELINE.md)) |

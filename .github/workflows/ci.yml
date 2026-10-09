@@ -304,3 +304,32 @@ jobs:
         with:
           name: fuzz-artifacts
           path: fuzz/artifacts
+
+  diagrams:
+    # GitHub shows a Mermaid diagram that doesn't parse as an error box, and no other
+    # check reads them. Renders the diagrams in the Markdown files a PR changes, with the
+    # pinned mermaid-cli image (scripts/render-mermaid.sh). Not a required check.
+    name: Mermaid diagrams render
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    env:
+      BASE_SHA: ${{ github.event.pull_request.base.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Render changed diagrams
+        run: |
+          mapfile -t files < <(git diff --name-only --diff-filter=AM "$BASE_SHA" HEAD -- '*.md' \
+            | xargs -r grep -l '^```mermaid' || true)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "No changed Markdown file has a Mermaid diagram."
+            exit 0
+          fi
+          scripts/render-mermaid.sh "${files[@]}"
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rendered-diagrams
+          path: out/mermaid
+          if-no-files-found: ignore
