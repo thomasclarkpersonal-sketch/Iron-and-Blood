@@ -121,8 +121,8 @@ Mechanism (module layouts, file formats, flag names, step-by-step algorithms) be
 | 3 | Market: orders (households, producers' inputs, governments D16) → price discovery → settlement | daily |
 | 4 | Firms: wages, dividends (income tax withheld, D15) | daily |
 | 4b | Government: transfers from treasuries to POPs (D15) | daily |
-| 5 | Labour mobility within a province (D18), then migration within a market (D20), then occupational migration within a market (D25); *(M2)* promotion | month end |
-| 6 | Politics: militancy (D19); *(M2)* consciousness | month end |
+| 5 | Labour mobility within a province (D18), then migration within a market (D20), then occupational migration within a market (D25); *(planned, needs a decision, none drafted)* promotion | month end |
+| 6 | Politics: militancy (D19); *(planned, needs a decision, none drafted)* consciousness | month end |
 | 7 | Demographics, then POP row compaction (D7) | month end |
 
 - A month is 30 days until a real calendar is needed (`rules.days_per_month`).
@@ -339,7 +339,7 @@ The state → national → sphere → global roll-up in the old ECONOMY_SYSTEM w
   - The destination's `life_needs` becomes the size-weighted mean.
   - Population and money are conserved, and tested.
 - **Tuning:** `demographics.mobility_rate` in `rules.toml`. `mini_valley`'s frozen definitions use 0, which keeps it a pure regression fixture.
-- **What it does not fix:** unemployment caused by *total* job capacity lagging population. That needs investment (new and expanding producers), a later M2 item.
+- **What it does not fix:** unemployment caused by *total* job capacity lagging population. That needs investment (new and expanding producers; proposal in [#21](https://github.com/thomasclarkpersonal-sketch/Iron-and-Blood/pull/21)).
   - **Measured (2026-10-09):** in `two_states` the 20-year unemployment drift (9.6%) was *not* this. Total workforce exceeded total jobs by only 4.5k at year 20, while 20k jobs stood empty: the unemployed and the vacancies were in different professions *and* provinces, which neither D18 nor D20 can bridge. D25 does.
 - **Later:** migration between provinces (D20 covers provinces of the same market), promotion to higher strata (literacy, D7), culture and religion.
 
