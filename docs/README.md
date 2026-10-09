@@ -17,7 +17,8 @@ Every fact has **one home**. Other documents link to it rather than restating it
 | What is being built, in what order | the milestone documents (`MILESTONE_<n>.md`) | Design that outlives the milestone |
 | Ideas not yet designed | vision documents, under a status banner (below) | |
 | Options surveyed | [research/](research/) | |
-| How to use it | [ONBOARDING.md](ONBOARDING.md), [HOSTING.md](HOSTING.md), [REPO_SETUP.md](REPO_SETUP.md), [CLAUDE_FEATURE_PIPELINE.md](CLAUDE_FEATURE_PIPELINE.md) | |
+| A feature's planning record (SSR, charter, specifications, baseline plan, diagrams) | its Project Workbook, `docs/workbooks/<slug>/`, under a status banner ([SDLC_WORKFLOW.md](SDLC_WORKFLOW.md#planning)) | Rules and mechanism: they move to DECISIONS.md and the system documents as the feature lands |
+| How to use it | [ONBOARDING.md](ONBOARDING.md), [HOSTING.md](HOSTING.md), [REPO_SETUP.md](REPO_SETUP.md), [CLAUDE_FEATURE_PIPELINE.md](CLAUDE_FEATURE_PIPELINE.md), [SDLC_WORKFLOW.md](SDLC_WORKFLOW.md) | |
 
 ## Status of what a document describes
 
