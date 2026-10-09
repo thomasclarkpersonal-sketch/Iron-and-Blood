@@ -73,7 +73,7 @@ New to the project? Start with **[Onboarding](docs/ONBOARDING.md)**: a codebase 
 * [Macroeconomics](docs/MACROECONOMICS.md): money, banking, stability.
 * [Politics & State](docs/POLITICS_SYSTEM.md): fiscal policy, taxation, interest groups, and reforms.
 * [Map & Logistics](docs/MAP_AND_LOGISTICS.md): geography, iceberg transport costs, and migration.
-* [Inter-market trade (proposal)](docs/TRADE.md): the M2-3 merchant design, awaiting review.
+* [Inter-market trade](docs/TRADE.md): the M5 merchant design (accepted, not implemented yet).
 * [Military & Supply](docs/MILITARY_SYSTEM.md): mobilization shocks and war debt.
 * [Colonization & Imperialism](docs/COLONIZATION_SYSTEM.md): colonial logistics and extractive vs inclusive institutions (vision).
 * Research notes: [Victoria 2 economy redesign](docs/research/victoria_2_economy_redesign.md), [reference textbook summaries](docs/research/economic_textbooks_summary.md).
