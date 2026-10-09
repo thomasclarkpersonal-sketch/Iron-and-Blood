@@ -24,6 +24,24 @@ fn money_conserved_in_random_economies() {
     }
 }
 
+/// D25's occupational migration moves people with their cash between provinces and
+/// professions at month end: money and people are conserved through it, and the
+/// random worlds really exercise it.
+#[test]
+fn money_conserved_through_occupational_migration() {
+    let mut retrained = 0;
+    for seed in 0..120 {
+        let mut world = random_world(seed);
+        let money = world.total_money();
+        for _ in 0..90 {
+            let report = step(&mut world);
+            assert_eq!(report.total_money, money, "seed {seed}");
+            retrained += report.retrained;
+        }
+    }
+    assert!(retrained > 0, "random worlds should exercise occupational migration (D25)");
+}
+
 #[test]
 fn goods_and_prices_stay_valid() {
     for seed in 200..260 {

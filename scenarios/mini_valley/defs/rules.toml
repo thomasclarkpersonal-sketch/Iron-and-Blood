@@ -23,3 +23,12 @@ subsistence_wage_multiple = 1.5   # target wage >= 1.5x a worker's daily subsist
 [demographics]              # D7, monthly rates
 growth_rate = 0.001
 starvation_rate = 0.05
+mobility_rate = 0             # frozen fixture: no mobility
+migration_rate = 0            # frozen fixture: no migration
+occupational_migration_rate = 0   # frozen fixture: no occupational migration (D25)
+births_need_employment = false    # frozen fixture: births as in D7 (D26)
+
+[politics]                  # D19, monthly militancy dynamics
+militancy_rise = 0.05       # per month at zero life-needs satisfaction
+militancy_tax_weight = 0.1  # per month per unit of income tax rate
+militancy_decay = 0.1       # share that fades each month

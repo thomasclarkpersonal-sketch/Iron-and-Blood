@@ -20,12 +20,16 @@
 //!   people whose subsistence was not fully met.
 //!   `population` is the end-of-period population, after demographics.
 //!
+//! * **Militancy:** `DayReport::militancy`, the population-weighted mean at the
+//!   end of the period (D19).
+//!
 //! If day 1 traded nothing, there is no base basket and the price index and real
 //! GDP print as `n/a` rather than a made-up 100.
 
 use std::process::ExitCode;
 
-use pax_engine::{DayReport, Fixed, World, step};
+use pax_data::CommandLog;
+use pax_engine::{DayReport, Fixed, World};
 
 fn f(v: Fixed) -> f64 {
     v.raw() as f64 / pax_engine::fixed::SCALE as f64
@@ -36,19 +40,26 @@ fn basket_value(prices: &[Fixed], basket: &[f64]) -> f64 {
     prices.iter().zip(basket).map(|(&p, &q)| f(p) * q).sum()
 }
 
-pub fn run(mut world: World, days: u64, every: u64) -> Result<ExitCode, String> {
-    let worker_professions: Vec<bool> =
-        (0..world.defs.professions.len()).map(|c| world.defs.producer_types.iter().any(|t| t.worker == c)).collect();
-
+pub fn run(mut world: World, log: &CommandLog, days: u64, every: u64) -> Result<ExitCode, String> {
     println!(
-        "{:>5} {:>10} {:>12} {:>9} {:>12} {:>8} {:>8} {:>6} {:>10} {:>9}",
-        "day", "population", "GDP/day", "prices", "real GDP", "unempl%", "wage%", "tax%", "lifeneeds", "deprived%"
+        "{:>5} {:>10} {:>12} {:>9} {:>12} {:>8} {:>8} {:>6} {:>10} {:>9} {:>9}",
+        "day",
+        "population",
+        "GDP/day",
+        "prices",
+        "real GDP",
+        "unempl%",
+        "wage%",
+        "tax%",
+        "lifeneeds",
+        "deprived%",
+        "militancy"
     );
 
     let mut base: Option<(Vec<f64>, f64)> = None; // (basket q0, Σ p0 q0)
     let (mut spending, mut wages, mut dividends, mut taxes, mut n) = (0.0, 0.0, 0.0, 0.0, 0u64);
     for day0 in 0..days {
-        let report: DayReport = step(&mut world);
+        let report: DayReport = crate::tick(&mut world, log);
         if base.is_none() {
             let basket: Vec<f64> = report.goods.iter().map(|g| f(g.traded)).collect();
             let value = basket_value(&world.markets.price, &basket);
@@ -74,11 +85,7 @@ pub fn run(mut world: World, days: u64, every: u64) -> Result<ExitCode, String> 
             ("n/a".to_string(), "n/a".to_string())
         };
 
-        let (mut workforce, mut unemployed) = (0u64, 0u64);
-        for pool in report.labour.iter().filter(|p| worker_professions[p.profession as usize]) {
-            workforce += pool.workforce;
-            unemployed += pool.unemployed();
-        }
+        let (unemployed, workforce) = pax_engine::systems::labor::unemployment(&world.defs, &report.labour);
         let unemployment = if workforce > 0 { unemployed as f64 / workforce as f64 * 100.0 } else { 0.0 };
         let wage_share = if wages + dividends > 0.0 { wages / (wages + dividends) * 100.0 } else { 0.0 };
         let tax_take = if wages + dividends > 0.0 { taxes / (wages + dividends) * 100.0 } else { 0.0 };
@@ -87,10 +94,12 @@ pub fn run(mut world: World, days: u64, every: u64) -> Result<ExitCode, String> 
         // The engine weights life needs by the sizes the market saw (DayReport).
         let life = &report.life_needs;
         let life_mean = life.mean().map_or(0.0, f);
+        // Population-weighted militancy as the period's last market saw it (D19).
+        let militancy = report.militancy.mean().map_or(0.0, f);
         let deprived_pct = if life.people > 0 { life.deprived as f64 / life.people as f64 * 100.0 } else { 0.0 };
 
         println!(
-            "{day:>5} {population:>10} {gdp:>12.2} {index:>9} {real_gdp:>12} {unemployment:>8.1} {wage_share:>8.1} {tax_take:>6.1} {life_mean:>10.3} {deprived_pct:>9.1}"
+            "{day:>5} {population:>10} {gdp:>12.2} {index:>9} {real_gdp:>12} {unemployment:>8.1} {wage_share:>8.1} {tax_take:>6.1} {life_mean:>10.3} {deprived_pct:>9.1} {militancy:>9.3}"
         );
         (spending, wages, dividends, taxes, n) = (0.0, 0.0, 0.0, 0.0, 0);
     }
@@ -105,7 +114,7 @@ mod tests {
     fn report_runs_on_reference_scenario() {
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/mini_valley");
         let world = pax_data::load_scenario(&dir).expect("scenario loads").world;
-        assert_eq!(run(world, 40, 20).unwrap(), ExitCode::SUCCESS);
+        assert_eq!(run(world, &CommandLog::default(), 40, 20).unwrap(), ExitCode::SUCCESS);
     }
 
     #[test]

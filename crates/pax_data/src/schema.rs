@@ -104,6 +104,15 @@ pub struct RulesFile {
     pub market: MarketRulesEntry,
     pub firms: FirmRulesEntry,
     pub demographics: DemographicRulesEntry,
+    pub politics: PoliticsRulesEntry,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PoliticsRulesEntry {
+    pub militancy_rise: Dec,
+    pub militancy_tax_weight: Dec,
+    pub militancy_decay: Dec,
 }
 
 #[derive(Deserialize)]
@@ -135,6 +144,10 @@ pub struct FirmRulesEntry {
 pub struct DemographicRulesEntry {
     pub growth_rate: Dec,
     pub starvation_rate: Dec,
+    pub mobility_rate: Dec,
+    pub migration_rate: Dec,
+    pub occupational_migration_rate: Dec,
+    pub births_need_employment: bool,
 }
 
 #[derive(Deserialize)]
@@ -144,6 +157,12 @@ pub struct ScenarioFile {
     pub seed: u64,
     /// Definitions directory, relative to the scenario directory.
     pub data: String,
+    /// Optional command log, relative to the scenario directory (D21).
+    #[serde(default)]
+    pub commands: Option<String>,
+    /// Optional province map directory, relative to the scenario directory (M3-7).
+    #[serde(default)]
+    pub map: Option<String>,
     #[serde(default)]
     pub nation: Vec<NationEntry>,
     #[serde(default)]
@@ -209,4 +228,23 @@ pub struct ProducerEntry {
     pub wage: Dec,
     #[serde(default)]
     pub stock: Dec,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CommandFile {
+    #[serde(default)]
+    pub command: Vec<CommandEntry>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CommandEntry {
+    /// Day (0-based) at whose start the command applies.
+    pub day: u64,
+    /// `set_income_tax`, `set_transfer_rate` or `set_consumption_rate`.
+    #[serde(rename = "type")]
+    pub kind: String,
+    pub nation: String,
+    pub rate: Dec,
 }

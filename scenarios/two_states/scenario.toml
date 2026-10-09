@@ -5,6 +5,8 @@
 name = "Two States"
 seed = 1848
 data = "../../data"
+commands = "commands.toml"   # policy timeline (D21)
+map = "map"                  # province map for the client (M3-7)
 
 # Governments (DECISIONS.md D15, D16): a flat income tax withheld from wages and
 # dividends, a daily per-capita transfer of a share of the treasury, and daily

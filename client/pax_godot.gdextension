@@ -1,0 +1,17 @@
+; Loads the Rust bridge (crates/pax_godot, D12). Build it first:
+;   cargo build -p pax_godot            (debug)
+;   cargo build -p pax_godot --release  (release)
+[configuration]
+
+entry_symbol = "gdext_rust_init"
+compatibility_minimum = 4.7
+reloadable = true
+
+[libraries]
+
+linux.debug.x86_64 = "res://../target/debug/libpax_godot.so"
+linux.release.x86_64 = "res://../target/release/libpax_godot.so"
+windows.debug.x86_64 = "res://../target/debug/pax_godot.dll"
+windows.release.x86_64 = "res://../target/release/pax_godot.dll"
+macos.debug = "res://../target/debug/libpax_godot.dylib"
+macos.release = "res://../target/release/libpax_godot.dylib"

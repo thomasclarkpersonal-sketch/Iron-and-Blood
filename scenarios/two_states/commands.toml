@@ -1,0 +1,15 @@
+# Policy timeline for two_states (DECISIONS.md D21). Each command applies at the
+# start of its (0-based) day, in file order. Replayed by pax_cli and pinned in
+# golden.hashes, so it is part of the determinism gate.
+
+[[command]]
+day = 360
+type = "set_income_tax"
+nation = "lowland_kingdom"
+rate = 0.12
+
+[[command]]
+day = 720
+type = "set_transfer_rate"
+nation = "highland_republic"
+rate = 0.08

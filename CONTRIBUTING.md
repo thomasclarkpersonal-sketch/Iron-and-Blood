@@ -1,5 +1,7 @@
 # Contributing
 
+New here? Read [docs/ONBOARDING.md](docs/ONBOARDING.md) first.
+
 ## Setup
 
 The toolchain is pinned in `rust-toolchain.toml`; `rustup` installs it automatically. Develop inside WSL or Linux.
@@ -15,17 +17,24 @@ cargo run --release -p pax_cli -- run scenarios/mini_valley --days 365
 ```bash
 cargo fmt --all
 cargo clippy --all-targets --release -- -D warnings
+RUSTDOCFLAGS="-D warnings" cargo doc --no-deps
 cargo test --all
 cargo run --release -p pax_cli -- verify scenarios/mini_valley
 ```
 
 CI runs the same commands, and also the determinism gate on Windows and macOS.
 
+If you changed a Mermaid diagram, render it before pushing (needs Docker; output in `out/mermaid/`, git-ignored). GitHub shows a diagram that doesn't parse as an error box:
+
+```bash
+scripts/render-mermaid.sh docs/ARCHITECTURE.md     # or no arguments for every doc with a diagram; --format png to view them
+```
+
 ## CI/CD pipelines (`.github/workflows/`)
 
 | Workflow | Runs on | What it does |
 |---|---|---|
-| `ci.yml` | every PR and push to `main` | fmt, clippy, rustdoc, debug and release tests, the determinism gate (Linux at 1 and 4 threads, plus Windows and macOS), and on PRs a benchmark regression gate (head vs base, fails above +20%) |
+| `ci.yml` | every PR and push to `main` | fmt, clippy, rustdoc, debug and release tests, the determinism gate (Linux at 1 and 4 threads, plus Windows and macOS), the session replay through `pax_cli replay` (all three platforms), and on PRs a benchmark regression gate (head vs base, fails above +20%) and 60 s of `cargo fuzz` on the client frame reader (not required; a crash uploads its input as an artifact; run it locally with `cd fuzz && cargo +nightly fuzz run client_frames`), and renders the Mermaid diagrams in changed Markdown files (not required; the images are an artifact) |
 | `critic.yml` | selected PRs | AI architectural review with [`/critic`](.claude/commands/critic.md), posted as a PR comment. **CRITICAL findings fail the `Critic` check and block the merge** |
 | `claude.yml` | a comment, issue or review mentioning `@claude` | Claude answers questions or investigates on request (read-only repo access) |
 | `claude-feature.yml` | label `claude-plan` / `claude-implement` on an issue | Claude plans a feature, then writes docs, code and tests on `claude/issue-<n>` ([guide](docs/CLAUDE_FEATURE_PIPELINE.md)) |
@@ -33,10 +42,16 @@ CI runs the same commands, and also the determinism gate on Windows and macOS.
 
 **The critic reviews a PR if any of these is true:**
 - it changes ≥ 200 lines or ≥ 20 files;
+- it changes the contract: `AGENTS.md`, `docs/DECISIONS.md` or `.claude/commands/critic.md`;
 - it was randomly sampled (1 in 5 PRs, decided once per PR number);
 - it carries the `critic` label.
 
-A selected PR is re-reviewed on every push. DEBT warnings and suggestions are advisory; only CRITICAL findings block. If you believe a CRITICAL finding is wrong, reply on the PR citing the rule and ask an admin. Do not remove the `critic` label to dodge a review.
+A selected PR is re-reviewed on every push, against the rules as they are on `main`. How to act on the findings ([AGENTS.md §9](AGENTS.md#9-critic-feedback)):
+- **CRITICAL:** blocks the merge; fix it. If you believe it's wrong, reply on the PR citing the rule and ask an admin.
+- **DEBT:** doesn't block, but fix it in the same PR. It is re-reported on every push until it's fixed or a maintainer waives it by commenting `critic-waive: <finding title>, <reason>`.
+- **SUGGESTION:** optional; consider each one.
+
+Do not remove the `critic` label to dodge a review.
 
 Repository admins: the one-time setup (GitHub App and its token secret, label, ruleset making the checks required) is in [docs/REPO_SETUP.md](docs/REPO_SETUP.md).
 

@@ -9,7 +9,7 @@ publish.workspace = true
 
 [dependencies]
 pax_engine.workspace = true
-pax_data.workspace = true
+pax_data = { workspace = true, features = ["bench"] }
 rayon.workspace = true
 
 [lints]

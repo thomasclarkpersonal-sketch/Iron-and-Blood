@@ -1,6 +1,6 @@
 # Backend Architecture & Schema
 
-This document describes the concrete Rust implementation. The code is authoritative for exact field names; this page explains structure and intent. Decisions are cited as D1–D14 ([DECISIONS.md](DECISIONS.md)).
+This document describes the concrete Rust implementation. The code is authoritative for exact field names; this page explains structure and intent. Decisions are cited as D1, D2, … ([DECISIONS.md](DECISIONS.md)).
 
 ## 🦀 Workspace Structure
 
@@ -17,20 +17,32 @@ crates/
 │       ├── hash.rs        FNV-1a state hashing (stable across Rust versions)
 │       ├── groups.rs      counting-sort row grouping (replaces HashMap lookups)
 │       ├── defs.rs        static definitions: goods, professions, producer types, rules
-│       ├── world.rs       SoA tables: Geography, Pops, Producers, Markets; World
+│       ├── world.rs       SoA tables: Geography, Pops, Producers, Markets, Nations; World
+│       ├── layout.rs      the self-validating POP layout cache (D7)
+│       ├── command.rs     player commands and their validation (D21)
+│       ├── views.rs       read-only aggregates the server's views are built from (D22)
 │       ├── tick.rs        step(): fixed system order + money conservation assert
-│       └── systems/       labor, production, market, firms, demographics
-├── pax_data/              TOML schema (schema.rs), validation, World builder, golden files
-└── pax_cli/               run | record | verify | bench
+│       └── systems/       labor, production, market, firms, government, mobility, politics, demographics
+├── pax_data/              TOML schema (schema.rs), validation, World builder, saves and snapshots, golden files
+├── pax_cli/               run | report | record | verify | bench | replay
+├── pax_server/            authoritative game server: sim thread owns the World, tokio for the network (D10, D22, D23)
+├── pax_protocol/          generated FlatBuffers code (scripts/gen-protocol.sh) + framing, no engine dependency (D22)
+├── pax_godot/             Godot GDExtension bridge: the client's side of the protocol (D12)
+├── pax_content/           the content-hash scheme both sides share (no dependencies)
+└── pax_map/               the province-map reader both sides share (no engine, no wire types)
+client/                    Godot 4 project (GDScript UI); loads pax_godot
 data/                      base definitions
 scenarios/<name>/          scenario.toml + golden.hashes
+schemas/                   FlatBuffers wire schemas (D22)
 ```
 
-`pax_server` will be added in M3 (D10).
+The client (Godot, with a Rust GDExtension bridge, D12) depends on `pax_protocol` and the side-neutral `pax_content` and `pax_map` only, never on `pax_engine`.
 
 ## 🧩 State Schema
 
 There is no ECS framework (D8). Each table below is a set of equally long column `Vec`s, and an entity is a row index. Static definitions (`Defs`) are shared through `Arc` and excluded from the state hash.
+
+**Table rules.** Rows enter through the `push_*` methods, which assert each row's rules: ids exist, money and stocks are non-negative, rates and ratios are in [0, 1]. `World::check_tables` checks the same rules, from the same functions, over whole tables, and adds the length rules (per-good columns are exactly `rows × goods`). It reports the first broken rule instead of panicking. A world that didn't come through `push_*`, such as a restored snapshot (D10), must pass it before anything reads it. Debug builds also check it after every tick, so every test proves the systems keep the rules.
 
 ### `Geography` (static topology)
 | Column | Type | Notes |
@@ -49,8 +61,9 @@ Rows are stored grouped by market: the loader sorts them stably. The market's pa
 | `profession` | `u16` | Index into `Defs::professions` |
 | `province` | `u32` | |
 | `life_needs` | `Fixed` | `[0, 1]`, subsistence satisfaction from the last market day (D2) |
-| *`culture`, `religion`* | *`u16`* | *M2* |
-| *`literacy`, `militancy`, `consciousness`* | *`Fixed`* | *M2. Fixed-point, never `f32` (D3)* |
+| *`culture`, `religion`* | *`u16`* | *Planned: needs a decision, none drafted* |
+| `militancy` | `Fixed` | `[0, 1]`, updated monthly (D19); no effects yet |
+| *`literacy`, `consciousness`* | *`Fixed`* | *Planned: needs a decision, none drafted. Fixed-point, never `f32` (D3)* |
 
 ### `Producers` (RGOs and factories; they differ only by recipe)
 | Column | Type | Notes |
@@ -85,10 +98,11 @@ Rows are stored grouped by market: the loader sorts them stably. The market's pa
 
 Orders and offers are **not** stored in state: they exist only during the market phase. The old `MarketNode { buy_orders: HashMap, … }` design is retired, because HashMap iteration order is non-deterministic (D3).
 
-### *M2 tables (planned)*
-- Laws, and tariffs on `Nations`.
-- `Accounts` for inside money: deposits, loans and bonds as asset/liability pairs (D5).
-- `Shares` (owner POP/nation → producer).
+### *Planned tables*
+- Tariffs on `Nations` (trade proposal, [#18](https://github.com/thomasclarkpersonal-sketch/Iron-and-Blood/pull/18)).
+- Laws on `Nations` (needs a decision, none drafted).
+- `Accounts` for inside money: deposits, loans and bonds as asset/liability pairs (D5; needs a decision, none drafted).
+- `Shares` (owner POP/nation → producer; raised by the investment proposal, [#21](https://github.com/thomasclarkpersonal-sketch/Iron-and-Blood/pull/21), question 1).
 
 ## ⚙️ Core Systems
 
@@ -103,7 +117,9 @@ All systems are plain functions over `&mut World`, called by `tick::step` in the
    - The concurrency rule (AGENTS.md §3) is satisfied by construction: no POP ever touches shared market state.
 4. **`firms::pay_wages_and_dividends`.** Value-added smoothing, sticky wages, then wage and dividend transfers with income tax withheld (D15).
 4b. **`government::pay_transfers`.** Each nation pays `treasury × transfer_rate` to its POPs, split by size.
-5. **`demographics::update_population`** (month end). Growth or starvation from `life_needs`; the estate of an extinct POP passes to an heir.
+5. **`mobility::reassign_workers`**, **`mobility::migrate_within_markets`**, then **`mobility::retrain_within_markets`** (month end). Unemployed workers move to vacancies in their province (D18), then surplus workers migrate to vacancies in other provinces of the same market (D20), then any surplus left moves to vacancies of another profession in another province of the market (D25), all taking their share of cash. D20 and D25 count workforce and jobs fresh (`mobility::Pools`), after the flows before them.
+6. **`politics::update_militancy`** (month end). Rises with hunger and taxes, and decays (D19).
+7. **`demographics::update_population`** (month end). Growth or starvation from `life_needs` (with `births_need_employment`, a worker POP's growth is scaled by its pool's employed share, D26); the estate of an extinct POP passes to an heir. Then **`World::compact_pops`** merges duplicate identities and drops empty rows (D7).
 
 > [!IMPORTANT]
 > **Determinism:** money, prices, quantities *and all rates* are `Fixed` (D3). `tax_rate`, `literacy` and `militancy` were `f32` in earlier drafts. That is no longer allowed, because a float tax rate applied to fixed-point wealth makes money itself platform-dependent.
@@ -120,22 +136,42 @@ All systems are plain functions over `&mut World`, called by `tick::step` in the
 | `payouts` | Gross wages and dividends paid that day, and the income tax withheld from them |
 | `transfers` | Paid from treasuries to POPs that day |
 | `government_spending` | Paid from treasuries for goods that day (D16) |
+| `moved` | People who changed profession that day (month end only, D18) |
+| `migrated` | People who moved to another province of their market that day (D20) |
+| `retrained` | People who moved to another profession in another province of their market that day (D25) |
+| `compacted` | POP rows removed by month-end compaction (D7) |
 | `life_needs` | Life-needs coverage at the market: people, deprived, weighted mean (`LifeNeedsSummary`) |
+| `militancy` | Population-weighted militancy at the end of the day (`MilitancySummary`, D19) |
 | `total_money` | Outside money after the day (asserted unchanged) |
 
 ## 🔌 API Boundary (M3)
 
-`pax_server` will wrap the engine. It is server-authoritative (D10) and uses a binary protocol: FlatBuffers or Cap'n Proto, chosen at the start of M3.
+`pax_server` wraps the engine. It is server-authoritative (D10) and speaks size-prefixed FlatBuffers over TCP (D22). The wire format is in [NETWORK_PROTOCOL.md](NETWORK_PROTOCOL.md), and the pacing and save rules are in D23.
 
 > [!WARNING]
 > **Serialization overhead:** never use JSON for the per-tick state sync. Sending aggregated state for thousands of provinces each tick as JSON costs severe CPU time and bandwidth.
 
-**Server → client (state sync):**
-* Map state (ownership, occupation).
-* Aggregated statistics (population, GDP, prices).
-* The server never sends individual POP data unless the client requests to inspect a single province.
+| Server module | What it does |
+|---|---|
+| `net.rs` | One tokio task per connection. `RequestReader` turns bytes into requests and enforces the `Hello` rules; the rest goes to the sim thread over a bounded channel. In multiplayer it also reports a client that stalls and comes back (D24's fairness pause, M4-4). With TLS, each connection does the handshake first, within `HANDSHAKE_TIMEOUT` (10 s); a failed or slow one is dropped before it becomes a session (M4-6) |
+| `request.rs`, `encode.rs`, `commands.rs` | Wire ↔ owned values. Engine ↔ wire conversions are exhaustive matches, with no `_` arm (NETWORK_PROTOCOL §5) |
+| `sim.rs` | The sim thread: the handshake and admission, subscriptions, command checks, speed, flow control, saves; D24's fairness pause and the lobby, sent when it differs from what players last saw |
+| `session.rs` | The session table (M4-1): one row per connection, with its subscription, window and seat (player id and nation); player ids, who holds a nation, the host (elected and succeeded by `HostRule`, M4-3), lobby claims and ready marks (M4-2), broadcasts; seats kept for players who left a started game, with their resume tokens (OS randomness), and stall marks for the fairness pause (M4-4); each row's recent commands for D24's rate limit (`SessionTable::admit_command`), and `HostRule::Admin` holding the admin's name and password (M4-6) |
+| `game.rs` | `Game`: the world, its applied-command log and checkpoints, and the day's derived views (`Today`), all changed in one step |
+| `secret.rs` | Passwords (D24, M4-6): `Secret`, whose `Debug` never prints the text and whose equality is constant-time |
+| `throttle.rs` | Bandwidth for remote sessions (D24, M4-7): at most 4 updates a second, the `MapView` every 5th, by default (`Config::bandwidth`) |
+| `answer_limit.rs` | **Temporary** map-request limit: at most 4 `Subscribe` answers a second per session by default (`Config::subscribe_answers_per_second`), the ones in between coalesced (MILESTONE_4, "Open follow-ups") |
+| `tls.rs` | TLS for multiplayer off localhost (D24, M4-6): the certificate, self-signed at start (`--tls-self-signed`) or from PEM files (`--tls-cert`, `--tls-key`); its SHA-256 fingerprint, which clients pin; rustls with the ring backend |
+| `queue.rs`, `clock.rs`, `window.rs` | Command stamping `(player, sequence)`, the game clock (D23), the 3-update flow-control window |
+| `view.rs` | The views, built from `pax_engine::views` (the engine owns every rule a view applies) |
 
-**Client → server (commands):** applied at the start of the next tick, ordered by `(tick, player, sequence)`:
-* `ChangeTaxRate { nation, rate: Fixed }` (the rate is sent as `Fixed`'s raw `i64`, never a float)
-* `SubsidizeFactory { producer, enabled: bool }`
-* `MoveArmy { army, target_province }`
+**Server → client (views, not state, D22):**
+* Every day: world totals and the per-nation table (treasury, policy rates, population, militancy).
+* On subscription: one map mode (a value per province), one market's goods, one province's POPs, labour pools and producers.
+* The full POP and producer tables are never sent. POPs are identified by `(province, profession)`, never by row index (D7).
+
+**Client → server (commands):** checked on arrival (well-formed, permitted, then `World::validate`, D21), stamped `(player, sequence)` and applied at the start of the next tick in stamp order, after the scenario's scripted commands, through `pax_data::step_day` (D10, D23).
+* **Implemented:** `SetIncomeTax`, `SetTransferRate`, `SetConsumptionRate { nation, rate: Fixed }`. Rates travel as `Fixed`'s raw `i64`, never as floats.
+* **Planned:** `SubsidizeFactory { producer, enabled }`, `MoveArmy { army, target_province }`.
+
+**Saves (D23):** the scenario, every applied command and a `state_hash` checkpoint every 30 days, plus a binary snapshot that loading reads (`pax_data::save`, `pax_data::snapshot`). `pax_cli replay` replays a save and checks it.
