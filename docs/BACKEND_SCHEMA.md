@@ -155,7 +155,7 @@ All systems are plain functions over `&mut World`, called by `tick::step` in the
 | `game.rs` | `Game`: the world, its applied-command log and checkpoints, and the day's derived views (`Today`), all changed in one step |
 | `secret.rs` | Passwords (D24, M4-6): `Secret`, whose `Debug` never prints the text and whose equality is constant-time |
 | `throttle.rs` | Bandwidth for remote sessions (D24, M4-7): at most 4 updates a second, the `MapView` every 5th, by default (`Config::bandwidth`) |
-| `answer_limit.rs` | **Temporary** map-request limit: at most 4 `Subscribe` answers a second per session, the ones in between coalesced (MILESTONE_4, "Open follow-ups") |
+| `answer_limit.rs` | **Temporary** map-request limit: at most 4 `Subscribe` answers a second per session by default (`Config::subscribe_answers_per_second`), the ones in between coalesced (MILESTONE_4, "Open follow-ups") |
 | `tls.rs` | TLS for multiplayer off localhost (D24, M4-6): the certificate, self-signed at start (`--tls-self-signed`) or from PEM files (`--tls-cert`, `--tls-key`); its SHA-256 fingerprint, which clients pin; rustls with the ring backend |
 | `queue.rs`, `clock.rs`, `window.rs` | Command stamping `(player, sequence)`, the game clock (D23), the 3-update flow-control window |
 | `view.rs` | The views, built from `pax_engine::views` (the engine owns every rule a view applies) |

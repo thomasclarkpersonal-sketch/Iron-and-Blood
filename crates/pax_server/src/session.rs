@@ -192,7 +192,7 @@ impl Session {
         self.subscription = CheckedSubscription::default();
         self.window = UpdateWindow::default();
         self.throttle.restart();
-        self.answers = AnswerLimit::default();
+        self.answers.reset();
     }
 }
 
@@ -212,11 +212,12 @@ impl SessionTable {
 
     /// A new connection, not yet welcomed.
     /// `bandwidth` throttles it if it is remote (D24, M4-7).
-    pub(crate) fn connect(&mut self, id: u64, conn: ConnHandle, bandwidth: Bandwidth) {
+    /// `answers` limits its `Subscribe` answers (temporary, `answer_limit`).
+    pub(crate) fn connect(&mut self, id: u64, conn: ConnHandle, bandwidth: Bandwidth, answers: AnswerLimit) {
         let throttle = Throttle::new(conn.remote, bandwidth);
         let row = Session {
             throttle,
-            answers: AnswerLimit::default(),
+            answers,
             conn,
             subscription: CheckedSubscription::default(),
             seat: None,
@@ -593,7 +594,7 @@ mod tests {
     /// Connects session `id` and seats it, checking it got player id `player`.
     fn seated(table: &mut SessionTable, id: u64, player: u16, nation: Option<u32>) {
         let (conn, _rx) = ConnHandle::for_test();
-        table.connect(id, conn, Bandwidth::default());
+        table.connect(id, conn, Bandwidth::default(), AnswerLimit::default());
         let claim = nation.map_or(Claim::Unclaimed, Claim::Nation);
         assert_eq!(table.sit(id, "p", claim, 8, false), Ok(Seat { player, claim }));
     }
@@ -635,18 +636,18 @@ mod tests {
         seated(&mut t, 1, 0, None);
         assert_eq!(t.host(), None, "the first player isn't host on a dedicated server");
         let (conn, _rx) = ConnHandle::for_test();
-        t.connect(2, conn, Bandwidth::default());
+        t.connect(2, conn, Bandwidth::default(), AnswerLimit::default());
         assert!(t.sit(2, "ada", Claim::Unclaimed, 8, false).is_ok());
         assert_eq!(t.host(), None, "the admin's name without its password is nobody");
         let (conn, _rx) = ConnHandle::for_test();
-        t.connect(3, conn, Bandwidth::default());
+        t.connect(3, conn, Bandwidth::default(), AnswerLimit::default());
         assert!(t.sit(3, "ada", Claim::Unclaimed, 8, true).is_ok());
         assert_eq!(t.host(), Some(3));
         assert_eq!(t.remove(3, OnLeave::EndSeat).map(|v| v.new_host), Some(None));
         assert_eq!(t.host(), None);
         let _ = t.remove(2, OnLeave::EndSeat);
         let (conn, _rx) = ConnHandle::for_test();
-        t.connect(2, conn, Bandwidth::default());
+        t.connect(2, conn, Bandwidth::default(), AnswerLimit::default());
         assert!(t.sit(2, "ada", Claim::Unclaimed, 8, true).is_ok());
         assert_eq!(t.host(), Some(2));
         assert_eq!(t.remove(2, OnLeave::EndSeat).map(|v| v.new_host), Some(None));
@@ -670,7 +671,7 @@ mod tests {
         seated(&mut t, 1, 0, Some(0));
         for id in [2, 3] {
             let (conn, _rx) = ConnHandle::for_test();
-            t.connect(id, conn, Bandwidth::default());
+            t.connect(id, conn, Bandwidth::default(), AnswerLimit::default());
         }
         assert_eq!(t.sit(2, "p", Claim::Nation(0), 8, false), Err(Refusal::NationTaken { nation: 0, player: 0 }));
         assert_eq!(t.sit(2, "p", Claim::Nation(1), 1, false), Err(Refusal::Full));
@@ -704,7 +705,7 @@ mod tests {
         seated(&mut t, 1, 0, None);
         seated(&mut t, 2, 1, Some(1));
         let (conn, _rx) = ConnHandle::for_test();
-        t.connect(3, conn, Bandwidth::default()); // connected, not welcomed
+        t.connect(3, conn, Bandwidth::default(), AnswerLimit::default()); // connected, not welcomed
         assert_eq!((t.holder(0), t.holder(1)), (None, Some(1)));
         assert_eq!(t.players(), 2);
     }

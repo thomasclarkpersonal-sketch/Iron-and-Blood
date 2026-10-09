@@ -68,6 +68,11 @@ pub const UPDATES_PER_SECOND: u32 = 4;
 /// D24's default map refresh for a remote session: its `MapView` goes out with every
 /// this-many-th update, and whenever its subscription changes (`--map-every`, M4-7).
 pub const MAP_EVERY: u32 = 5;
+
+/// D24's default for the temporary map-request limit: at most this many `Subscribe`
+/// answers a second per session, the ones in between coalesced
+/// (`--subscribe-answers-per-second`; MILESTONE_4, "Open follow-ups").
+pub const SUBSCRIBE_ANSWERS_PER_SECOND: u32 = 4;
 /// D24's default per-session command rate limit (`--commands-per-second`).
 pub const COMMANDS_PER_SECOND: u32 = 20;
 
@@ -125,6 +130,10 @@ pub struct Config {
     /// `--updates-per-second` and `--map-every`, by default [`UPDATES_PER_SECOND`]
     /// and [`MAP_EVERY`]. Local sessions are never throttled.
     pub bandwidth: Bandwidth,
+    /// The temporary map-request limit: at most this many `Subscribe` answers a
+    /// second per session, local ones too (`--subscribe-answers-per-second`, by
+    /// default [`SUBSCRIBE_ANSWERS_PER_SECOND`]; MILESTONE_4, "Open follow-ups").
+    pub subscribe_answers_per_second: u32,
 }
 
 impl Config {
@@ -146,7 +155,10 @@ impl Config {
                 return Err(ConfigError::PauseNotBeforeDrop);
             }
         }
-        if self.bandwidth.updates_per_second == 0 || self.bandwidth.map_every == 0 {
+        if self.bandwidth.updates_per_second == 0
+            || self.bandwidth.map_every == 0
+            || self.subscribe_answers_per_second == 0
+        {
             return Err(ConfigError::NoUpdates);
         }
         if self.max_players > 1 && !self.bind.ip().is_loopback() && self.tls.is_none() {
@@ -192,6 +204,7 @@ impl Config {
             sandbox: true,
             admin: None,
             bandwidth: Bandwidth::default(),
+            subscribe_answers_per_second: SUBSCRIBE_ANSWERS_PER_SECOND,
             password: None,
             commands_per_second: COMMANDS_PER_SECOND,
             tls: None,
@@ -215,8 +228,8 @@ pub enum ConfigError {
     PauseInSinglePlayer,
     /// The pause must come before the drop, or clients are dropped instead.
     PauseNotBeforeDrop,
-    /// `--updates-per-second` or `--map-every` is 0: a remote session would never
-    /// get an update, or never a map.
+    /// `--updates-per-second`, `--map-every` or `--subscribe-answers-per-second` is 0:
+    /// a session would never get an update, a map, or an answer to `Subscribe`.
     NoUpdates,
     /// D24: TLS off localhost.
     MultiplayerNeedsTls { players: u16, bind: SocketAddr },
@@ -234,7 +247,9 @@ impl std::fmt::Display for ConfigError {
                 write!(f, "a fairness pause (--pause-after) is for multiplayer (--players above 1)")
             }
             ConfigError::PauseNotBeforeDrop => write!(f, "--pause-after must be shorter than --drop-after"),
-            ConfigError::NoUpdates => write!(f, "--updates-per-second and --map-every must be at least 1"),
+            ConfigError::NoUpdates => {
+                write!(f, "--updates-per-second, --map-every and --subscribe-answers-per-second must be at least 1")
+            }
             ConfigError::MultiplayerNeedsTls { players, bind } => write!(
                 f,
                 "--players {players} on {bind} needs TLS (D24): add --tls-self-signed, or --tls-cert and --tls-key"

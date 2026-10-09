@@ -26,6 +26,7 @@ use pax_data::save;
 use pax_protocol::{PROTOCOL_MAJOR, PROTOCOL_MINOR, wire};
 use tracing::{debug, info};
 
+use crate::answer_limit::AnswerLimit;
 use crate::clock::Clock;
 use crate::commands;
 use crate::encode::{self, WelcomeInfo};
@@ -80,6 +81,8 @@ pub(crate) struct Sim {
     sandbox: bool,
     /// How remote sessions are throttled (D24, M4-7).
     bandwidth: crate::Bandwidth,
+    /// The temporary map-request limit (`Config::subscribe_answers_per_second`).
+    subscribe_answers_per_second: u32,
     /// The server password (`Config::password`, D24, M4-6). The admin's is in the
     /// table's `HostRule::Admin`.
     password: Option<crate::Secret>,
@@ -120,6 +123,7 @@ impl Sim {
             max_players: usize::from(config.max_players),
             sandbox: config.sandbox,
             bandwidth: config.bandwidth,
+            subscribe_answers_per_second: config.subscribe_answers_per_second,
             password: config.password.clone(),
             commands_per_second: config.commands_per_second,
             exit_when_idle: config.exit_when_idle,
@@ -320,8 +324,10 @@ impl Sim {
     }
 
     /// Replaces the session's subscription and answers with a `DayUpdate` for the
-    /// current day, so a newly opened panel fills at once, even when paused (D22).
-    /// The refresh bypasses the flow-control window: the client asked for it.
+    /// current day, so a newly opened panel fills at once, even when paused (D22),
+    /// or, within the temporary map-request limit's gap (`answer_limit`), a moment
+    /// later through [`Self::flush`], for the latest subscription. The refresh
+    /// bypasses the flow-control window: the client asked for it.
     fn subscribe(&mut self, session: u64, requested: Subscription) {
         self.subscribe_at(session, requested, Instant::now());
     }
@@ -536,11 +542,9 @@ impl Sim {
     /// Sends every held update whose time has come: the latest day, which a pause or a
     /// slow speed would otherwise keep from a remote session.
     pub(crate) fn flush(&mut self, now: Instant) {
-        let due = |it: &mut dyn Iterator<Item = (u64, Instant)>| -> Vec<u64> {
-            it.filter(|&(_, at)| at <= now).map(|(id, _)| id).collect()
-        };
-        let answers = due(&mut self.sessions.pending_answers());
-        let updates = due(&mut self.sessions.held_updates());
+        let answers: Vec<u64> =
+            self.sessions.pending_answers().filter(|&(_, at)| at <= now).map(|(id, _)| id).collect();
+        let updates: Vec<u64> = self.sessions.held_updates().filter(|&(_, at)| at <= now).map(|(id, _)| id).collect();
         if answers.is_empty() && updates.is_empty() {
             return;
         }
@@ -758,7 +762,10 @@ impl Sim {
     /// Handles one inbound event. Returns `false` when the server should stop.
     pub(crate) fn handle(&mut self, event: Inbound) -> bool {
         match event {
-            Inbound::Connected { session, conn } => self.sessions.connect(session, conn, self.bandwidth),
+            Inbound::Connected { session, conn } => {
+                let answers = AnswerLimit::new(self.subscribe_answers_per_second);
+                self.sessions.connect(session, conn, self.bandwidth, answers);
+            }
             Inbound::Request {
                 session,
                 request: Request::Hello { major, minor, name, requested_nation, resume_token, password },
