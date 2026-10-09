@@ -1,0 +1,138 @@
+# Milestone 3: Playable Single Player (Server and Godot Client)
+
+**Goal:** a person can play `two_states` in a Godot client, and the client never touches the engine directly. The client launches a local `pax_server`, shows the map and panels, lets the player pause, change speed and set policy, and saves and loads games.
+
+**Status: closed by the owner on 2026-10-08.** Every task is merged (#35–#49). The tick budget from item 4 of the definition of done moved to M4 (task M4-11). The human playtest (item 1) is the owner's.
+
+M3 is **single player over a local connection** (D10). Multiplayer is [Milestone 4](MILESTONE_4.md). It reuses everything built here unchanged and adds sessions, authority and hosting.
+
+Binding rules: D10, D12, D22, D23 in [DECISIONS.md](DECISIONS.md). The wire format is in [NETWORK_PROTOCOL.md](NETWORK_PROTOCOL.md).
+
+## Decisions to make first
+
+| # | Decision | Status | Blocks |
+|---|---|---|---|
+| 1 | **Client (D12):** Rust GDExtension bridge + GDScript UI; C# fallback if the M3-0 spike fails | ✅ Accepted | M3-8 |
+| 2 | Wire protocol and sessions (D22), FlatBuffers kept (D10) | ✅ Accepted | M3-1 onwards |
+| 3 | Server loop: pacing, flow control, saves (D23) | ✅ Accepted | M3-2, M3-5, M3-6 |
+| 4 | Map data format (part of M3-7) | ✅ Done (below) | M3-8 |
+
+## Relation to Milestone 2
+
+M3 can start while M2's design questions (trade, investment, rebellions) are open: the server and client only need the command set and `DayReport` that exist today. Each M2 feature that lands later adds to the protocol under its evolution rules (NETWORK_PROTOCOL §8): new summary fields, map modes and commands. The schema is versioned for exactly this. **Freeze nothing in the engine for M3.**
+
+## Architecture
+
+```mermaid
+flowchart LR
+    subgraph Client [Godot client]
+        UI[GDScript UI: map, panels] --> Bridge[Protocol bridge, D12 choice]
+    end
+    Bridge <-->|"TCP 127.0.0.1, size-prefixed FlatBuffers (D22)"| Net
+    subgraph Server [pax_server process]
+        Net[tokio: one task per connection] <-->|channels| Sim[Sim thread: owns World]
+        Sim --> Views[View builders]
+        Sim --> Log[Command log + saves]
+    end
+    Sim --> Engine[pax_engine + pax_data]
+```
+
+- **New crate `pax_protocol`:**
+  - the generated FlatBuffers code;
+  - framing (read and write size-prefixed frames with limits);
+  - message helpers.
+
+  It doesn't depend on `pax_engine`, so the client bridge never pulls in the simulation.
+- **`pax_server`:**
+  - the network tasks;
+  - the sim thread, which owns `World` exclusively. Ticks run there with rayon inside, and there are no locks around the world;
+  - the view builders (read-only over `World` and `DayReport`);
+  - commands, pacing and saves.
+
+  Engine ↔ wire conversion lives here, the only crate that sees both.
+- **The engine changes only if a view needs data `DayReport` doesn't have.** Any such change goes through the normal rules (docs, `state_hash` if it's state).
+
+## Tasks
+
+| ID | Task | Depends on | Notes |
+|---|---|---|---|
+| M3-0 ✅ | **GDExtension spike** (D12): `crates/pax_godot` (gdext) decodes a real `Welcome` and `DayUpdate` from `pax_protocol` in Godot 4 and draws a coloured province map | M3-1 | **Passed**: Godot 4.7.2 + godot-rust 0.5.5; [screenshot](images/m3-0-gdext-spike.png). C# fallback not needed |
+| M3-1 ✅ | **`pax_protocol` crate:** schemas → generated Rust (flatc 24.3.25, checked in, CI drift check); frame reader/writer with size limits; round-trip tests for every message; size-budget test | — | M4-8's Docker image will use the checked-in generated code. Allow generated-code lints locally (`#[allow]` on the module), not workspace-wide |
+| M3-2 ✅ | **`pax_server` skeleton:** CLI (`--scenario DIR`, `--bind`, `--port-file`, `--exit-when-idle`; NETWORK_PROTOCOL §6's launch line is a test); sim thread + tokio network; `Hello`/`Welcome`/`Rejected`; one session at a time (a second gets `Rejected: server full`); `Ping`/`Pong`, 10 s silence timeout; `Goodbye` on protocol errors | M3-1 | Inherit workspace lints (`[lints] workspace = true`) and edition |
+| M3-3 ✅ | **Views:** `WorldSummary`, `NationTable`, `MapView` (all `MapMode`s), `MarketDetail`, `ProvinceDetail`; `Subscribe` with an immediate refresh | M3-2 | Builders read `World` + `DayReport` only. Tests: values match the engine's own numbers, because every aggregation rule exists once, in the engine (`LifeNeedsSummary::record`, `views::province_pops`); the per-province totals equal the tick's own summary exactly. **Measured** at 990k POP rows / 3,000 markets / 200 nations: 2.7 ms and 57 KB per full update (`view_building_budget`) |
+| M3-4 ✅ | **Commands over the wire:** decode → permission (sandbox in M3) → `World::validate` → stamp → queue → `step_with`; `CommandResult`; command log of applied commands | M3-2 | Tests: rejected commands change nothing and aren't logged; order within a day is stamp order |
+| M3-5 ✅ | **Pacing:** speeds 1–5 and pause (D23); `ServerState`; flow control (3-update window, coalescing with `skipped`) | M3-3 | Test with a client that never acks: the sim keeps running and the client gets the latest day after acking |
+| M3-6 ✅ | **Saves:** `SaveGame`/`LoadGame`/`ListSaves`; save = scenario + content hash + command log + hash checkpoints (D23); load = replay, then verify checkpoints | M3-4 | **M3-6a done:** log-based saves with verified replay. **Measured:** replay is tick speed, about 35 ms per day at D13 long-term scale, so a 20-year save would take about 4 minutes to load. **M3-6b done:** each save also writes a binary world snapshot (D10), and loading reads it. Measured at 990k POP rows: 40 MB, loads in 67 ms (D23) |
+| M3-7 ✅ | **Map data:** province map image + definition file (format below); `pax_data` validates it against the scenario; a map for `two_states` | — | Can start immediately, in parallel with M3-1 |
+| M3-8 ✅ | **Godot client:** launches the server (NETWORK_PROTOCOL §6); map with map modes (political, population, unemployment, life needs, militancy, price of a good); top bar (date, speed, pause); nation panel with the three policy sliders; market panel; province panel; save/load menu; connection-lost screen; debug overlay showing `state_hash` | M3-0, M3-3 to M3-7 | Map rendering: one province-ID texture plus a small per-province colour lookup texture updated from `MapView` (a shader), so a map-mode change rewrites one small texture. **M3-8a done:** the bridge (full decoder, encoder, connection with auto-ack and keep-alive, local-server launcher, generated `PaxKeys`), tested against a real server; the app shell with top bar and debug overlay; a headless smoke test in CI. **M3-8b done:** the province map from the shared `pax_map` reader, checked against `map_hash`; the shader with the per-province colour table; map modes with legends; zoom, pan and province selection. **M3-8c done:** side panels for the world, the nation (three policy sliders, with command results), the market and the province. **M3-8d done:** the save/load menu and the connection-lost screen; the CI smoke test now plays a province panel, a value map mode, a policy and a save/list/load round trip |
+| M3-9 ✅ | **Session replay test:** a scripted headless Rust client plays a session (commands on several days, speed changes, a save), then `pax_cli replay` on the save must reproduce the server's final `state_hash` | M3-6 | Runs in CI on Linux, Windows and macOS. It is the determinism gate for the server. **Done:** `pax_server/tests/session_replay.rs`, through the real `pax_cli` binary in CI |
+| M3-10 ✅ | **Hostile input:** fuzz the frame reader and message handling; the server closes the session and never panics | M3-2 | `cargo fuzz` target, run in CI for a fixed budget. **Done:** seeded stable tests (decoder, sim thread, TCP storm) in every build, plus `fuzz/` (`client_frames`, 60 s per PR, nightly; 3.3M local runs clean) |
+| M3-11 ✅ | **Docs:** ARCHITECTURE (crates, processes), BACKEND_SCHEMA (API boundary), DATA_FORMAT (map files, save files), ONBOARDING (how to run the server and client), this file's status | all | Same PR as the code, per AGENTS.md §8 |
+
+### Map data format (done in M3-7)
+
+Provinces belong to scenarios, so maps do too: a scenario names its map directory (`map = "map"` in `scenario.toml`), and `scenarios/two_states/map/` is the first one. The format is in [DATA_FORMAT.md](DATA_FORMAT.md#province-map-map-m3-7).
+
+| File | Content |
+|---|---|
+| `provinces.png` | Every province painted in one unique colour (8-bit RGB or RGBA, no anti-aliasing), on an optional background colour (sea) |
+| `provinces.toml` | `background = [r, g, b]`; per province `key`, `color = [r, g, b]`, `label = [x, y]` |
+
+- **Validation:** `pax_data` checks the map at load. Every scenario province must be listed once with a unique colour, every pixel must be a listed colour or the background, and every province must own at least one pixel with its label on its own pixels.
+- **The engine never reads the image.** Adjacency, needed later for military movement and migration across markets, will be **pre-computed** from the image by a tool (AGENTS.md §5), never computed during the tick.
+- **Map hash:** `StaticData.map_hash` is `pax_content::map_hash` of the two files (a dependency-free crate both sides link), so the client can check its own copy of the map with the server's exact function. `Welcome.content_hash` covers every file, maps included (D22).
+
+## Definition of done
+
+M3 is done when all of these hold. Each is checked by a test or a recorded measurement:
+
+1. **Playable:** from the Godot client, a player can:
+   - start `two_states`;
+   - pause and change speed;
+   - set an income tax rate and see the treasury and militancy respond in the nation panel;
+   - inspect a province's POPs;
+   - save, quit, relaunch, load, and continue.
+2. **Server-authoritative:** the client contains no simulation code and depends on `pax_protocol` only.
+3. **Deterministic:** the session replay test (M3-9) passes in CI on Linux, Windows and macOS.
+4. **Budgets** at D13 long-term scale, measured and recorded in this file:
+   - `DayUpdate` ≤ 16 KB summary-only and ≤ 128 KB with every view subscribed;
+   - view building ≤ 5 ms per day;
+   - the tick plus view building stays within the D13 tick budget plus 10%;
+   - a command is acknowledged within one tick at speed 3.
+5. **Robust:**
+   - a second client is refused;
+   - a silent client times out;
+   - malformed input closes the session without a panic (fuzzed);
+   - killing the client stops the server.
+6. **Documented:** D12, D22 and D23 are accepted; the docs in M3-11 are updated.
+
+### Status against the definition of done
+
+| # | Status | Evidence |
+|---|---|---|
+| 1 | Built and checked headless; **a human playtest remains** | The client does all of it. CI's `--smoke` drives the client headless: it starts `two_states`, runs at full speed, sets an income tax and checks the nation table, opens a province panel and a value map, then saves, lists and loads and plays on. The nation panel shows treasury and militancy (protocol 1.2). Quitting and relaunching the client, then loading, is for the playtest |
+| 2 | Met | No simulation code in the client. The bridge links `pax_protocol`, plus the side-neutral `pax_map` and `pax_content` (the owner approved this D12 exception on 2026-10-08; CI allowlists exactly these), and never `pax_engine`, not even in tests (CI checks dev edges) |
+| 3 | Met | `pax_server/tests/session_replay.rs` through the real `pax_cli replay`, on Linux, Windows and macOS (M3-9) |
+| 4 | **Partly met; closed by the owner with the tick budget moved to M4 (2026-10-08).** The server's share is met; the per-day hash is accepted outside the budget (owner's decision, 2026-10-08). **The tick itself is over D13's 100 ms at `two_states` content** (12 goods, nations): 126 ms. That comes from M2's content, not from the server: M4-11 | At about 1M POP rows on 8 threads (`game::tests::server_day_budget`, 2026-10-08): tick 126 ms, state hash 31 ms, stats and one update 7.5 ms (6% of the tick). `DayUpdate`: 8.3 KB summary-only, 91 KB with every view (M3-1). View building: 2.4–4.0 ms (M3-3). A command gets its `CommandResult` on arrival, before the next tick. The hash adds about 25% per day, which the owner accepted: see Risks |
+| 5 | Met | A second client is refused, a silent client times out, and killing the client stops the server (`pax_server/tests/session.rs`). Hostile input closes the session without a panic, fuzzed (M3-10) |
+| 6 | Met | D12, D22, D23 accepted; ARCHITECTURE, BACKEND_SCHEMA, DATA_FORMAT, ONBOARDING, NETWORK_PROTOCOL and this file updated (M3-11) |
+
+## Out of scope for M3
+
+Several clients, lobbies, nation assignment and permissions (all M4). Also out:
+- TLS, passwords, a dedicated server, and Docker (M4);
+- an AI for nations nobody plays;
+- client-side prediction;
+- a browser build;
+- binary saves, unless M3-6's load-time measurement requires them;
+- sound, localisation beyond English keys, and modding tools.
+
+## Risks
+
+| Risk | Mitigation |
+|---|---|
+| The client-language spike shows no good FlatBuffers path for Godot | M3-0 comes first and is time-boxed. The schema is language-neutral, and C# has an official library |
+| Map art for many provinces is slow to produce | M3 needs only `two_states`'s map. Bigger maps are content work after M3 |
+| Hashing the whole world costs about 30 ms per day at D13 long-term scale (measured in M3-3; 31 ms beside a 126 ms tick in `server_day_budget`). Every `DayUpdate` carries the hash (D10, D22), computed once per day | **Decided (owner, 2026-10-08): keep the hash in every update.** Every update stays pinnable for a bug report, and the hash is accepted outside the +10% view budget. A faster hash (for example FNV over 8-byte words, which re-records every golden file) is an M4 candidate |
+| Replay-based loading is too slow for long games | Resolved in M3-6b: loads read a binary snapshot (67 ms at 1M POP rows, D23); replay remains the determinism check |
+| M2 features change state the client shows | Protocol evolution rules (NETWORK_PROTOCOL §8); new data arrives as new fields and map modes |

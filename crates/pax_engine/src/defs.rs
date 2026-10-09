@@ -140,6 +140,13 @@ pub struct DemographicRules {
     /// Share of a province's surplus workers of one profession who migrate each
     /// month to provinces of the same market with vacancies (D20).
     pub migration_rate: Fixed,
+    /// Share of a pool's surplus workers who move each month to vacancies of another
+    /// profession in another province of the same market (D25).
+    pub occupational_migration_rate: Fixed,
+    /// **Band-aid** (D26): a worker POP's births scale with its pool's employed
+    /// share, a stand-in for "people can't raise children without an income" until
+    /// POPs model dependents (POP_SYSTEM.md, "Future: dependents").
+    pub births_need_employment: bool,
 }
 
 /// Monthly militancy dynamics (D19).
@@ -179,10 +186,24 @@ impl Defs {
         self.goods.len()
     }
 
-    /// Whether each profession is a *worker profession*: one that some producer
-    /// type employs. Owner-only professions never take jobs (D18). This is the
-    /// single definition, used by mobility and by reports.
-    pub fn worker_professions(&self) -> Vec<bool> {
-        (0..self.professions.len()).map(|c| self.producer_types.iter().any(|t| t.worker == c)).collect()
+    /// The *worker professions*: those some producer type employs. Owner-only
+    /// professions never take jobs (D18). This is the single definition, used by
+    /// mobility and by reports.
+    pub fn worker_professions(&self) -> WorkerProfessions {
+        WorkerProfessions(
+            (0..self.professions.len()).map(|c| self.producer_types.iter().any(|t| t.worker == c)).collect(),
+        )
+    }
+}
+
+/// Which professions are worker professions ([`Defs::worker_professions`]), by
+/// profession id. A type of its own, so a rule that needs this set (such as
+/// `labor::pool_unemployment`) can't be handed some other per-profession mask.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WorkerProfessions(Vec<bool>);
+
+impl WorkerProfessions {
+    pub fn contains(&self, profession: usize) -> bool {
+        self.0[profession]
     }
 }

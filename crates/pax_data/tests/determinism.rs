@@ -50,8 +50,14 @@ fn two_states_matches_golden_hashes() {
     let expected = golden::read(&dir.join("golden.hashes")).expect("two_states golden.hashes present");
     let scenario = pax_data::load_scenario(&dir).expect("two_states loads");
     assert!(!scenario.commands.is_empty(), "two_states replays a command log");
+    let last = scenario.commands.last_day().expect("non-empty log");
+    assert!(
+        expected.len() as u64 > last,
+        "the golden replay must cover the whole command log (D11; last command: day {last})"
+    );
     let mut world = scenario.world;
-    let actual = pax_data::run_logged(&mut world, &scenario.commands, expected.len() as u64);
+    let actual =
+        pax_data::run_logged(&mut world, &scenario.commands, expected.len() as u64).expect("logged commands accepted");
     assert_eq!(actual, expected, "two_states results changed; re-record if intended");
 }
 

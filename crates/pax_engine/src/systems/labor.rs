@@ -9,6 +9,7 @@
 //! the pool's POPs (wages are later distributed by size).
 
 use crate::alloc::allocate_raw;
+use crate::defs::WorkerProfessions;
 use crate::groups::Groups;
 use crate::layout::{pool_count, pool_key, pool_of_key};
 use crate::world::World;
@@ -77,4 +78,67 @@ pub fn assign_employment(world: &mut World, pools: &Groups) -> Vec<LabourReport>
         report.push(LabourReport { province, profession, workforce: supply, jobs: demand as u64, employed });
     }
     report
+}
+
+/// Unemployment among *worker professions* (D18): `(unemployed, workforce)`
+/// summed over the labour pools of professions some producer type employs.
+/// Owner-only professions are outside the labour force. The single definition,
+/// used by reports and tests.
+pub fn unemployment(defs: &crate::defs::Defs, labour: &[LabourReport]) -> (u64, u64) {
+    let worker = defs.worker_professions();
+    labour.iter().fold((0, 0), |(u, w), pool| {
+        let (pu, pw) = pool_unemployment(&worker, pool);
+        (u + pu, w + pw)
+    })
+}
+
+/// One pool's `(unemployed, workforce)` under [`unemployment`]'s definition, given
+/// `worker` (`Defs::worker_professions`, computed once by the caller). It is the rule
+/// itself, so per-province views can apply it in a single pass over the pools.
+pub fn pool_unemployment(worker: &WorkerProfessions, pool: &LabourReport) -> (u64, u64) {
+    if worker.contains(pool.profession as usize) { (pool.unemployed(), pool.workforce) } else { (0, 0) }
+}
+
+/// Workforce and jobs of every labour pool `(province, profession)` as the tables
+/// stand now, by [`pool_key`]. Not state (D7): counted from the POP and producer
+/// tables whenever a month-end rule needs them after earlier flows moved people
+/// (D20 and D25 in `mobility`, D26's births in `demographics`). Callers ask by
+/// `(province, profession)`, never by index, so the key is `layout`'s alone.
+pub(crate) struct Pools {
+    workforce: Vec<u64>,
+    jobs: Vec<u64>,
+}
+
+impl Pools {
+    pub(crate) fn count(world: &World) -> Pools {
+        let mut workforce = vec![0u64; pool_count(world)];
+        for i in 0..world.pops.len() {
+            workforce[pool_key(world, world.pops.province[i], world.pops.profession[i] as usize)] +=
+                world.pops.size[i] as u64;
+        }
+        let mut jobs = vec![0u64; pool_count(world)];
+        for i in 0..world.producers.len() {
+            let worker = world.defs.producer_types[world.producers.kind[i] as usize].worker;
+            jobs[pool_key(world, world.producers.province[i], worker)] += world.producers.capacity[i] as u64;
+        }
+        Pools { workforce, jobs }
+    }
+
+    /// `(workforce, jobs)` of a pool.
+    pub(crate) fn of(&self, world: &World, province: u32, profession: usize) -> (u64, u64) {
+        let k = pool_key(world, province, profession);
+        (self.workforce[k], self.jobs[k])
+    }
+
+    /// People beyond the pool's jobs (0 if none).
+    pub(crate) fn surplus(&self, world: &World, province: u32, profession: usize) -> u64 {
+        let (workforce, jobs) = self.of(world, province, profession);
+        workforce.saturating_sub(jobs)
+    }
+
+    /// Jobs beyond the pool's workforce, or `None` if it has no vacancy.
+    pub(crate) fn vacancy(&self, world: &World, province: u32, profession: usize) -> Option<u64> {
+        let (workforce, jobs) = self.of(world, province, profession);
+        (jobs > workforce).then(|| jobs - workforce)
+    }
 }

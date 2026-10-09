@@ -1,0 +1,24 @@
+[package]
+name = "pax_protocol"
+description = "Wire protocol between pax_server and its clients: generated FlatBuffers code and framing (D22)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# No pax_engine dependency, ever: clients link this crate, and a client must not be able
+# to simulate (D10, D12).
+[dependencies]
+flatbuffers.workspace = true
+
+# The workspace lints, except one. The workspace forbids `unsafe_code`, but flatc's
+# generated Rust uses `unsafe` internally, and `forbid` can't be relaxed for a single
+# module. This crate denies it instead and allows it only on the generated module
+# (src/lib.rs), so hand-written code here is held to the same rule. Keep these in step
+# with [workspace.lints] in the root Cargo.toml.
+[lints.rust]
+unsafe_code = "deny"
+
+[lints.clippy]
+float_arithmetic = "warn"

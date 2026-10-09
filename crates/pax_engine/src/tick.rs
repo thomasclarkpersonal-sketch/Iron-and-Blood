@@ -22,7 +22,7 @@ use crate::command::{Command, CommandError};
 use crate::fixed::Fixed;
 use crate::systems::firms::Payouts;
 use crate::systems::labor::LabourReport;
-use crate::systems::market::{GoodReport, LifeNeedsSummary};
+use crate::systems::market::{GoodReport, LifeNeedsSummary, MilitancySummary};
 use crate::systems::{demographics, firms, government, labor, market, mobility, politics, production};
 use crate::world::World;
 
@@ -45,6 +45,8 @@ pub struct DayReport {
     pub payouts: Payouts,
     /// Life-needs coverage at today's market.
     pub life_needs: LifeNeedsSummary,
+    /// Population-weighted militancy at the end of the day (D19).
+    pub militancy: MilitancySummary,
     /// Paid from treasuries to POPs today (D15).
     pub transfers: Fixed,
     /// Paid from treasuries for government consumption today (D16).
@@ -53,6 +55,9 @@ pub struct DayReport {
     pub moved: u64,
     /// People who moved to another province of their market today (month end only, D20).
     pub migrated: u64,
+    /// People who moved to another profession in another province of their market
+    /// today (month end only, D25).
+    pub retrained: u64,
     /// POP rows removed by month-end compaction (D7).
     pub compacted: usize,
     pub total_money: Fixed,
@@ -85,7 +90,8 @@ fn step_systems(world: &mut World) -> DayReport {
     let outcome = market::clear_markets(world, &layout);
     let payouts = firms::pay_wages_and_dividends(world, &layout, &outcome.revenue, &outcome.input_cost);
     let transfers = government::pay_transfers(world, &layout);
-    let (mut moved, mut migrated, mut compacted) = (0, 0, 0);
+    let (mut moved, mut migrated, mut retrained, mut compacted) = (0, 0, 0, 0);
+    let mut militancy = outcome.militancy;
     if demographics::is_month_end(world) {
         moved = mobility::reassign_workers(world, &layout, &labour);
         // Mobility may have appended rows, so the tick's layout snapshot is stale
@@ -93,13 +99,20 @@ fn step_systems(world: &mut World) -> DayReport {
         // demographics, compaction) do not read the layout.
         let regrouped = world.pop_layout();
         migrated = mobility::migrate_within_markets(world, &regrouped);
+        // Migration may have appended rows too: a fresh layout again (D25).
+        let regrouped = world.pop_layout();
+        retrained = mobility::retrain_within_markets(world, &regrouped);
         politics::update_militancy(world);
         demographics::update_population(world);
         compacted = world.compact_pops();
+        militancy = MilitancySummary::of(&world.pops);
     }
 
     let money_after = world.total_money();
     assert_eq!(money_before, money_after, "money not conserved on day {}", world.day);
+    // Every system keeps the table invariants a restored world is checked against
+    // (`World::check_tables`). Debug builds prove it on every day of every test.
+    debug_assert_eq!(world.check_tables(), Ok(()), "a table invariant broke on day {}", world.day);
     let day = world.day;
     world.day += 1;
     DayReport {
@@ -107,10 +120,12 @@ fn step_systems(world: &mut World) -> DayReport {
         input_spending: outcome.input_spending,
         household_spending: outcome.household_spending,
         life_needs: outcome.life_needs,
+        militancy,
         transfers,
         government_spending: outcome.government_spending,
         moved,
         migrated,
+        retrained,
         compacted,
         goods: outcome.goods,
         iterations: outcome.iterations,

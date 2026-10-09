@@ -1,11 +1,16 @@
 //! `pax_cli`: headless runner for the simulation.
 //!
 //! ```text
-//! pax_cli run    <scenario-dir> [--days N] [--every K]
-//! pax_cli record <scenario-dir> [--days N]      # write <scenario-dir>/golden.hashes
+//! pax_cli run    <scenario-dir> [--days N] [--every K] [--market KEY]
+//! pax_cli record <scenario-dir> [--days N]      # write <scenario-dir>/golden.hashes (keeps the existing length)
 //! pax_cli verify <scenario-dir> [--threads T]   # replay and compare with golden.hashes
 //! pax_cli bench  <scenario-dir> [--days N] [--scale K] [--regions R] [--threads T]
+//!     (--scale copies POP rows with identical identities, which month-end
+//!     compaction merges back, so with --scale the default run stops before the
+//!     first month end, after 29 days; a longer --days warns, and can overflow at
+//!     large scales; use --regions for long runs)
 //! pax_cli report <scenario-dir> [--days N] [--every K]   # economy health indicators
+//! pax_cli replay <save.toml> [--threads T]      # replay a server save, verifying its checkpoints
 //! ```
 //!
 //! `verify` is the determinism gate used by CI: any change to simulation
@@ -25,37 +30,108 @@ use pax_data::{CommandLog, golden};
 use pax_engine::{DayReport, Fixed, World, step};
 
 const USAGE: &str = "usage:
-  pax_cli run    <scenario-dir> [--days N] [--every K]
+  pax_cli run    <scenario-dir> [--days N] [--every K] [--market KEY]
   pax_cli record <scenario-dir> [--days N]
   pax_cli verify <scenario-dir> [--threads T]
   pax_cli bench  <scenario-dir> [--days N] [--scale K] [--regions R] [--threads T]
-  pax_cli report <scenario-dir> [--days N] [--every K]";
+  pax_cli report <scenario-dir> [--days N] [--every K]
+  pax_cli replay <save.toml> [--threads T]";
+
+/// The subcommands, parsed once: every match over them is exhaustive, so a new one
+/// can't be missing a flag list or a dispatch arm.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Cmd {
+    Run,
+    Record,
+    Verify,
+    Bench,
+    Report,
+    Replay,
+}
+
+impl Cmd {
+    fn parse(name: &str) -> Result<Cmd, String> {
+        Ok(match name {
+            "run" => Cmd::Run,
+            "record" => Cmd::Record,
+            "verify" => Cmd::Verify,
+            "bench" => Cmd::Bench,
+            "report" => Cmd::Report,
+            "replay" => Cmd::Replay,
+            other => return Err(format!("unknown command '{other}'")),
+        })
+    }
+
+    /// The flags the command takes, as in `USAGE`.
+    fn flags(self) -> &'static [Flag] {
+        match self {
+            Cmd::Run => &[Flag::Days, Flag::Every, Flag::Market],
+            Cmd::Record => &[Flag::Days],
+            Cmd::Verify | Cmd::Replay => &[Flag::Threads],
+            Cmd::Bench => &[Flag::Days, Flag::Scale, Flag::Regions, Flag::Threads],
+            Cmd::Report => &[Flag::Days, Flag::Every],
+        }
+    }
+}
+
+/// The flags, parsed once: `Cmd::flags` and `parse_args` both match over this type,
+/// so a flag can't be listed for a command without a parser, or the reverse.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Flag {
+    Days,
+    Every,
+    Scale,
+    Regions,
+    Market,
+    Threads,
+}
+
+impl Flag {
+    fn parse(name: &str) -> Option<Flag> {
+        Some(match name {
+            "--days" => Flag::Days,
+            "--every" => Flag::Every,
+            "--scale" => Flag::Scale,
+            "--regions" => Flag::Regions,
+            "--market" => Flag::Market,
+            "--threads" => Flag::Threads,
+            _ => return None,
+        })
+    }
+}
 
 struct Args {
-    command: String,
-    scenario: PathBuf,
+    command: Cmd,
+    /// The command's operand: the scenario directory, or for `replay` the save file.
+    target: PathBuf,
     days: Option<u64>,
     every: u64,
     scale: u32,
     regions: u32,
+    market: Option<String>,
     threads: Option<usize>,
 }
 
 fn parse_args() -> Result<Args, String> {
     let mut it = std::env::args().skip(1);
-    let command = it.next().ok_or("missing command")?;
-    let scenario = PathBuf::from(it.next().ok_or("missing scenario directory")?);
-    let mut args = Args { command, scenario, days: None, every: 30, scale: 1, regions: 1, threads: None };
-    while let Some(flag) = it.next() {
-        let value = it.next().ok_or(format!("{flag} needs a value"))?;
-        let num = |v: &str| v.parse::<u64>().map_err(|_| format!("{flag}: '{v}' is not a number"));
-        match flag.as_str() {
-            "--days" => args.days = Some(num(&value)?),
-            "--every" => args.every = num(&value)?.max(1),
-            "--scale" => args.scale = num(&value)?.max(1) as u32,
-            "--regions" => args.regions = num(&value)?.max(1) as u32,
-            "--threads" => args.threads = Some(num(&value)?.max(1) as usize),
-            _ => return Err(format!("unknown flag {flag}")),
+    let name = it.next().ok_or("missing command")?;
+    let command = Cmd::parse(&name)?;
+    let target = PathBuf::from(it.next().ok_or("missing scenario directory (or save file, for replay)")?);
+    let mut args = Args { command, target, days: None, every: 30, scale: 1, regions: 1, market: None, threads: None };
+    while let Some(text) = it.next() {
+        // A flag a command doesn't use is an error, never silently ignored.
+        let flag = Flag::parse(&text)
+            .filter(|f| command.flags().contains(f))
+            .ok_or_else(|| format!("unknown flag {text} for {name}"))?;
+        let value = it.next().ok_or(format!("{text} needs a value"))?;
+        let num = |v: &str| v.parse::<u64>().map_err(|_| format!("{text}: '{v}' is not a number"));
+        match flag {
+            Flag::Days => args.days = Some(num(&value)?),
+            Flag::Every => args.every = num(&value)?.max(1),
+            Flag::Scale => args.scale = num(&value)?.max(1) as u32,
+            Flag::Regions => args.regions = num(&value)?.max(1) as u32,
+            Flag::Market => args.market = Some(value),
+            Flag::Threads => args.threads = Some(num(&value)?.max(1) as usize),
         }
     }
     Ok(args)
@@ -84,30 +160,72 @@ fn main() -> ExitCode {
 }
 
 fn dispatch(args: &Args) -> Result<ExitCode, String> {
-    let scenario = pax_data::load_scenario(&args.scenario).map_err(|e| e.to_string())?;
-    match args.command.as_str() {
-        "run" => run(scenario.world, &scenario.commands, args.days.unwrap_or(365), args.every),
-        "record" => {
-            let days = args.days.unwrap_or(golden::DEFAULT_DAYS);
+    if args.command == Cmd::Replay {
+        return replay(&args.target);
+    }
+    let scenario = pax_data::load_scenario(&args.target).map_err(|e| e.to_string())?;
+    match args.command {
+        Cmd::Replay => unreachable!("handled above: it loads a save, not a scenario"),
+        Cmd::Run => {
+            run(scenario.world, &scenario.commands, args.days.unwrap_or(365), args.every, args.market.as_deref())
+        }
+        Cmd::Record => {
+            // D11: keep the existing file's length unless --days says otherwise, and
+            // never record less than the scenario's minimum (past its last command).
+            let path = golden_path(&args.target);
+            let existing = golden::existing_len(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+            let min = golden::min_days(&scenario.commands);
+            let days = args.days.or(existing).unwrap_or(min);
+            if days < min {
+                return Err(format!(
+                    "--days {days} is shorter than this scenario's minimum of {min} (D11: past its last command)"
+                ));
+            }
             let mut world = scenario.world;
-            let hashes = pax_data::run_logged(&mut world, &scenario.commands, days);
-            let path = golden_path(&args.scenario);
+            let hashes = pax_data::run_logged(&mut world, &scenario.commands, days)?;
             golden::write(&path, &scenario.name, &hashes).map_err(|e| format!("{}: {e}", path.display()))?;
             println!("recorded {days} day hashes to {}", path.display());
             Ok(ExitCode::SUCCESS)
         }
-        "verify" => verify(scenario.world, &scenario.commands, &golden_path(&args.scenario)),
-        "bench" => bench(scenario.world, args.days.unwrap_or(30), args.scale, args.regions),
-        "report" => report::run(scenario.world, &scenario.commands, args.days.unwrap_or(365), args.every),
-        other => Err(format!("unknown command '{other}'\n{USAGE}")),
+        Cmd::Verify => verify(scenario.world, &scenario.commands, &golden_path(&args.target)),
+        Cmd::Bench => bench(scenario.world, args.days, args.scale, args.regions),
+        Cmd::Report => report::run(scenario.world, &scenario.commands, args.days.unwrap_or(365), args.every),
     }
+}
+
+/// Replays a server save from its scenario (D23, M3-9): every logged command on its
+/// day, every checkpoint verified, and the end checked against the save's snapshot
+/// if it has one. Prints the final day and `state_hash`, which must match what the
+/// server sent in that day's `DayUpdate` (D10).
+fn replay(save: &Path) -> Result<ExitCode, String> {
+    let started = Instant::now();
+    let loaded = pax_data::save::load_by_replay(save).map_err(|e| e.to_string())?;
+    let world = &loaded.scenario.world;
+    println!(
+        "ok: replayed {} to day {}: state_hash {:#018x}, {} checkpoints and {} commands ({:.1} s)",
+        save.display(),
+        world.day,
+        world.state_hash(),
+        loaded.save.checkpoints.len(),
+        loaded.save.commands.len(),
+        started.elapsed().as_secs_f64()
+    );
+    Ok(ExitCode::SUCCESS)
 }
 
 fn golden_path(scenario: &Path) -> PathBuf {
     scenario.join("golden.hashes")
 }
 
-fn run(mut world: World, log: &CommandLog, days: u64, every: u64) -> Result<ExitCode, String> {
+fn run(mut world: World, log: &CommandLog, days: u64, every: u64, market: Option<&str>) -> Result<ExitCode, String> {
+    let m =
+        match market {
+            None => 0,
+            Some(key) => world.geography.market_keys.iter().position(|k| k == key).ok_or_else(|| {
+                format!("unknown market '{key}' (markets: {})", world.geography.market_keys.join(", "))
+            })?,
+        };
+    println!("market: {}", world.geography.market_keys[m]);
     let goods: Vec<String> = world.defs.goods.iter().map(|g| g.key.clone()).collect();
     print!("{:>5} {:>10} {:>14}", "day", "population", "money");
     for g in &goods {
@@ -120,8 +238,7 @@ fn run(mut world: World, log: &CommandLog, days: u64, every: u64) -> Result<Exit
             continue;
         }
         print!("{:>5} {:>10} {:>14}", report.day + 1, world.population(), short(report.total_money, 2));
-        // M1 prints the first market; per-market views come with pax_server.
-        for r in report.goods.iter().take(goods.len()) {
+        for r in &report.goods[m * goods.len()..(m + 1) * goods.len()] {
             print!(" {:>12} {:>10}", short(r.price, 4), short(r.traded, 1));
         }
         println!();
@@ -131,6 +248,14 @@ fn run(mut world: World, log: &CommandLog, days: u64, every: u64) -> Result<Exit
 
 fn verify(mut world: World, log: &CommandLog, path: &Path) -> Result<ExitCode, String> {
     let expected = golden::read(path).map_err(|e| format!("{}: {e} (run `pax_cli record` first)", path.display()))?;
+    let min = golden::min_days(log);
+    if (expected.len() as u64) < min {
+        return Err(format!(
+            "{}: pins {} days, but this scenario needs at least {min} to cover its command log (D11)",
+            path.display(),
+            expected.len()
+        ));
+    }
     for (day, &want) in expected.iter().enumerate() {
         tick(&mut world, log);
         let got = world.state_hash();
@@ -144,8 +269,26 @@ fn verify(mut world: World, log: &CommandLog, path: &Path) -> Result<ExitCode, S
     Ok(ExitCode::SUCCESS)
 }
 
-fn bench(world: World, days: u64, scale: u32, regions: u32) -> Result<ExitCode, String> {
-    let mut world = replicate(&world, scale, regions);
+/// Times `days` days (default 30) of the scenario grown by `scale` and `regions`
+/// (D13). With `scale > 1` the default is the days before the first month end, when
+/// compaction merges the copies (`pax_data::bench`). A longer run is allowed, to
+/// time the month-end systems too (CI's `two_states` benchmark does), with a warning:
+/// past the month end it measures a smaller world, and at large scales the merged
+/// sizes overflow.
+fn bench(world: World, days: Option<u64>, scale: u32, regions: u32) -> Result<ExitCode, String> {
+    let days = if scale > 1 {
+        let limit = pax_data::bench::days_before_compaction(&world);
+        if let Some(d) = days.filter(|&d| d > limit) {
+            eprintln!(
+                "warning: --days {d} with --scale {scale}: the copies share identities, which month-end compaction \
+                 merges after day {limit} (D7), so later days measure a smaller world; use --regions for long runs"
+            );
+        }
+        days.unwrap_or(limit)
+    } else {
+        days.unwrap_or(30)
+    };
+    let mut world = pax_data::bench::replicate(&world, scale, regions);
     let start = Instant::now();
     for _ in 0..days {
         step(&mut world);
@@ -161,71 +304,13 @@ fn bench(world: World, days: u64, scale: u32, regions: u32) -> Result<ExitCode, 
     Ok(ExitCode::SUCCESS)
 }
 
-/// Builds a benchmark world: the scenario's whole map copied `regions` times
-/// (separate provinces and markets), with every POP row repeated `scale` times.
-/// Rows are pushed region by region, so they stay grouped by market as a loaded
-/// scenario's are.
-fn replicate(base: &World, scale: u32, regions: u32) -> World {
-    use pax_engine::world::{Geography, NewProducer};
-    let g = &base.geography;
-    let (provinces, markets) = (g.province_count() as u32, g.market_count() as u32);
-    let mut geography = Geography::default();
-    for r in 0..regions {
-        geography.province_keys.extend(g.province_keys.iter().map(|k| format!("{k}#{r}")));
-        geography.province_market.extend(g.province_market.iter().map(|&m| m + r * markets));
-        geography.market_keys.extend(g.market_keys.iter().map(|k| format!("{k}#{r}")));
-        let nations = base.nations.len() as u32;
-        geography
-            .market_nation
-            .extend((0..markets as usize).map(|m| g.nation_of_market(m).map(|n| n as u32 + r * nations)));
-    }
-    let mut world = World::new(base.defs.clone(), geography, base.seed);
-    for r in 0..regions {
-        let n = &base.nations;
-        for k in 0..n.len() {
-            world.push_nation(pax_engine::world::NewNation {
-                key: format!("{}#{r}", n.key[k]),
-                treasury: n.treasury[k],
-                income_tax_rate: n.income_tax_rate[k],
-                transfer_rate: n.transfer_rate[k],
-                consumption_rate: n.consumption_rate[k],
-                basket: n.basket[k * base.defs.good_count()..(k + 1) * base.defs.good_count()].to_vec(),
-            });
-        }
-    }
-    let (pops, producers) = (&base.pops, &base.producers);
-    for r in 0..regions {
-        for _ in 0..scale {
-            for i in 0..pops.len() {
-                world.push_pop(
-                    pops.province[i] + r * provinces,
-                    pops.profession[i] as usize,
-                    pops.size[i],
-                    pops.cash[i],
-                );
-            }
-        }
-        for i in 0..producers.len() {
-            world.push_producer(NewProducer {
-                kind: producers.kind[i] as usize,
-                province: producers.province[i] + r * provinces,
-                capacity: producers.capacity[i],
-                cash: producers.cash[i],
-                wage: producers.wage[i],
-                output_stock: producers.output_stock[i],
-            });
-        }
-    }
-    world
-}
-
-/// Advances one day, applying the command log's commands for that day (D21).
-/// A rejected command is reported on stderr, and the day still runs.
+/// Advances one day through the shared replay step (`pax_data::step_logged`).
+/// A rejected logged command is reported on stderr; the day has still run.
 pub(crate) fn tick(world: &mut World, log: &CommandLog) -> DayReport {
     let day = world.day;
-    let (report, results) = pax_engine::tick::step_with(world, log.for_day(day));
-    for e in results.into_iter().filter_map(Result::err) {
-        eprintln!("warning: command on day {day} rejected: {e}");
+    let (report, rejected) = pax_data::step_logged(world, log);
+    for (command, error) in rejected {
+        eprintln!("warning: command {command:?} on day {day} rejected: {error}");
     }
     report
 }
@@ -243,5 +328,28 @@ fn short(v: Fixed, decimals: usize) -> String {
         Some((i, _)) if decimals == 0 => i.to_string(),
         Some((i, f)) => format!("{i}.{}", &f[..decimals.min(f.len())]),
         None => s,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn two_states() -> pax_data::Scenario {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two_states");
+        pax_data::load_scenario(&dir).expect("two_states loads")
+    }
+
+    #[test]
+    fn run_shows_a_chosen_market() {
+        let s = two_states();
+        assert_eq!(run(s.world, &s.commands, 5, 5, Some("highland")).unwrap(), ExitCode::SUCCESS);
+    }
+
+    #[test]
+    fn run_rejects_an_unknown_market_by_name() {
+        let s = two_states();
+        let err = run(s.world, &s.commands, 5, 5, Some("atlantis")).unwrap_err();
+        assert!(err.contains("unknown market 'atlantis'") && err.contains("lowland"), "{err}");
     }
 }

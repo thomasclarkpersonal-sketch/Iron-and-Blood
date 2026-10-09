@@ -1,6 +1,6 @@
 # State, Politics & Fiscal Policy
 
-The government is the largest single economic actor. In a stock-flow consistent economy, the state's balance sheet is tied directly to POP wealth: a government surplus drains liquidity from the private sector, and a deficit injects it. This is an **M2** system; the accounting rules below are already binding (D3, D5 in [DECISIONS.md](DECISIONS.md)).
+The government is the largest single economic actor. In a stock-flow consistent economy, the state's balance sheet is tied directly to POP wealth: a government surplus drains liquidity from the private sector, and a deficit injects it. Part of it is built (below); the accounting rules for the rest are already binding (D3, D5 in [DECISIONS.md](DECISIONS.md)).
 
 ## 🏛️ Fiscal Policy (the Balance Sheet)
 
@@ -35,7 +35,7 @@ Both are `Fixed` columns on `Pops`, updated at month end (D4). **Militancy is im
 *   **Militancy:** willingness to use violence against the state. It rises with unmet life needs (`1 − life_needs`) and with the tax burden, and decays slowly toward a baseline. High militancy produces rebellions, the one place genuine randomness is used (`rng::Stream::REBELLION`, D3).
 *   **Consciousness:** political awareness. Driven by literacy, discretionary spending (`Y − N·C`) and technology. High consciousness creates demand for political reforms (voting rights, free press) and social reforms (minimum wage, pensions).
 
-Exact update formulas will be specified in M2, together with the data fields for them in `professions.toml` and `rules.toml`.
+Consciousness needs a decision of its own, with its update formula and its data fields in `professions.toml` and `rules.toml`. What militancy *does* is proposed in [#28](https://github.com/thomasclarkpersonal-sketch/Iron-and-Blood/pull/28).
 
 ### Laws & reforms
 Enacted laws constrain the government's tax brackets, tariff ranges and social spending. Reforms can appease high-consciousness POPs but anger entrenched elite interest groups.

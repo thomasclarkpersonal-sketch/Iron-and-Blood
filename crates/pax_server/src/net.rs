@@ -1,0 +1,414 @@
+//! The network side (D22, D23): one tokio task per connection.
+//!
+//! A connection task splits the byte stream into frames, verifies and decodes them
+//! into [`Request`]s, enforces the framing-level session rules, and passes the rest
+//! to the sim thread:
+//! * `Hello` must come first, and only once;
+//! * a silent client times out, and in multiplayer is first reported as stalled
+//!   (D24's fairness pause), then as resumed if it speaks again;
+//! * `Ping` is answered here.
+//!
+//! Whether a session is *welcomed*, and so may do anything else, is decided only by
+//! the sim thread.
+//!
+//! Any protocol error ends the session with `Goodbye` and the reason (D22). The sim
+//! thread answers through the connection's bounded outbound queue. A client that
+//! stops reading fills the queue, and its connection is closed instead of growing
+//! memory without limit.
+
+use std::net::SocketAddr;
+use std::sync::Arc;
+use std::time::Duration;
+
+use pax_protocol::{Direction, FrameDecoder};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use tokio::net::TcpListener;
+use tokio::sync::mpsc::error::TrySendError;
+use tokio::sync::{Notify, mpsc};
+use tokio_rustls::TlsAcceptor;
+use tracing::{debug, info, warn};
+
+use crate::encode;
+use crate::request::{self, Request};
+
+/// Frames a connection may have queued for writing. A client that reads normally
+/// never comes close: updates are capped by D23's 3-update window, and replies are
+/// one per request.
+pub(crate) const OUTBOUND_QUEUE: usize = 256;
+
+/// Events all connections may have queued for the sim thread. When it is full, a
+/// connection stops reading its socket until there is room: TCP backpressure,
+/// not unbounded memory.
+pub(crate) const INBOUND_QUEUE: usize = 1024;
+
+/// After the session ends, how long the writer may take to flush its queue before
+/// it is cut off (a client that isn't reading would hold it forever).
+const FLUSH_TIMEOUT: Duration = Duration::from_secs(2);
+
+/// When the server stops, how long `Server::wait` lets the connection tasks write
+/// their `Goodbye` and end before the runtime is dropped (which cancels them). A
+/// connection gives its writer [`FLUSH_TIMEOUT`], so the drain allows that and a
+/// little more: one policy, not two numbers that can drift apart.
+pub(crate) const SHUTDOWN_DRAIN: Duration = FLUSH_TIMEOUT.saturating_add(Duration::from_millis(500));
+
+/// How long a connection may stay silent (D22, D24).
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Timing {
+    /// Silence that closes the session: D22's 10 s in single player, D24's drop
+    /// (30 s) in multiplayer.
+    pub idle: Duration,
+    /// Silence after which the sim thread hears `Stalled`, so it can pause the game
+    /// for everyone (D24's fairness pause, 5 s). `None` in single player.
+    pub stall_after: Option<Duration>,
+}
+
+/// What the sim thread sends a connection.
+#[derive(Debug)]
+pub(crate) enum Outbound {
+    /// A complete frame to write.
+    Frame(Vec<u8>),
+    /// Flush what was queued, then close the connection.
+    Close,
+}
+
+/// The sim thread's handle on one connection.
+#[derive(Debug)]
+pub(crate) struct ConnHandle {
+    out: mpsc::Sender<Outbound>,
+    kill: Arc<Notify>,
+    /// The peer is not on this machine: its updates are throttled (D24, M4-7).
+    pub remote: bool,
+}
+
+impl ConnHandle {
+    /// Queues `out` without blocking the sim thread. If the queue is full, the
+    /// client isn't reading, so the connection is closed instead. It can't be sent a
+    /// `Goodbye`, because its queue is what's full. A closed connection is ignored.
+    pub(crate) fn send(&self, out: Outbound) {
+        if let Err(TrySendError::Full(_)) = self.out.try_send(out) {
+            self.kill.notify_one();
+        }
+    }
+}
+
+#[cfg(test)]
+impl ConnHandle {
+    /// A handle whose frames the test reads from the returned receiver.
+    pub(crate) fn for_test() -> (ConnHandle, mpsc::Receiver<Outbound>) {
+        let (out, rx) = mpsc::channel(OUTBOUND_QUEUE);
+        (ConnHandle { out, kill: Arc::new(Notify::new()), remote: false }, rx)
+    }
+
+    /// As [`Self::for_test`], for a peer on another machine.
+    pub(crate) fn for_test_remote() -> (ConnHandle, mpsc::Receiver<Outbound>) {
+        let (mut conn, rx) = ConnHandle::for_test();
+        conn.remote = true;
+        (conn, rx)
+    }
+}
+
+/// What connections tell the sim thread.
+pub(crate) enum Inbound {
+    Connected {
+        session: u64,
+        conn: ConnHandle,
+    },
+    Request {
+        session: u64,
+        request: Request,
+    },
+    Closed {
+        session: u64,
+    },
+    /// The client has sent nothing for `Timing::stall_after` (D24).
+    Stalled {
+        session: u64,
+    },
+    /// A stalled client spoke again.
+    Resumed {
+        session: u64,
+    },
+    /// Stop the server (tests, and future admin commands).
+    Shutdown,
+    /// Make the sim thread panic, to test how a failure reaches clients and the caller.
+    #[cfg(test)]
+    Crash,
+}
+
+/// The synchronous half of a connection: bytes in, requests out, with the
+/// framing-level session rules (`Hello` first, and only once). The connection task
+/// feeds it the socket; the cargo-fuzz target (`fuzz/`) feeds it fuzzed bytes, so it
+/// fuzzes exactly this code.
+#[derive(Debug)]
+pub struct RequestReader {
+    decoder: FrameDecoder,
+    greeted: bool,
+}
+
+impl Default for RequestReader {
+    fn default() -> Self {
+        RequestReader { decoder: FrameDecoder::new(Direction::ClientToServer), greeted: false }
+    }
+}
+
+impl RequestReader {
+    /// Bytes as they arrived, in any chunking.
+    pub fn push(&mut self, bytes: &[u8]) {
+        self.decoder.push(bytes);
+    }
+
+    /// The next request; `Ok(None)` until more bytes arrive. An error is a protocol
+    /// error that ends the session with `Goodbye` (D22); its text is the reason.
+    pub fn next_request(&mut self) -> Result<Option<Request>, ReadError> {
+        let Some(frame) = self.decoder.next_frame().map_err(ReadError::Frame)? else { return Ok(None) };
+        let request = request::decode(&frame).map_err(ReadError::Decode)?;
+        match (&request, self.greeted) {
+            (Request::Hello { .. }, false) => self.greeted = true,
+            (Request::Hello { .. }, true) => return Err(ReadError::HelloTwice),
+            (_, false) => return Err(ReadError::NoHello),
+            (_, true) => {}
+        }
+        Ok(Some(request))
+    }
+}
+
+/// Why a connection's input ends the session, by kind, so callers (the fuzz target,
+/// future metrics) can tell them apart. `Display` is the `Goodbye` reason.
+#[derive(Debug)]
+pub enum ReadError {
+    /// The byte stream can't be split into frames.
+    Frame(pax_protocol::FrameError),
+    /// A frame isn't a usable request.
+    Decode(request::RequestError),
+    /// The session rules: `Hello` first, and only once.
+    HelloTwice,
+    NoHello,
+}
+
+impl std::fmt::Display for ReadError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ReadError::Frame(e) => write!(f, "{e}"),
+            ReadError::Decode(e) => write!(f, "{e}"),
+            ReadError::HelloTwice => write!(f, "Hello sent twice"),
+            ReadError::NoHello => write!(f, "the first message must be Hello"),
+        }
+    }
+}
+
+/// How long a client may take over its TLS handshake (D24, M4-6), so a connection
+/// that never finishes one can't hold a task forever.
+const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// How many sessions' connection tasks are running: [`connection`] counts itself,
+/// so every session is counted, however it arrived. When the server stops, the sim
+/// queues a `Goodbye` and `Close` for every session; `Server::wait` stops accepting,
+/// then waits ([`Self::all_closed`], at most [`SHUTDOWN_DRAIN`]) for the count to
+/// reach zero, so those tasks write it before the runtime is dropped, which would
+/// otherwise cancel them with the `Goodbye` unsent.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct OpenConnections(Arc<Open>);
+
+#[derive(Debug, Default)]
+pub(crate) struct Open {
+    count: std::sync::atomic::AtomicUsize,
+    /// Signalled when the count reaches zero.
+    closed: Notify,
+}
+
+impl OpenConnections {
+    /// Counts one connection until the returned guard is dropped (its task ends,
+    /// or is cancelled).
+    fn open(&self) -> OpenGuard {
+        self.0.count.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+        OpenGuard(self.0.clone())
+    }
+
+    /// Returns once no connection is open.
+    pub(crate) async fn all_closed(&self) {
+        loop {
+            // Registered before the check, so a close in between can't be missed.
+            let notified = self.0.closed.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+            if self.0.count.load(std::sync::atomic::Ordering::Acquire) == 0 {
+                return;
+            }
+            notified.await;
+        }
+    }
+}
+
+struct OpenGuard(Arc<Open>);
+
+impl Drop for OpenGuard {
+    fn drop(&mut self) {
+        if self.0.count.fetch_sub(1, std::sync::atomic::Ordering::AcqRel) == 1 {
+            self.0.closed.notify_waiters();
+        }
+    }
+}
+
+/// Accepts connections. With `tls`, each one does the TLS handshake first, and a
+/// failed or slow handshake is dropped before it becomes a session (D24, M4-6).
+pub(crate) async fn accept_loop(
+    listener: TcpListener,
+    sim: flume::Sender<Inbound>,
+    timing: Timing,
+    tls: Option<TlsAcceptor>,
+    open: OpenConnections,
+) {
+    let mut next_session = 1u64;
+    loop {
+        match listener.accept().await {
+            Ok((stream, peer)) => {
+                let session = next_session;
+                next_session += 1;
+                // Small, latency-sensitive messages: don't wait to coalesce them.
+                let _ = stream.set_nodelay(true);
+                let (sim, open) = (sim.clone(), open.clone());
+                match tls.clone() {
+                    None => {
+                        tokio::spawn(connection(stream, session, peer, sim, timing, open));
+                    }
+                    Some(acceptor) => {
+                        // A pending or failed handshake isn't a session yet, so it never
+                        // holds up a shutdown (`connection` counts sessions).
+                        tokio::spawn(async move {
+                            match tokio::time::timeout(HANDSHAKE_TIMEOUT, acceptor.accept(stream)).await {
+                                Ok(Ok(stream)) => connection(stream, session, peer, sim, timing, open).await,
+                                // A port probe, such as the Docker health check (M4-8),
+                                // closes without a word: not worth a line every 30 s.
+                                Ok(Err(e)) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
+                                    debug!(session, %peer, "closed before the TLS handshake")
+                                }
+                                Ok(Err(e)) => info!(session, %peer, error = %e, "TLS handshake failed"),
+                                Err(_) => info!(session, %peer, "TLS handshake timed out"),
+                            }
+                        });
+                    }
+                }
+            }
+            Err(e) => {
+                // Usually transient (e.g. out of file descriptors): back off briefly.
+                warn!(error = %e, "accept failed");
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+        }
+    }
+}
+
+/// One session's connection task, over plain TCP or TLS.
+/// One session, from its first byte to its close; every session goes through here,
+/// which counts it in `open` (for the shutdown drain) and logs it.
+async fn connection<S>(
+    stream: S,
+    session: u64,
+    peer: SocketAddr,
+    sim: flume::Sender<Inbound>,
+    timing: Timing,
+    open: OpenConnections,
+) where
+    S: AsyncRead + AsyncWrite + Send + Unpin + 'static,
+{
+    let _counted = open.open();
+    info!(session, %peer, "connection");
+    // The peer is not on this machine: its updates are throttled (D24, M4-7).
+    // `to_canonical`: on a dual-stack socket, a local IPv4 client is ::ffff:127.0.0.1.
+    let remote = !peer.ip().to_canonical().is_loopback();
+    let idle = timing.idle;
+    let (mut rd, mut wr) = tokio::io::split(stream);
+    let (out_tx, mut out_rx) = mpsc::channel::<Outbound>(OUTBOUND_QUEUE);
+    let kill = Arc::new(Notify::new());
+    let conn = ConnHandle { out: out_tx.clone(), kill: kill.clone(), remote };
+    // `send_async` waits, in FIFO order and without blocking the runtime, while the
+    // sim thread's queue is full; it fails only once the sim thread has stopped.
+    if sim.send_async(Inbound::Connected { session, conn }).await.is_err() {
+        return; // the server is shutting down
+    }
+
+    // The writer drains the outbound queue in order. When it closes the connection
+    // it wakes the reader, which must stop too.
+    let writer_done = Arc::new(Notify::new());
+    let mut writer = tokio::spawn({
+        let writer_done = writer_done.clone();
+        async move {
+            while let Some(out) = out_rx.recv().await {
+                match out {
+                    Outbound::Frame(frame) => {
+                        if wr.write_all(&frame).await.is_err() {
+                            break;
+                        }
+                    }
+                    Outbound::Close => break,
+                }
+            }
+            let _ = wr.shutdown().await;
+            writer_done.notify_one();
+        }
+    });
+
+    let mut reader = RequestReader::default();
+    let mut buf = vec![0u8; 16 * 1024];
+    // Silence is measured from the last bytes received. A stalled client is
+    // reported once, and once more when it speaks again (D24).
+    let mut last_heard = tokio::time::Instant::now();
+    let mut stalled = false;
+    let goodbye: Option<String> = 'read: loop {
+        let stall_at = timing.stall_after.filter(|_| !stalled).map(|s| last_heard + s);
+        let deadline = stall_at.unwrap_or(last_heard + idle);
+        let n = tokio::select! {
+            _ = writer_done.notified() => break 'read None,
+            _ = kill.notified() => break 'read Some("the client is not reading its messages".to_owned()),
+            read = tokio::time::timeout_at(deadline, rd.read(&mut buf)) => match read {
+                Err(_) if stall_at.is_some() => {
+                    stalled = true;
+                    if sim.send_async(Inbound::Stalled { session }).await.is_err() {
+                        break 'read Some("the server is shutting down".to_owned());
+                    }
+                    continue;
+                }
+                Err(_) => break 'read Some(format!("no message for {} s", idle.as_secs_f32())),
+                Ok(Ok(0) | Err(_)) => break 'read None,
+                Ok(Ok(n)) => n,
+            },
+        };
+        last_heard = tokio::time::Instant::now();
+        if stalled {
+            stalled = false;
+            if sim.send_async(Inbound::Resumed { session }).await.is_err() {
+                break 'read Some("the server is shutting down".to_owned());
+            }
+        }
+        reader.push(&buf[..n]);
+        loop {
+            let request = match reader.next_request() {
+                Ok(Some(request)) => request,
+                Ok(None) => break,
+                Err(e) => break 'read Some(e.to_string()),
+            };
+            if let Request::Ping { nonce } = request {
+                if out_tx.try_send(Outbound::Frame(encode::pong(nonce))).is_err() {
+                    break 'read Some("the client is not reading its messages".to_owned());
+                }
+                continue;
+            }
+            debug!(session, ?request, "request");
+            if sim.send_async(Inbound::Request { session, request }).await.is_err() {
+                break 'read Some("the server is shutting down".to_owned());
+            }
+        }
+    };
+
+    if let Some(reason) = &goodbye {
+        info!(session, %reason, "closing session");
+        let _ = out_tx.try_send(Outbound::Frame(encode::goodbye(reason)));
+    }
+    let _ = out_tx.try_send(Outbound::Close);
+    let _ = sim.send_async(Inbound::Closed { session }).await;
+    // A client that isn't reading would keep the writer blocked forever.
+    if tokio::time::timeout(FLUSH_TIMEOUT, &mut writer).await.is_err() {
+        writer.abort();
+    }
+    info!(session, "disconnected");
+}

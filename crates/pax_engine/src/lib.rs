@@ -20,6 +20,7 @@ pub mod layout;
 pub mod rng;
 pub mod systems;
 pub mod tick;
+pub mod views;
 pub mod world;
 
 pub use command::{Command, CommandError};
