@@ -3,13 +3,13 @@
 > [!NOTE]
 > **Status: planning record** for the "m5" run, kept by the SDLC workflow (docs/SDLC_WORKFLOW.md). Not binding: the contract wins, and each fact moves to its home as the work lands.
 
-What Milestone 5 must do, not yet how: the Analysis stage of the [Project Workbook](README.md). It turns the [System Service Request](01-system-service-request.md#service-requirements)'s SR-1 to SR-13 and the [charter](02-project-charter.md)'s objectives into testable requirements, gives the rules they need as process logic in `Fixed` terms, and draws the system's data flows, use cases, main activity and data model. Code is cited at `aa2133a`, which the plan's commits don't change; documents are cited as they stand on `m5/plan` at this page's commit. Measurements are from a release build of `aa2133a` on the run's machine (32 cores, `bench` at 8 threads).
+What Milestone 5 must do, not yet how: the Analysis stage of the [Project Workbook](README.md). It turns the [System Service Request](01-system-service-request.md#service-requirements)'s SR-1 to SR-13 and the [charter](02-project-charter.md)'s objectives into testable requirements, gives the rules they need as process logic in `Fixed` terms, and draws the system's data flows, use cases, main activity and data model. Code is cited at `aa2133a`, which the plan's commits don't change; documents are cited as they stand on `m5/plan` at this page's commit. Measurements are from a release build of `aa2133a` on the run's machine (32 cores, `bench` at 8 threads). The month-end day's own time was measured with an uncommitted probe of R-F56's print: `pax_cli` built outside the worktree from `m5/plan`, whose engine is `aa2133a`'s, timing each day of `bench`'s loop ([README](README.md#correspondence-log), 04:21).
 
-This is round 2 of the stage. How each finding of round 1 was handled is in the workbook's [review log](README.md#analysis-round-1-findings).
+This is round 3 of the stage. How each finding of rounds 1 and 2 was handled is in the workbook's review log ([round 1](README.md#analysis-round-1-findings), [round 2](README.md#analysis-round-2-findings)).
 
 ## How to read this page
 
-- **Ids:** `R-F<n>` functional, `R-N<n>` non-functional, `R-D<n>` data rules. Each has a testable "shall", its rationale, its source (an SSR row, a milestone task, a decision, a run decision or the charter), a MoSCoW priority and its verification. Ids are stable across rounds: none is renumbered, and those added in round 2 (R-F63 to R-F67, R-N25 to R-N27) follow the last, in the section they belong to.
+- **Ids:** `R-F<n>` functional, `R-N<n>` non-functional, `R-D<n>` data rules. Each has a testable "shall", its rationale, its source (an SSR row, a milestone task, a decision, a run decision or the charter), a MoSCoW priority and its verification. Ids are stable across rounds: none is renumbered, and those added in round 2 (R-F63 to R-F67, R-N25 to R-N27) follow the last, in the section they belong to. Round 3 adds none; it makes R-F56 a *must* and moves it to M5-1.
 - **Priorities:** *must*: the definition of done, a decision or a run decision needs it; *should*: the milestone asks for it, its definition of done doesn't; *won't*: out of this run, listed so nobody builds it.
 - **Verification:** T, an automated test, named, and *planned* unless it exists; M, a measurement with its command; I, inspection of code or documents; D, a demonstration such as CI's headless client smoke test. Test names are this stage's, and the Design stage's test design may rename them while keeping the requirement.
 - **Names:** tables, columns, rules and messages that M5 adds are named here so the next stages can trace them, in the style of [DATA_MODEL_M5_M6.md](../../DATA_MODEL_M5_M6.md). The Design stage fixes their Rust and schema spelling.
@@ -47,8 +47,10 @@ The decisions and the run decisions leave these points to mechanism ([SSR](01-sy
 | C23 | **No producer ids on the wire:** a project is shown by its province and producer type; routes get ids in `StaticData`, which is fixed per session (`server.fbs:19-21`) | Founding adds producer rows mid-session, and `StaticData` has no producer table | D22: every id indexes a `StaticData` table fixed for the session | R-F44 to R-F46 |
 | C24 | **Construction spends only cash above today's needs:** a project's daily budget is at most the producer's cash less its input orders' budgets, its D6 restart reserve and today's wage bill, at the opening prices (PL-10) | D27 says the cash covers the project above its reserves when it starts, and nothing about the days after; D6's liquidity rule protects inputs from wages, not from construction | Prices can rise after a project starts; with this bound construction slows instead of leaving the producer unable to buy inputs or pay today's wages. D6's dividend reserve, `firms.reserve_days` of wages, is not kept back: dividends already wait until cash exceeds it and the project reserve (PL-11), which is how D27's "reserved before dividends" works | R-F25, R-F27 |
 | C25 | **New state is hashed only where it holds something:** each new state table only when it has rows, each new column of an existing table only when a row differs from its default, each behind its own tag; the snapshot carries all of them always (PL-18) | D11 pins golden hashes, and nothing says how new state enters `state_hash`; the charter keeps `mini_valley`'s hashes (A4) | A world without M5's content hashes exactly as before, as a world without nations does (`world.rs:633-641`), so `mini_valley`'s golden file stays valid, and so does `two_states`' until a task changes its results. The rule reads only the state, so a restored snapshot's hash still matches | R-N8, R-N16 |
-| C26 | **How this run checks D13:** every task that adds daily or month-end work measures it on one machine before and after its change, beside `aa2133a`'s time there; the cold 29-day window as PERFORMANCE.md measures it, the 30 days through the first month end, and a warmed-up world in which projects run | D13 sets budgets for worlds, not a method; PERFORMANCE.md's command stops before the first month end, and the scaled `two_states` starts no project before it | A task that breaks the budget is caught when it lands, not at M5-15. Only a warm-up can time construction at 1M rows: `--scale`'s copies merge at the first month end (`crates/pax_data/src/bench.rs:8-11`) | R-N10, R-N12, R-N25 to R-N27 |
+| C26 | **How this run checks D13:** every task that adds daily or month-end work measures it on one machine before and after its change, beside `aa2133a`'s time there; the cold 29-day window as PERFORMANCE.md measures it, the 30 days through the first month end with that day's own time as R-F56 prints it (C29), and a warmed-up world in which projects run | D13 sets budgets for worlds, not a method; PERFORMANCE.md's command stops before the first month end, and the scaled `two_states` starts no project before it | A task that breaks the budget is caught when it lands, not at M5-15. Only a warm-up can time construction at 1M rows: `--scale`'s copies merge at the first month end (`crates/pax_data/src/bench.rs:8-11`) | R-F56, R-N10, R-N12, R-N25 to R-N27 |
 | C27 | **Each command's wire form lands with its engine command:** `SetTariff`'s table, union member, error value, server checks and log and save fields in M5-3, `FoundProducer`'s in M5-8. M5-13 keeps the views, `StaticData.routes` and the subscriptions, and `protocol_minor` rises by one in each pull request that changes the schema | M5-13 lists both commands with the views (`MILESTONE_5.md:76`) | D22: `SubmitCommand` mirrors `pax_engine::Command`. `pax_server` converts commands and errors with exhaustive matches over the engine's enums (`crates/pax_server/src/commands.rs:1-7`, `:32-47`; NETWORK_PROTOCOL §5), and `pax_data` describes every engine command for logs and saves (`crates/pax_data/src/lib.rs:202-211`), so an engine command without its wire and file forms doesn't compile. Holding the engine commands back to M5-13 instead would leave the tariff column and the founding requests writable only by tests until then. M4 raised the minor version once per schema-changing task (NETWORK_PROTOCOL §8's history) | R-F42 to R-F44, R-N15 |
+| C28 | **A merchant's loss is its realized profit over the month, summed exactly:** each sale adds its receipts less the landed cost of the units sold, a cargo row written off at arrival subtracts its cost, and at each month end the sum is tested (below 0 is a month of loss) and reset to 0. No smoothed profit is kept | D17 winds merchants up "when loss-making" with no measure; `TRADE.md:83` tests a "smoothed profit" and `TRADE.md:42` keeps a `profit_avg` column, with no rounding rule | A smoothed average stepped by `div_int`, which rounds toward −∞ (`crates/pax_engine/src/fixed.rs:130-134`), never climbs back to 0 from fewer than `revenue_smoothing_days` ulps below it: a merchant whose last trades lost money and that then stopped trading would keep an average a few ulps below 0 for ever, count as loss-making at every month end, and be wound up for rounding alone (round 2, finding 5). A sum of `Fixed` profits rounds nothing, so a month without trade is exactly 0 and never a loss. The losses it counts are real: D1's supply `S(p) = stock × min(1, p/r)` (`crates/pax_engine/src/systems/market.rs:200-217`) sells part of a merchant's stock below its reservation price, and below its landed cost once the destination's price has fallen that far. M5-4 updates `TRADE.md`'s exit bullet and column (R-N23) | R-F5, R-F15 |
+| C29 | **The month-end print lands first:** R-F56 is M5-1's first commit, which changes only `pax_cli`, and M5-1 records the baseline at that commit with R-N26's command, so the baseline times `aa2133a`'s engine. The baseline plan makes M5-7 and M5-12 depend on M5-1, so every task that adds month-end work (M5-4, M5-7 to M5-9, M5-12, M5-16) lands after it | No milestone task prints the month-end day; M5-15, which holds the benchmarks, depends on every task (`MILESTONE_5.md:78`) | Deriving that day from the 29- and 30-day means multiplies their run-to-run noise about 40 times, so it can't see a month-end regression of 30 ms (round 2, finding 1). M5-1 depends on nothing and is first in the milestone's table; M5-4 and M5-16 follow it already, and M5-8 and M5-9 follow M5-7. The two new edges only order the queue, which has one pull request in flight at a time (the workflow's `parallel` setting, 1 by default) | R-F56, R-N26 |
 
 ## Requirements
 
@@ -65,7 +67,7 @@ The decisions and the run decisions leave these points to mechanism ([SSR](01-sy
 
 | Id | Requirement | Rationale | Source | Priority | Verification |
 |---|---|---|---|---|---|
-| R-F5 | The world shall hold a `Merchants` table (one row per merchant: route, `MerchantKind` Private, Commercial or Chartered, owner nation for Chartered, cash, smoothed profit, smoothed purchases, months of loss, winding-up flag) and a `Cargo` table (one row per merchant, good and stage, in transit or for sale: quantity, landed cost, tariff owed). | Merchants hold money (D5) and goods in transit; D17's invariants | M5-2, M5-4; D17 (Owners, Invariants); [D8](../../DECISIONS.md#d8-ecs-hand-rolled-struct-of-arrays); C4 | must | I: `BACKEND_SCHEMA.md` and `World::check_tables`; T: `trade.rs` (planned `merchant_tables_keep_their_invariants`). M5-2 adds both tables with the route, cash and cargo columns; M5-4 adds the kind, owner nation, smoothed figures, months of loss and winding-up flag, which its dividends and exit use |
+| R-F5 | The world shall hold a `Merchants` table (one row per merchant: route, `MerchantKind` Private, Commercial or Chartered, owner nation for Chartered, cash, the month's realized profit so far, smoothed purchases, months of loss, winding-up flag) and a `Cargo` table (one row per merchant, good and stage, in transit or for sale: quantity, landed cost, tariff owed). | Merchants hold money (D5) and goods in transit; D17's invariants | M5-2, M5-4; D17 (Owners, Invariants); [D8](../../DECISIONS.md#d8-ecs-hand-rolled-struct-of-arrays); C4, C28 | must | I: `BACKEND_SCHEMA.md` and `World::check_tables`; T: `trade.rs` (planned `merchant_tables_keep_their_invariants`). M5-2 adds both tables with the route, cash and cargo columns; M5-4 adds the kind, owner nation, month's profit, smoothed purchases, months of loss and winding-up flag, which its dividends and exit use |
 | R-F6 | The loader shall seed merchants from the scenario's `[[merchant]]` entries, each naming its route by its two markets, its kind and its starting cash; a Chartered merchant is owned by its origin market's nation. | "A scenario may seed starting merchants" (D17); the only source of Chartered merchants in this run (SSR item 3) | M5-4; D17 (Entry and exit); `TRADE.md:75`, `:84-91` | must | T: `validation.rs` (planned `merchants_seed_by_route_and_kind`, and R-D3's refusals) |
 | R-F7 | Each day, each merchant not winding up shall place in its route's origin market one D1 buy order for each good whose gap is positive, wanting its share of the route's capacity scaled by the flow rule and budgeted so that the purchase and the tariff it will owe never exceed its cash (PL-2). | D17: merchants are ordinary D1 buyers; D14 rule 2: the flow grows with the gap and is throttled by capacity | M5-3; D17 (Rule); D14 rules 2-3; C5 | must | T: `trade.rs` (planned `export_orders_follow_the_flow_rule`, `a_merchant_never_owes_more_than_its_cash`) |
 | R-F8 | Each day, each merchant shall offer its goods for sale in its route's destination market as D1 sell offers, at a reservation price of their landed cost per unit times `1 + margin`, or at any price while it winds up (PL-3). | D17: merchants are ordinary D1 sellers in the destination | M5-3; D17 (Rule); `TRADE.md:56` | must | T: `trade.rs` (planned `imports_are_offered_at_landed_cost_plus_margin`) |
@@ -75,7 +77,7 @@ The decisions and the run decisions leave these points to mechanism ([SSR](01-sy
 | R-F12 | The units a route's merchants buy on a day shall never exceed the route's capacity, however many merchants share it. | D14 rule 2: the flow is throttled by capacity | M5-3; `TRADE.md:137` (test 4) | must | T: `trade.rs` (planned `capacity_binds_however_many_merchants`) |
 | R-F13 | When no good's gap is positive on a route, its merchants shall place no buy orders, and no merchant shall be founded on it. | No churn without a gap | M5-3, M5-16; `TRADE.md:135` (test 2) | must | T: `trade.rs` (planned `equal_prices_mean_no_trade_and_no_entry`): M5-3 asserts no orders, and M5-16 no entry |
 | R-F14 | Each day in the firms step, a merchant shall pay `firms.dividend_payout_rate` of its cash above its reserve (the tariffs it owes plus `firms.reserve_days` of its smoothed purchases) to its owner: a Private merchant to the origin market's POPs of profession `trade.private_owner`, a Commercial one to those of `trade.commercial_owner`, split by size, and a Chartered one to its nation's treasury; with no living owner POPs it keeps the dividend (PL-5). | D17: dividends follow the owner; D6's dividend rule, which D17 amends for merchants | M5-4; D17 (Owners); [D6](../../DECISIONS.md#d6-firms-production-wages-ownership) (Dividends); C6, C7, C8 | must | T: `trade.rs` (planned `each_kind_pays_its_owner`, `TRADE.md:140`'s test 7) |
-| R-F15 | A merchant whose smoothed profit has been negative at `trade.exit_months` consecutive month ends shall wind up: it places no more buy orders, offers its goods at any price, and at each month end pays its cash above the tariffs it owes to its owner as R-F14 routes dividends (PL-6). | D17: wound up when loss-making, its cash returning to the owner | M5-4; D17 (Entry and exit); C10 | must | T: `trade.rs` (planned `a_loss_maker_winds_up_and_returns_its_cash`); R-N3 |
+| R-F15 | A merchant whose realized profit over the month (its sales' receipts less the landed cost of the units sold, less the cost of cargo written off) has been below 0 at `trade.exit_months` consecutive month ends shall wind up: it places no more buy orders, offers its goods at any price, and at each month end pays its cash above the tariffs it owes to its owner as R-F14 routes dividends (PL-6). A month in which it sold nothing and wrote nothing off has a profit of exactly 0, so a merchant that stops trading is never wound up for it. | D17: wound up when loss-making, its cash returning to the owner; an exact monthly sum, so rounding can't make a loss (C28) | M5-4; D17 (Entry and exit); C10, C28 | must | T: `trade.rs` (planned `a_loss_maker_winds_up_and_returns_its_cash`; `an_idle_merchant_is_never_wound_up`: with `trade.exit_months` of 2 or more, a merchant whose last month lost one ulp and that then trades nothing for `trade.exit_months` + 1 month ends is still active, its months of loss back to 0 at the first idle month end); R-N3 |
 | R-F16 | At each month end, the system shall found at most one merchant on each route whose gap has been open at `trade.entry_months` consecutive month ends and whose active merchants' cash is below the cost of one day of its capacity at that day's prices, funded with the shortfall by one transfer from the origin market's private-owner POPs, or else its commercial-owner POPs, taking routes by largest relative gap, then lowest route; it shall never found a Chartered merchant (PL-7). | D17: founded when the gap persists and cash can't use the capacity, by a one-time transfer from the owner; Chartered "by command only", and no such command is in scope (SSR item 3; M5-16's row text, `MILESTONE_5.md:79`, is reworded when it is ticked) | M5-16; D17 (Entry and exit); [D27](../../DECISIONS.md#d27-capital-investment-and-capacity-expansion) (funding); C9 | must | T: `trade.rs` (planned `a_persistent_gap_founds_a_merchant`, `entry_never_charters`, `TRADE.md:139`'s test 6); R-N3 |
 
 ### Functional: tariffs
@@ -140,9 +142,9 @@ The decisions and the run decisions leave these points to mechanism ([SSR](01-sy
 | Id | Requirement | Rationale | Source | Priority | Verification |
 |---|---|---|---|---|---|
 | R-F44 | The wire protocol shall gain, by appending only, with `protocol_minor` raised by one in each pull request that changes the schema: the `SetTariff` command table, `Command` union member and `CommandError` value with the engine command (M5-3); the `FoundProducer` ones with its engine command (M5-8); `StaticData.routes`, and `TradeRouteView` and `InvestmentLedgerView` in `DayUpdate` with the `Subscribe` fields that request them (M5-13); and the `TradeFlow` map mode (M5-14). | The milestone's wire additions; the union and errors are append-only (`common.fbs:29-44`, `:65-69`); today's version is 1.6 (`crates/pax_protocol/src/lib.rs:74-76`), and M4 raised it once per schema-changing task (`NETWORK_PROTOCOL.md` §8) | M5-3, M5-8, M5-13, M5-14; `MILESTONE_5.md:34-35`; D22 (Versioning); C21, C23, C27 | must | T: `crates/pax_protocol/tests/roundtrip.rs` (planned cases for each new message); I: `scripts/gen-protocol.sh` output checked in, CI's regeneration check |
-| R-F45 | `TradeRouteView` shall carry, for a subscribed market, each route into or out of it, by its `StaticData.routes` id, with its merchants' number and cash by kind and, per good, the day's units bought, landed and lost and the tariffs paid (R-F54's figures); and, for a subscribed nation, that nation's tariff on each good. | DoD 4: players view active trade routes and set tariffs; the tariff panel subscribes its own nation whatever market the trade panel shows; D22 builds views from state and the day's report | M5-13; DoD 4; C22, C23 | must | T: `crates/pax_server/tests/views.rs` (planned `trade_route_view_matches_the_day`) |
+| R-F45 | `TradeRouteView` shall carry, for a subscribed market, each route into or out of it, by its `StaticData.routes` id, with its merchants' number and cash by kind and, per good, the day's units bought, landed and lost and, in money, the cost of the units bought and the tariffs paid (R-F54's route figures); and, for a subscribed nation, that nation's tariff on each good. | DoD 4: players view active trade routes and set tariffs; the tariff panel subscribes its own nation whatever market the trade panel shows; D22 builds views from state and the day's report | M5-13; DoD 4; C22, C23 | must | T: `crates/pax_server/tests/views.rs` (planned `trade_route_view_matches_the_day`) |
 | R-F46 | `InvestmentLedgerView`, for one subscribed province, shall carry each project there (producer type, slots, state or private owner, units still needed per good), for each producer type with an expansion recipe its founding cost at today's prices and the unclaimed unemployed workers of its worker profession there (PL-8), the state's pending founding requests there, and the outcome of any founding there that day (R-F65). | DoD 4: players inspect construction progress and found factories, which needs the cost and the workers before sending | M5-13; DoD 4; C16, C23 | must | T: `views.rs` (planned `investment_ledger_view_matches_the_world`) |
-| R-F47 | The protocol shall append a `TradeFlow` map mode that gives each province its market's net imports for the day: merchants' sales there less their purchases there (R-F54's figures). | The milestone's trade flow map mode; a map mode is one value per province (`common.fbs:71-80`) | M5-14; `MILESTONE_5.md:35` | should | T: `crates/pax_server/src/view.rs` tests (planned case in `every_map_mode_has_one_value_per_province`) |
+| R-F47 | The protocol shall append a `TradeFlow` map mode that gives each province its market's net imports for the day by value, a signed `Fixed` amount of money: the receipts of merchants' sales in that market less the cost of their purchases there (R-F54's market figures), positive where the market imports more than it exports. | The milestone's trade flow map mode; a map mode is one value per province (`common.fbs:71-80`), sent as `[Fixed]` (`server.fbs:99-104`); units of different goods can't be summed, money can | M5-14; `MILESTONE_5.md:35` | should | T: `crates/pax_server/src/view.rs` tests (planned case in `every_map_mode_has_one_value_per_province`, and `trade_flow_is_sales_less_purchases_by_value`) |
 | R-F48 | `pax_godot` shall encode `SetTariff` and `FoundProducer` and decode the new views, still depending on no engine crate. | D12: the bridge links `pax_protocol` and the side-neutral crates only | M5-13; [D12](../../DECISIONS.md#d12-frontend-godot-with-a-rust-gdextension-bridge) | must | T: `crates/pax_godot/tests/client.rs` (planned cases); CI's crate-boundary step |
 | R-F49 | The client shall show a trade panel for the selected market, listing its routes with their flows, merchants and tariffs. | DoD 4: view active trade routes | M5-14; DoD 4 | must | D: the client smoke test (R-F53) and a manual look in the morning |
 | R-F50 | The client shall show the player's nation's tariff on each good as a slider in per mille, sending `SetTariff` when the player releases it and otherwise following the server's rate, as the nation panel's sliders do. | DoD 4: adjust national tariff rates; the nation panel's pattern (`client/ui/nation_panel.gd:1-11`, `:20-25`) | M5-14; DoD 4; C2 | must | D: R-F53 |
@@ -156,14 +158,14 @@ Each figure is reported by the task that adds its flow, so the tests of that tas
 
 | Id | Requirement | Rationale | Source | Priority | Verification |
 |---|---|---|---|---|---|
-| R-F54 | `DayReport` shall report the day's trade: for each route and good with any flow, the units bought and their cost, the units landed and lost, and the tariff paid; and for each market, merchants' purchases and sales there and the tariffs its nation received. Arrival's figures come with arrival (M5-2), and purchases and sales with merchant orders (M5-3). | The tests of R-F10, R-F19 and R-F20 and the views of R-F45 and R-F47 need them; D22 builds views from the day's report | SR-12; DoD 1; M5-2, M5-3 | must | T: the tests named in R-F10 and R-F19 read them, and a unit test that the route figures sum to the market figures; I: `BACKEND_SCHEMA.md`'s `DayReport` |
+| R-F54 | `DayReport` shall report the day's trade: for each route and good with any flow, in units the quantities bought, landed and lost, and in money the cost of the units bought and the tariff paid on landing; and for each market, in money only, the cost of merchants' purchases there, the receipts of their sales there and the tariffs paid on goods landing there. Arrival's figures come with arrival (M5-2), and purchases and sales with merchant orders (M5-3). | The tests of R-F10, R-F19 and R-F20 and the views of R-F45 and R-F47 need them; D22 builds views from the day's report; a market's figures sum over goods, which only money can | SR-12; DoD 1; M5-2, M5-3 | must | T: the tests named in R-F10 and R-F19 read them, and a unit test that each market's purchase cost is the sum of the costs of the routes leaving it and its tariffs the sum of the tariffs of the routes entering it; I: `BACKEND_SCHEMA.md`'s `DayReport` |
 | R-F63 | `DayReport` shall report merchants' dividends by kind, the merchants that started winding up and the cash they returned (M5-4), and the merchants founded, each with its route, kind and capital (M5-16). | DoD 1's entry and exit, and SR-3's owners, are checked on these | SR-12; DoD 1; M5-4, M5-16 | must | T: the tests named in R-F14 to R-F16 read them |
 | R-F64 | `DayReport` shall report household and government spending by market, beside today's world totals, which keep their meaning. | O3c's per-market real GDP (R-F20) needs each market's own C+G | SR-12; M5-5; charter O3c | must | T: R-F20's test; a unit test that the market figures sum to the world totals |
 | R-F65 | `DayReport` shall report construction spending by market and the projects started and completed with the capacity they add (M5-7); the foundings, each with its province, producer type, funder (owners or nation), cost and outcome, including requests dropped and why (M5-8); and the capacity removed by depreciation (M5-9). | DoD 2's construction demand and growth, and R-F46's founding outcome, are read from these | SR-12; DoD 2; M5-7, M5-8, M5-9 | must | T: the tests named in R-F24 to R-F31 and R-F33 read them |
 | R-F66 | `DayReport` shall report, at each month end, the provinces that rioted, the units of each good destroyed there and the security transfer each received; strikers are in the labour report (R-F36). | DoD 3's riots are checked on these | SR-12; DoD 3; M5-12 | must | T: the tests named in R-F37, R-F38 and R-F40 read them |
 | R-F55 | `pax_cli report --market KEY` shall print that market's own C+G (R-F64), its Laspeyres price index and its real GDP from its own day-1 basket, as an informational measure: O3c's measure, which weights both runs by the autarky run's basket, is computed by R-F20's test. | SR-12: new figures beside today's measures, never folded into them (`report.rs:7-11`) | SR-12; M5-5 | should | T: `crates/pax_cli/src/report.rs` tests (planned `report_shows_a_market_on_its_own`) |
-| R-F67 | `pax_cli report` shall print each new world figure of R-F36, R-F54, R-F63, R-F65 and R-F66 in columns after today's, which keep their definitions, each added by the task that adds the figure. | SR-12: report what the milestone adds beside today's measures (`report.rs:7-11`) | SR-12; M5-3, M5-4, M5-7 to M5-9, M5-11, M5-12, M5-16 | should | T: `report.rs` tests (planned `new_columns_follow_todays`); I: the columns |
-| R-F56 | `pax_cli bench` shall print the slowest day's time and, when the run reaches one, the first month-end day's time beside the mean. | With `--scale`, `bench` stops before the first month end by default (`crates/pax_cli/src/main.rs:279-290`); a direct print is more precise than R-N26's derivation | M5-15; charter O7 | should | M: R-N26's commands |
+| R-F67 | `pax_cli report` shall print each new world figure of R-F36, R-F54, R-F63, R-F65 and R-F66 in columns after today's, which keep their definitions, each added by the task that adds the figure: arrival's units landed and lost and tariffs paid by M5-2, purchases and sales by M5-3. | SR-12: report what the milestone adds beside today's measures (`report.rs:7-11`) | SR-12; M5-2, M5-3, M5-4, M5-7 to M5-9, M5-11, M5-12, M5-16 | should | T: `report.rs` tests (planned `new_columns_follow_todays`); I: the columns |
+| R-F56 | `pax_cli bench` shall print, beside its mean over the run, the slowest day with its time and, when the run reaches a month end, the first month-end day's own time and the mean of the days before it; the POP rows it prints shall be the replicated world's, before any month-end compaction; and today's summary line shall stay the only line with a time in ms/day, which CI's regression gate reads (`scripts/bench-compare.sh:19-21`). | The month-end systems can only be measured by timing that day: `bench` times its whole loop (`crates/pax_cli/src/main.rs:292-296`), and deriving the day from two means multiplies their noise about 40 times (C29). With `--days 30` one run then gives R-N10's 29-day mean and R-N26's figures. Today the printed rows are counted after the loop (`:297-303`), so a run through the month end reports the 18,000 rows compaction leaves of 990,000 | M5-1 (its first commit, C29); charter O7; C26 | must | T: `crates/pax_cli/src/main.rs` tests (planned `bench_times_the_first_month_end_day`: over 31 days of `two_states` unscaled, the summary's month-end day is the one `days_until_month_end` names, and its slowest day is one of the 31); M: R-N26's commands, and `scripts/bench-compare.sh` with the new binary on both sides, which must read one time per run |
 
 ### Functional: data and scenarios
 
@@ -194,12 +196,12 @@ Each figure is reported by the task that adds its flow, so the tests of that tas
 | R-N7 | `pax_cli verify` shall pass for both scenarios, and the session replay test shall reach the server's final state hash, on Linux, Windows and macOS, the replayed session setting a tariff (M5-3), founding a producer (M5-8) and raising a tax enough to cause strikes and riots (M5-15). | CI verifies both scenarios and replays a session on all three systems (`.github/workflows/ci.yml:112-117`, `:179-187`); today's session sends income-tax commands only (`session_replay.rs:24-37`) | D11; DoD 4-5; charter O6-O7 | must | T: `crates/pax_server/tests/session_replay.rs` (extended); CI's determinism jobs |
 | R-N8 | `mini_valley`'s golden hashes shall not change: `World::state_hash` shall hash each new state table (route gaps, merchants, cargo, projects and their needs, founding requests) only when it has rows, and each new column of an existing table (`PRODUCER.owner_nation`, `PRODUCER.idle_months`, `NATION.tariff`) only when some row differs from its default (`None`, 0, 0), each behind a tag naming it, so a world whose new content is empty or default hashes exactly as before (PL-18). | Charter A4; nations are hashed only when present (`world.rs:633-641`); `mini_valley` has producers but no nations, routes or recipes | D11; charter A4; C25 | must | T: `pax_cli verify scenarios/mini_valley` in CI, with `scenarios/mini_valley/golden.hashes` unchanged; `world.rs` tests (planned `a_new_column_is_hashed_once_it_differs`: one producer's `idle_months` set to 1 changes the hash, and set back to 0 restores it) |
 | R-N9 | `two_states`' golden hashes shall change only in a pull request that changes its results on purpose, re-recorded with `pax_cli record` and the reason given. | D11; AGENTS.md §7 | D11; [AGENTS.md §7](../../../AGENTS.md#7-determinism-gate-d11) | must | I: each pull request's description and commit `Evidence:` |
-| R-N10 | `two_states` with its M5 content, replicated to about 1M POP rows on 8 threads, shall average at most 100 ms a day over the 29 days before its first month end; every task that adds work to the daily tick shall measure it before and after its change on one machine, beside `aa2133a`'s time there, and M5-15 shall record the result in PERFORMANCE.md. | D13's M2-content budget. PERFORMANCE.md has about 91 ms at M4-11; on the run's machine `aa2133a` measured 69.0 and 70.2 ms in two runs. Daily work lands in M5-2 (arrival), M5-3 (merchant orders), M5-4 (merchant dividends), M5-5 (`two_states` trades), M5-7 (construction orders, timed by R-N27) and M5-11 (strikes) | [D13](../../DECISIONS.md#d13-performance-budget); DoD 5; charter O7; C26 | must | M: `pax_cli bench scenarios/two_states --scale 55 --regions 1500 --threads 8` (29 days by default), in each of those tasks' commit `Evidence:` |
-| R-N26 | The same world run through its first month end shall average at most 100 ms a day over those 30 days, and the month-end day's own time, `30 × mean₃₀ − 29 × mean₂₉` from the medians of three runs each (or R-F56's print), shall be recorded beside `aa2133a`'s. Under `--scale` that day also compacts the 55 copies into one (`crates/pax_cli/src/main.rs:282-284`), which a real world of that size doesn't, so the figure is an upper bound. Every task that adds month-end work shall measure it, and M5-15 shall record it in PERFORMANCE.md. | The charter's O7 asks for the month-end systems to be measured. On the run's machine `aa2133a`'s 30-day mean was 69.7 and 71.0 ms in two runs, and its month-end day about 92 to 94 ms. Month-end work lands in M5-4 (exit), M5-7 (expansion), M5-8 (founding), M5-9 (depreciation), M5-12 (riots) and M5-16 (entry) | D13; charter O7; C26 | must | M: the R-N10 command, and the same with `--days 30`, in each of those tasks' commit `Evidence:` |
+| R-N10 | `two_states` with its M5 content, replicated to about 1M POP rows on 8 threads, shall average at most 100 ms a day over the 29 days before its first month end; every task that adds work to the daily tick shall measure it before and after its change on one machine, beside `aa2133a`'s time there, and M5-15 shall record the result in PERFORMANCE.md. | D13's M2-content budget. PERFORMANCE.md has about 91 ms at M4-11; on the run's machine `aa2133a` measured 69.0 and 70.2 ms in two 29-day runs, and its 29 days before the month end a median of 71.5 ms in eight 30-day runs (69.7 to 74.2). Daily work lands in M5-2 (arrival), M5-3 (merchant orders), M5-4 (merchant dividends), M5-5 (`two_states` trades), M5-7 (construction orders, timed by R-N27) and M5-11 (strikes) | [D13](../../DECISIONS.md#d13-performance-budget); DoD 5; charter O7; C26 | must | M: `pax_cli bench scenarios/two_states --scale 55 --regions 1500 --threads 8` (29 days by default), or the mean before the month end that R-F56 prints in R-N26's runs, in each of those tasks' commit `Evidence:` |
+| R-N26 | The same world run through its first month end (`--days 30`) shall average at most 100 ms a day over those 30 days. Every task that adds month-end work shall run it five times before its change and five times after, on one machine, and record the first month-end day's own time as R-F56 prints it, the median of each five with their range, beside the baseline: `aa2133a`'s engine measured the same way at M5-1's first commit (C29). A task whose median after exceeds its median before by more than 20% shall say why in its pull request. M5-15 shall record the last figures in PERFORMANCE.md. | The charter's O7 asks for the month-end systems to be measured; only timing the day itself can (C29). On the run's machine, timed directly at `aa2133a` with a probe of R-F56's print, the first month-end day took 102.2 to 118.4 ms in eight runs, median 105.7, against a median 71.5 ms/day for the 29 days before it; its month-end systems took about 36 ms (medians of five instrumented runs: mobility 14.5, politics 3.7, demographics 6.8 and compaction 11.2). Under `--scale` that compaction merges the 55 copies of every POP into one (`crates/pax_data/src/bench.rs:8-11`); in a world of that size without copies it merges nothing, since mobility appends a row only for an identity that has none (`crates/pax_engine/src/systems/mobility.rs:107-111`), drops only emptied rows, and returns before rebuilding the columns when it removes none (`crates/pax_engine/src/world.rs:327-330`), so the figure is an upper bound. D13's budget is a day's mean, as PERFORMANCE.md measures it: the 30-day mean was 72.7 ms. Five runs, because single runs of that day spread over 16 ms; 20% is D13's regression ratio. Month-end work lands in M5-4 (exit), M5-7 (expansion), M5-8 (founding), M5-9 (depreciation), M5-12 (riots) and M5-16 (entry) | D13; charter O7; C26, C29 | must | M: `pax_cli bench scenarios/two_states --scale 55 --regions 1500 --threads 8 --days 30`, five runs before and five after, with the printed month-end-day times, their medians and the 30-day means in each of those tasks' commit `Evidence:`; M5-1 records the baseline the same way |
 | R-N27 | With R-N25's warm-up long enough that the base world has a running construction project when timing starts, the replicated world shall average at most 100 ms a day over the days to its next month end, measured by M5-7 and M5-15 and recorded with the warm-up used. | Construction orders start only after a month end, which the cold window never reaches; a warmed world also times merchants holding cargo at settled prices | D13; charter O7; C26 | must | M: `pax_cli bench scenarios/two_states --warmup DAYS --scale 55 --regions 1500 --threads 8` (R-N25's flag) |
 | R-N11 | No pull request shall make CI's Benchmark regression job more than 20% slower than its base. | D13's regression gate (`ci.yml:154-163`) | D13 | must | M: CI's `Benchmark regression` check |
-| R-N12 | `pax_data::bench::replicate_with_nations` shall copy, into every region, the base world's links, routes, route gaps, merchants with their cargo, projects with their needs, and founding requests, each table from the task that adds it, so the D13 benchmark and CI's Benchmark regression job time trade once `two_states` has it. | Today it copies geography, nations, POPs and producers only (`crates/pax_data/src/bench.rs:50-107`), and CI's `two_states` comparison runs `bench --scale 2000 --days 35` (`ci.yml:154-163`, `scripts/bench-compare.sh:19-21`), which replicates | D13; charter O7; C26 | must | T: `bench.rs` tests (planned `replicas_copy_the_trade_and_investment_tables`) |
-| R-N25 | `pax_data::bench` shall replicate a world that has already run, copying every state table and column (the day, prices, POPs' life needs and militancy, producers' employment, value added, input stock and new columns, nations' tariffs, and R-N12's tables), and `pax_cli bench --warmup DAYS` (planned) shall run the scenario that many days before replicating it. | Today's replicate copies what a scenario loads and starts at day 0 (`bench.rs:66-105`), so it can't time a world in which projects run | D13; charter O7; C26 | must | T: `bench.rs` tests (planned `a_replica_of_one_region_hashes_like_its_base`: `replicate(&warm, 1, 1)` has the warmed world's state hash) |
+| R-N12 | `pax_data::bench::replicate_with_nations` shall copy into every region each table and column that M5 adds, with every column as it stands in the base world, each in the task that adds it: links and routes (M5-1); merchants and their cargo (M5-2), with the columns M5-4 adds; nations' tariffs (M5-3); projects and their needs (M5-6); producers' owner nation and the founding requests (M5-8); producers' idle months (M5-9); and route gaps (M5-16). The D13 benchmark and CI's Benchmark regression job then time trade once `two_states` has it, and a replica of a warmed world (R-N25) carries the new state. | Today it copies geography, nations, POPs and producers only (`crates/pax_data/src/bench.rs:50-107`), and CI's `two_states` comparison runs `bench --scale 2000 --days 35` (`ci.yml:154-163`, `scripts/bench-compare.sh:19-21`), which replicates | D13; charter O7; C26 | must | T: `bench.rs` tests (planned `replicas_copy_the_trade_and_investment_tables`, which each of those tasks extends with its own table or column) |
+| R-N25 | `pax_data::bench` shall replicate a world that has already run: besides R-N12's tables and columns, the replica copies every state column that today's replicate leaves at its load-time value (the day, prices, POPs' life needs and militancy, producers' employment, value added and input stock), and `pax_cli bench --warmup DAYS` (planned) shall run the scenario that many days before replicating it. M5-7 adds both; every task that adds a state table or column after M5-7 has landed extends the copy's test with it. | Today's replicate copies what a scenario loads and starts at day 0 (`bench.rs:66-105`), so it can't time a world in which projects run. Its test catches a missing column only where the warmed world holds something other than the default, so the test puts it there | D13; charter O7; C26 | must | T: `bench.rs` tests (planned `a_replica_of_one_region_hashes_like_its_base`: after the test gives every M5 table and column that exists a row or value other than its default where the warm-up left none, `replicate(&warm, 1, 1)` has the warmed world's state hash, which covers every state column and no keys, `world.rs:611-642`). M5-8 adds a producer's owner nation and a founding request to it, M5-9 an `idle_months` of 1, M5-16 a route's `gap_months` of 1, and M5-2 to M5-4 their merchants, cargo and tariffs if the baseline plan queues them after M5-7 |
 | R-N13 | Building the trade horizon for 3,000 markets with 20 links each shall take under 1 second on 1 thread, with memory proportional to the pairs kept. | D17's sparse horizon, at D13's long-term scale; it runs at every scenario load | D17 (Routes); AGENTS.md §5 | should | M: an ignored benchmark test in `trade.rs` (planned `horizon_build_at_scale`), recorded in PERFORMANCE.md |
 | R-N14 | A `DayUpdate` at D13's long-term scale shall stay within 16 KB with no view subscribed and within 128 KB with every view subscribed, the new ones included. | D22's budgets | D22 (Views, not state); C22 | must | T: `crates/pax_protocol/tests/size_budget.rs` and `view.rs`'s `view_building_budget`, extended with the new views |
 | R-N15 | Each protocol change shall only append fields, union members and enum values, renumbering none, and a 1.6 client shall still play against the server of every later minor version. | D22's versioning rules | D22 (Versioning); `NETWORK_PROTOCOL.md` §8; C27 | must | I: the schema diff; T: `roundtrip.rs` (planned `a_1_6_client_reads_every_later_update`) |
@@ -208,7 +210,7 @@ Each figure is reported by the task that adds its flow, so the tests of that tas
 | R-N18 | `pax_engine` shall stay free of IO, all new file parsing shall be in `pax_data`, the protocol code shall come from `scripts/gen-protocol.sh`, never edited by hand, and `pax_godot` shall depend on no engine crate. | Crate purity | [AGENTS.md §2](../../../AGENTS.md#2-strict-decoupling); [D9](../../DECISIONS.md#d9-data-format-toml); D12; D22 | must | I: review; CI's crate-boundary and generated-code checks |
 | R-N19 | Every new table shall be a struct of arrays whose columns are pushed together and hashed in `World::state_hash`; no table that grows with routes, merchants or projects shall hold a per-good column; and no new state shall reference a POP row. | AGENTS.md §1; D8; D7's unstable POP rows; the data model's rules 1 and 2 | [AGENTS.md §1](../../../AGENTS.md#1-core-architecture-rust--data-oriented-design); D8; D7; [DATA_MODEL_M5_M6.md](../../DATA_MODEL_M5_M6.md#rules-the-model-follows); C4 | must | I: review; `check_tables` destructures every table without `..` (`world.rs:484-486`) |
 | R-N20 | Strikers, available workers, labour supply, project reserves, unclaimed unemployment and founding costs shall be computed when needed, never stored; the trade horizon shall be computed when a scenario loads, used there to check the routes, and not kept, so M5 stores no derived data and adds no cache; a route shall refer to its link by row, topology that, like the link, never changes in a game. | D7: derived values aren't state, and the only cache is the self-validating `World::layout` (AGENTS.md §1). D17's Routes bullet has routes precomputed at load and when infrastructure changes, as D14 rule 5 and AGENTS.md §5 want friction data; M5 changes no infrastructure, and a milestone that does rebuilds links and routes together | D7; D14 rule 5; D17 (Routes); AGENTS.md §1, §5; C1 | must | I: review: no derived column or cache in `World`; T: R-N17's `a_restored_world_has_the_scenarios_routes` |
-| R-N21 | The server shall never panic on new commands or subscriptions with hostile values, and the hostile-input tests shall send them. | D22: a protocol error closes the session; the server never panics | D22; `NETWORK_PROTOCOL.md` §9 | must | T: `crates/pax_server/src/hostile.rs` and `crates/pax_server/tests/hostile.rs`, extended |
+| R-N21 | The server shall never panic on new commands or subscriptions with hostile values, and the hostile-input tests shall send them; an out-of-range id in a new `Subscribe` field (the nation of R-F45) shall close the session with `Goodbye`, as an out-of-range market or province does today. | D22: any protocol error closes the session with `Goodbye`; today `Subscription::checked` refuses an out-of-range market or province (`crates/pax_server/src/view.rs:106-121`) and the server says goodbye (`crates/pax_server/src/sim.rs:340-344`) | D22; `NETWORK_PROTOCOL.md` §9 | must | T: `crates/pax_server/src/hostile.rs` and `crates/pax_server/tests/hostile.rs`, extended; `sim.rs` tests (planned `a_subscribe_naming_no_nation_says_goodbye`) |
 | R-N22 | Every pull request that changes `two_states`' results shall keep each `economic_bands.rs` assertion or move it in the same pull request with its reason. | The test's own rule (`crates/pax_data/tests/economic_bands.rs:6-8`) | Charter [bands clause](02-project-charter.md#the-bands-clause) | must | T: `economic_bands.rs` (release, CI) |
 | R-N23 | Each pull request shall update in the same change the documents it makes stale: DECISIONS.md where it implements an Amends line (D4, D5, D6, D14 rule 5, D21, D24), the system and design documents, BACKEND_SCHEMA.md, DATA_FORMAT.md, NETWORK_PROTOCOL.md, ARCHITECTURE.md's game loop and its milestone task row; `scripts/check_docs.py` shall pass. | One home per fact, kept true at every merge | [AGENTS.md §8](../../../AGENTS.md#8-documentation-maintenance); [docs/README.md](../../README.md#milestone-lifecycle); SR-13 | must | I: the critic and the local gate; `python3 scripts/check_docs.py` |
 | R-N24 | Overflow shall still panic: no new code shall switch to wrapping or saturating arithmetic to avoid a panic, and a product that can exceed `Fixed`'s range shall use `mul_div` or a 128-bit intermediate. | D3: overflow panics, in release too | D3 (Overflow); AGENTS.md §4 | must | I: review; T: `crates/pax_engine/tests/extremes.rs` (planned cases at the price ceiling with large capacities) |
@@ -296,39 +298,42 @@ Why the budget holds: the units bought `q` satisfy `q × p ≤ b'`, the tariff (
 - `merchant.cash −= cost`;
 - the landing units `L = q.mul(r)` and the tariff owed `due = t_g.mul(L.mul(p*))`, with `t_g` as in PL-2;
 - the *in transit* row `(merchant, g)` gains `quantity += q`, `landed_cost += cost`, `tariff_due += due`;
+- the merchant's `purchases` for the day, a figure the step passes to the firms step as it passes producers' input cost (`market.rs:782`), never stored, gains `cost + due`;
 - after the merchant's last purchase of the day, `merchant.cash ≥ Σ tariff_due` is asserted (R-D9);
 - the day's report adds `q` and `cost` to the route's figures for `g` (R-F54).
 
-**Sales:** sellers are paid pro rata to the quantity offered (`market.rs:809-830`). A merchant's row selling `s` of its `Q` units at receipts `R` gives `merchant.cash += R`, and `allocate(landed_cost, [Q − s, s])` splits the landed cost into the part kept and the part sold, `cost_sold`; the row keeps `quantity = Q − s` and its part. The day's `profit` of the merchant gains `R − cost_sold`, and its `purchases` gains each purchase's `cost + due`.
+**Sales:** sellers are paid pro rata to the quantity offered (`market.rs:809-830`). A merchant's row selling `s` of its `Q` units at receipts `R` gives `merchant.cash += R`, and `allocate(landed_cost, [Q − s, s])` splits the landed cost into the part kept and the part sold, `cost_sold`; the row keeps `quantity = Q − s` and its part. The merchant's `month_profit` gains `R − cost_sold`, a signed sum that rounds nothing (C28). It falls below 0 when the destination's price is below the row's landed cost per unit: D1's supply sells `stock × p ÷ r` of a row whose reservation `r` is above the price `p` (`market.rs:200-217`).
 
 ### PL-4. Arrival
 
 At the start of each day, after commands: for each *in transit* `Cargo` row (merchant `j` on route `A → B`, good `g`, `q`, `landed_cost K`, `due`), in row order:
 1. `L = q.mul(r)`, the same units as at purchase; `lost = q − L`, destroyed and reported as iceberg loss.
 2. If `due > 0`: `merchant.cash −= due` and `world.nations.treasury[n_B] += due`, `n_B` being the nation of `B`'s market.
-3. The *for sale* row `(j, g)` gains `quantity += L` and `landed_cost += K + due`; the transit row is removed. If the for-sale row then holds 0 units, its landed cost is charged to the day's profit as a loss, and the row is removed.
+3. The *for sale* row `(j, g)` gains `quantity += L` and `landed_cost += K + due`; the transit row is removed. If the for-sale row then holds 0 units, its landed cost is subtracted from the merchant's `month_profit`, a loss, and the row is removed.
 4. The day's report adds `L`, `lost` and `due` to the route's figures for `g` (R-F54).
 
 ### PL-5. Merchant dividends
 
 In the firms step, for each merchant `j`, with `h = firms.revenue_smoothing_days`:
-1. `profit_avg += (profit − profit_avg).div_int(h)`, and `purchases_avg += (purchases − purchases_avg).div_int(h)`, from today's `profit` and `purchases` (PL-3, PL-4).
+1. `purchases_avg += (purchases − purchases_avg).div_int(h)`, from the day's `purchases` (PL-3). It never goes below 0 and falls to exactly 0 once the merchant stops buying, since `div_int` rounds toward −∞ (`fixed.rs:130-134`): a positive average falls by at least one ulp a day.
 2. `reserve = Σ tariff_due + purchases_avg.mul_int(firms.reserve_days)`; `surplus = cash − reserve`.
 3. If `surplus > 0` and the owner can receive (PL-17): `D = surplus.mul(firms.dividend_payout_rate)`; `cash −= D`; the owner receives `D`, a POP owner pool split by size with `allocate`, untaxed (C7).
 
 ### PL-6. Merchant exit and winding up
 
-At month end, for each merchant in row order:
+At month end, for each merchant in row order, with `month_profit` its realized profit since the last month end (PL-3, PL-4):
 
 | Condition | 1 | 2 | 3 | 4 |
 |---|---|---|---|---|
 | Winding up already | N | N | N | Y |
-| `profit_avg < 0` | N | Y | Y | — |
+| `month_profit < 0` | N | Y | Y | — |
 | `loss_months + 1 ≥ trade.exit_months` | — | N | Y | — |
 | **Action** | `loss_months = 0` | `loss_months += 1` | `loss_months += 1`; start winding up | — |
 | **Then, if winding up** | — | — | return | return |
 
 *Return:* `R = cash − Σ tariff_due`; if `R > 0` and the owner can receive (PL-17), `cash −= R` and the owner receives `R`, split as dividends are. A merchant winding up places no buy orders (PL-2) and offers its goods at any price (PL-3).
+
+Then every merchant's `month_profit = 0`. A month without sales or write-offs leaves it exactly 0, so a merchant that has stopped trading takes column 1 and its `loss_months` returns to 0: rounding never counts as a loss (C28).
 
 ### PL-7. Merchant entry
 
@@ -513,7 +518,7 @@ flowchart LR
     D1[("D1 World.defs")]
     D2[("D2 World.geography: markets, provinces, links, routes")]
     D3[("D3 World state: pops, producers, projects, markets, nations, merchants, cargo")]
-    D4[("D4 Server command queue and applied-command log")]
+    D4[("D4 Commands: Scenario.commands, the server's queue, the applied-command log")]
     D5[("D5 Saves: name.toml and name.world")]
     D6[("D6 golden.hashes")]
 
@@ -522,6 +527,7 @@ flowchart LR
     P1 -- "definitions and rules" --> D1
     P1 -- "topology: links and checked routes" --> D2
     P1 -- "initial state and seeded merchants" --> D3
+    P1 -- "scripted commands from commands.toml" --> D4
     P1 -- "initial world and content hash" --> P9
 
     Player -- "commands: rates, SetTariff, FoundProducer" --> P2
@@ -529,26 +535,29 @@ flowchart LR
     D1 -- "goods, producer types, recipes" --> P2
     D2 -- "nations of markets" --> P2
     P2 -- "stamped commands" --> D4
-    D4 -- "commands due today" --> P2
+    D4 -- "scripted and stamped commands due today" --> P2
     Clock -- "day tick" --> P2
     P2 -- "rates, tariffs, founding requests" --> D3
 
     Clock -- "day tick and month end" --> P3
-    D1 -- "firms and trade rules" --> P3
-    D2 -- "routes and their links" --> P3
-    D3 -- "merchants, cargo, prices, tariffs, owner cash" --> P3
+    D1 -- "firms, trade and investment rules, professions' spend rates" --> P3
+    D2 -- "routes and their links, markets' nations" --> P3
+    D3 -- "merchants, cargo, prices, tariffs, owner pools' sizes and cash" --> P3
+    P5 -- "merchants' purchases today" --> P3
     P3 -- "landed cargo, tariffs, dividends, exits, entries" --> D3
     P3 -- "merchant orders and offers" --> P5
     P3 -- "trade figures" --> P8
 
     Clock -- "day tick and month end" --> P4
-    D1 -- "strike and riot rules" --> P4
+    D1 -- "producer types, strike and riot rules" --> P4
+    D2 -- "provinces' markets, markets' nations" --> P4
     D3 -- "sizes, militancy, capacity, stock, treasuries" --> P4
     P4 -- "employment, output, riot losses, security transfers" --> D3
     P4 -- "working members" --> P7
     P4 -- "labour and unrest figures" --> P8
 
     Clock -- "day tick" --> P5
+    D2 -- "provinces' markets" --> P5
     D3 -- "POP budgets, producer and government orders, offers, opening prices" --> P5
     P6 -- "construction orders" --> P5
     P5 -- "prices, purchases, deliveries, payments" --> D3
@@ -556,18 +565,21 @@ flowchart LR
     P5 -- "market figures" --> P8
 
     Clock -- "day tick and month end" --> P6
-    D1 -- "recipes, input recipes, investment, firms and strike rules" --> P6
+    D1 -- "recipes, input recipes, investment, firms and strike rules, professions' spend rates" --> P6
+    D2 -- "provinces' markets, markets' nations" --> P6
     D3 -- "producers, projects, founding requests, POP sizes, militancy and cash, treasuries, prices" --> P6
     P6 -- "projects, capacity, new producers, funding transfers, requests cleared" --> D3
     P6 -- "investment figures" --> P8
 
     Clock -- "day tick" --> P7
+    D2 -- "provinces' markets, markets' nations" --> P7
     D3 -- "wages, cash, reserves" --> P7
     P7 -- "wages, dividends, income tax, transfers" --> D3
     P7 -- "payouts" --> P8
 
     Player -- "subscriptions" --> P8
     Dev -- "report requests" --> P8
+    D2 -- "topology for StaticData and the map" --> P8
     D3 -- "state at day end" --> P8
     P8 -- "day updates with views" --> Player
     P8 -- "reports" --> Dev
@@ -575,6 +587,7 @@ flowchart LR
     Host -- "save and load requests" --> P9
     Dev -- "verify, record and bench requests" --> P9
     D4 -- "applied commands" --> P9
+    D2 -- "topology to replicate" --> P9
     D3 -- "state to snapshot or replicate" --> P9
     P9 -- "save file and snapshot" --> D5
     D5 -- "saved log and snapshot" --> P9
@@ -585,7 +598,7 @@ flowchart LR
     P9 -- "verdicts and timings" --> Dev
 ```
 
-Balanced with the context diagram: the Player's commands and subscriptions go to 2.0 and 8.0, and its results and updates come from them; the host's requests and results are 9.0's; the author's files and errors are 1.0's; the developer's report requests go to 8.0 and its verify, record and bench requests to 9.0; the clock drives 2.0 to 7.0. The flow from 1.0 to 9.0 is internal: a load checks every logged command against the scenario's initial world (D21, D23) and the save's content hash against the scenario's, and a restored world takes its definitions, links and routes from it.
+Balanced with the context diagram: the Player's commands and subscriptions go to 2.0 and 8.0, and its results and updates come from them; the host's requests and results are 9.0's; the author's files and errors are 1.0's; the developer's report requests go to 8.0 and its verify, record and bench requests to 9.0; the clock drives 2.0 to 7.0. Three kinds of flow are internal. 1.0 to 9.0: a load checks every logged command against the scenario's initial world (D21, D23) and the save's content hash against the scenario's, and a restored world takes its definitions, links and routes from it. 1.0 to `D4`: the scenario's command log (`commands.toml`), which `pax_data::step_day` applies first on each day, before the players' commands in stamp order (`crates/pax_data/src/lib.rs:615-624`; the server's `Game::step`, `crates/pax_server/src/game.rs:95-111`). 5.0 to 3.0 and 7.0: the day's figures settlement hands to the firms step, merchants' purchases (PL-3) as producers' revenue and input cost are today.
 
 The level-1 diagrams below split `D3` into its tables: `D3.1 World.merchants`, `D3.2 World.cargo`, `D3.3 World.nations`, `D3.4 World.markets.price`, `D3.5 World.pops`, `D3.6 World.producers`, `D3.7 World.projects` with their needs, `D3.8 World.route_gap` and `D3.9 World.founding_requests`. A level-0 process that a level-1 diagram's flows reach is drawn there as a box marked "off this diagram", not as one of its processes; its own flows are in the level-0 diagram.
 
@@ -601,8 +614,8 @@ flowchart LR
     P33("3.3 Pay merchant dividends")
     P34("3.4 Wind up loss-makers")
     P35("3.5 Found merchants")
-    RU[("D1 World.defs.rules: firms and trade")]
-    R[("D2 World.geography: routes and links")]
+    RU[("D1 World.defs: firms, trade and investment rules, professions")]
+    R[("D2 World.geography: routes, links, markets' nations")]
     M[("D3.1 World.merchants")]
     C[("D3.2 World.cargo")]
     N[("D3.3 World.nations: tariff, treasury")]
@@ -615,11 +628,11 @@ flowchart LR
     R -- "link retention, destination's nation" --> P31
     P31 -- "goods for sale; transit rows removed" --> C
     P31 -- "tariffs paid" --> N
-    P31 -- "tariff debits" --> M
+    P31 -- "tariff debits, write-offs from the month's profit" --> M
     P31 -- "units landed and lost, tariffs" --> P8x
 
     Clock -- "day tick" --> P32
-    R -- "margin, k, link retention and capacity" --> P32
+    R -- "margin, k, link retention and capacity, markets' nations" --> P32
     PR -- "opening prices in both markets" --> P32
     N -- "importer's tariff per good" --> P32
     M -- "cash, winding-up flag" --> P32
@@ -627,11 +640,13 @@ flowchart LR
     P32 -- "buy orders and sell offers" --> P5x
 
     Clock -- "day tick" --> P33
+    P5x -- "each merchant's purchases today" --> P33
     RU -- "payout rate, reserve and smoothing days, owner professions" --> P33
     R -- "route origin" --> P33
-    M -- "cash, today's profit and purchases" --> P33
+    M -- "cash, smoothed purchases, kind, owner nation" --> P33
     C -- "tariffs owed" --> P33
-    P33 -- "smoothed profit and purchases, dividend debits" --> M
+    PO -- "owner pools' sizes" --> P33
+    P33 -- "smoothed purchases, dividend debits" --> M
     P33 -- "dividends to owner pools" --> PO
     P33 -- "chartered dividends" --> N
     P33 -- "dividends by kind" --> P8x
@@ -639,28 +654,29 @@ flowchart LR
     Clock -- "month end" --> P34
     RU -- "exit months, owner professions" --> P34
     R -- "route origin" --> P34
-    M -- "smoothed profit, months of loss, cash" --> P34
+    M -- "month's profit, months of loss, winding-up flag, cash, kind, owner nation" --> P34
     C -- "tariffs owed" --> P34
-    P34 -- "winding-up flags, returns debited" --> M
+    PO -- "owner pools' sizes" --> P34
+    P34 -- "months of loss, winding-up flags, month's profit reset, returns debited" --> M
     P34 -- "returns to owner pools" --> PO
     P34 -- "returns to chartering treasury" --> N
     P34 -- "wind-ups and returns" --> P8x
 
     Clock -- "month end" --> P35
-    RU -- "entry months, owner professions, reserve days" --> P35
-    R -- "routes, margin, link retention and capacity" --> P35
+    RU -- "entry months, owner professions, investor reserve days, their spend rates" --> P35
+    R -- "routes, margin, link retention and capacity, markets' nations" --> P35
     PR -- "today's prices" --> P35
     N -- "importer's tariff per good" --> P35
     G -- "months with an open gap" --> P35
     P35 -- "updated months" --> G
-    M -- "cash of each route's merchants" --> P35
+    M -- "cash and winding-up flag of each route's merchants" --> P35
     PO -- "owner POPs' cash" --> P35
     P35 -- "funding debits" --> PO
     P35 -- "new merchants" --> M
     P35 -- "entries" --> P8x
 ```
 
-Settlement, which puts purchases in transit and books sales, is 5.0's: it reads the merchants' orders and offers from 3.2 and writes `D3.1` and `D3.2` (level 0's "prices, purchases, deliveries, payments").
+Settlement, which puts purchases in transit and books sales, is 5.0's: it reads the merchants' orders and offers from 3.2, writes `D3.1` and `D3.2` (level 0's "prices, purchases, deliveries, payments"), adding each sale's profit to the merchant's `month_profit` (PL-3), and hands 3.3 each merchant's purchases for the day.
 
 ### Level-1 DFD: 4.0 Run labour, unrest and production
 
@@ -673,7 +689,8 @@ flowchart LR
     P42("4.2 Assign employment")
     P43("4.3 Produce")
     P44("4.4 Riot")
-    RU[("D1 World.defs.rules.politics")]
+    RU[("D1 World.defs: producer types, politics rules")]
+    GE[("D2 World.geography: provinces' markets, markets' nations")]
     PO[("D3.5 World.pops")]
     PD[("D3.6 World.producers")]
     N[("D3.3 World.nations")]
@@ -684,17 +701,20 @@ flowchart LR
     P41 -- "working members per POP" --> P42
     P41 -- "working members per POP" --> P7x
 
+    RU -- "each producer type's worker profession" --> P42
     PD -- "capacity per labour pool" --> P42
     P42 -- "employed" --> PD
     P42 -- "labour report with strikers" --> P8x
 
     Clock -- "day tick" --> P43
+    RU -- "production recipes: output per worker, inputs per unit" --> P43
     PD -- "employed, input stock, output stock" --> P43
     P43 -- "output added, inputs used" --> PD
 
     Clock -- "month end" --> P44
     PO -- "size, this month's militancy" --> P44
     RU -- "riot threshold, destruction, security rate" --> P44
+    GE -- "each province's market and its nation" --> P44
     N -- "treasury" --> P44
     PD -- "output stock" --> P44
     P44 -- "output stock destroyed" --> PD
@@ -716,7 +736,8 @@ flowchart LR
     P64("6.4 Start expansions")
     P65("6.5 Found producers for owners")
     P66("6.6 Found for the state's requests")
-    DF[("D1 World.defs: recipes, rules")]
+    DF[("D1 World.defs: recipes, rules, professions")]
+    GE[("D2 World.geography: provinces' markets, markets' nations")]
     PD[("D3.6 World.producers")]
     PJ[("D3.7 World.projects and project needs")]
     PO[("D3.5 World.pops")]
@@ -728,6 +749,7 @@ flowchart LR
     PJ -- "units still needed" --> P61
     PD -- "cash, wage, employed, input stock" --> P61
     DF -- "input recipes, input spend rate" --> P61
+    GE -- "each producer's market" --> P61
     PR -- "opening prices" --> P61
     P61 -- "construction orders" --> P5x
 
@@ -748,8 +770,9 @@ flowchart LR
     PD -- "value added, wage, employed, cash, capacity per pool" --> P64
     PO -- "sizes, militancy" --> P64
     PJ -- "claimed slots" --> P64
+    GE -- "each producer's market" --> P64
     PR -- "today's prices" --> P64
-    DF -- "recipes, profit margin, strike rules" --> P64
+    DF -- "recipes, input recipes, profit margin, reserve days, strike rules" --> P64
     P64 -- "new projects" --> PJ
     P64 -- "projects started" --> P8x
 
@@ -757,8 +780,9 @@ flowchart LR
     PO -- "sizes, militancy, owner cash" --> P65
     PD -- "producers by type and market, capacity per pool" --> P65
     PJ -- "claimed slots" --> P65
+    GE -- "provinces' markets" --> P65
     PR -- "today's prices" --> P65
-    DF -- "recipes, investment and strike rules" --> P65
+    DF -- "recipes, investment, firms and strike rules, professions' spend rates" --> P65
     P65 -- "funding debits" --> PO
     P65 -- "new producer rows" --> PD
     P65 -- "new projects" --> PJ
@@ -770,8 +794,9 @@ flowchart LR
     PO -- "sizes, militancy" --> P66
     PD -- "capacity per pool" --> P66
     PJ -- "claimed slots" --> P66
+    GE -- "the province's market and its nation" --> P66
     PR -- "today's prices" --> P66
-    DF -- "recipes, strike rules" --> P66
+    DF -- "recipes, firms and strike rules" --> P66
     P66 -- "requests removed" --> FR
     P66 -- "founding debit" --> N
     P66 -- "new producer row" --> PD
@@ -779,7 +804,7 @@ flowchart LR
     P66 -- "founding outcomes" --> P8x
 ```
 
-Delivery of construction goods is 5.0's settlement, which lowers `D3.7`'s needed units (level 0's "deliveries"). The POPs' sizes and militancy and the strike rules feed 6.4 to 6.6 because their unclaimed unemployment counts only working members (PL-8).
+Delivery of construction goods is 5.0's settlement, which lowers `D3.7`'s needed units (level 0's "deliveries"). The POPs' sizes and militancy and the strike rules feed 6.4 to 6.6 because their unclaimed unemployment counts only working members (PL-8). The geography gives each producer and province its market, whose prices and owner pools the steps read, and the nation a state's request must belong to.
 
 ## Use case diagram
 
@@ -833,14 +858,14 @@ flowchart LR
 
 | Use case | Actor and trigger | Preconditions | Main flow | Alternative flows | Postconditions | Requirements |
 |---|---|---|---|---|---|---|
-| UC1 View trade routes | Player; opens the trade panel on a market | A session that has a `Welcome` | The client subscribes to that market's `TradeRouteView`; the server answers at once with an update carrying it; the panel lists the routes, their merchants, flows and tariffs, refreshed by each update | A market with no routes shows an empty list; a market id the session doesn't have is refused and no view comes | The subscription holds until replaced | R-F44, R-F45, R-F49, R-N14 |
+| UC1 View trade routes | Player; opens the trade panel on a market | A session that has a `Welcome` | The client subscribes to that market's `TradeRouteView`; the server answers at once with an update carrying it; the panel lists the routes, their merchants, flows and tariffs, refreshed by each update | A market with no routes shows an empty list. An out-of-range market id, or nation id in the new field, closes the session with `Goodbye`, as an out-of-range id in `Subscribe` does today (`Subscription::checked`, `crates/pax_server/src/view.rs:106-121`, refused at `crates/pax_server/src/sim.rs:340-344`; D22: any protocol error closes the session) | The subscription holds until replaced | R-F44, R-F45, R-F49, R-N14, R-N21 |
 | UC2 Set tariff | Player; releases a tariff slider | The session commands the nation, or is a sandbox seat | The client sends `SetTariff`; UC5; the server stamps it for the next tick and answers `None` with the day it applies; it applies at the start of that tick, and that day's merchant orders use it | UC5 refuses it, and the slider returns to the server's rate | The nation's rate on the good is set, logged and saved | R-F17, R-F18, R-F42, R-F43, R-F50 |
-| UC3 Inspect construction | Player; opens the construction panel on a province | A session | The client subscribes to the province's `InvestmentLedgerView`; the panel shows its projects with the units still needed, and per producer type the founding cost and the unclaimed unemployed workers | A province with no projects shows only the founding options | The subscription holds | R-F46, R-F51 |
+| UC3 Inspect construction | Player; opens the construction panel on a province | A session | The client subscribes to the province's `InvestmentLedgerView`; the panel shows its projects with the units still needed, and per producer type the founding cost and the unclaimed unemployed workers | A province with no projects shows only the founding options. An out-of-range province id closes the session with `Goodbye`, as today (`view.rs:112-115`, `sim.rs:340-344`) | The subscription holds until replaced | R-F46, R-F51, R-N21 |
 | UC4 Found producer | Player; picks a producer type and confirms | The province's market is the player's nation's; the panel shows the cost covered and the workers available | The client sends `FoundProducer`; UC5; the next tick records the request, and the ledger shows it pending; at the month end the treasury pays the founding cost, and a producer with capacity 0 and a project appears in the ledger | UC5 refuses it; or at the month end the treasury no longer covers the cost, the workers have gone (or strike) or the province has already founded, so the request is dropped and the ledger says why | The state owns a new producer with a project; the command is logged and saved | R-F29, R-F42, R-F43, R-F51, R-D13 |
 | UC5 Check and validate command | (included) | A `SubmitCommand` arrived | Well-formed, then permitted (D24), then `World::validate` (D21); stamp `(day, player, sequence)`; queue; answer one `CommandResult` | `Malformed`, `NotPermitted`, `NotStarted`, `RateLimited` or the validation error, and nothing is queued | A valid command is queued | R-F43, R-D13, R-N21 |
 | UC6 Save and load a game | Host; saves or loads | A started game, or the lobby for a load | Saving writes the log, with the new commands' fields, and a snapshot in the current format; loading checks the format first, then the content hash, every logged command against the initial world, the checkpoints, and the snapshot's tables | A file of another format, changed content or a crafted snapshot is refused, and the running game is untouched | The game resumes paused at the saved day, with the scenario's links and routes | R-F42, R-N16, R-N17 |
 | UC7 Load a scenario with trade and investment | Scenario author; starts the server or `pax_cli` on a scenario | The files exist | Parse and check links, routes, merchants, recipes and rules; build the world; compute the trade horizon and check each route against it, then drop it; seed merchants | Every error is listed together, and nothing runs | A world whose routes and merchants are ready for day 0 | R-F1 to R-F6, R-F22, R-F57, R-D1 to R-D7 |
-| UC8 Report, verify and benchmark | Developer or CI | A built `pax_cli` | `report` prints today's columns, the new figures, and a market on its own; `verify` compares golden hashes; `bench` times the tick cold, through the month end, and after a warm-up | A hash mismatch fails `verify` | Measurements recorded | R-F55, R-F56, R-F67, R-N6 to R-N12, R-N25 to R-N27 |
+| UC8 Report, verify and benchmark | Developer or CI | A built `pax_cli` | `report` prints today's columns, the new figures, and a market on its own; `verify` compares golden hashes; `bench` times the tick cold, through the month end, printing that day's own time and the slowest day's, and after a warm-up | A hash mismatch fails `verify` | Measurements recorded | R-F55, R-F56, R-F67, R-N6 to R-N12, R-N25 to R-N27 |
 | UC9 Trade between markets | Daily tick | Routes with merchants | Arrival lands cargo and pays tariffs; merchants form orders and offers; markets clear; settlement books purchases and sales; merchants pay dividends; the day's report carries the flows | No open gap: no orders | Goods moved, money conserved | R-F7 to R-F14, R-F17, R-F54, R-N1, R-N4 |
 | UC10 Strike | Daily tick | POPs above the strike threshold | Working members are counted; pools supply only them; wages are split among them; the labour report counts strikers apart | No POP above the threshold: today's numbers | Output falls where workers strike | R-F34 to R-F36 |
 | UC11 Build projects | Daily tick | Producers with projects | Construction orders join the market, from cash above the day's input budgets, restart reserve and wages; delivered goods are consumed | No cash above those: no order that day | Needed units fall | R-F25 |
@@ -859,13 +884,17 @@ flowchart TD
     subgraph Client["Player and client"]
         S((start)) --> C1["Release a tariff slider or confirm a founding"]
         C1 --> C2["Send SubmitCommand"]
-        C9["Show the CommandResult and the day's views"]
+        C9["Show the CommandResult"]
+        C10["Show the day's views"]
         C9 --> E((end))
+        C10 --> E
     end
     subgraph Server["pax_server sim thread"]
-        V1{"Well-formed and permitted? (D24)"}
+        V1{"Within the rate limit, well-formed, started and permitted? (D24)"}
         V2{"World::validate passes? (D21)"}
         V3["Stamp day, player, sequence and queue"]
+        FV{{"fork: answer now, apply at the next tick"}}
+        V7["Reply CommandResult None with the day it applies"]
         V4["Reply CommandResult with the error"]
         V5["step_day: scripted commands, then players' in stamp order"]
         V6["Build views from state and the day's report; send DayUpdate"]
@@ -919,7 +948,9 @@ flowchart TD
     V2 -- no --> V4
     V2 -- yes --> V3
     V4 --> C9
-    V3 -- "next tick" --> V5
+    V3 --> FV
+    FV --> V7 --> C9
+    FV -- "next tick" --> V5
     V5 --> T1 --> T2 --> T3 --> T4 --> T5 --> FA
     FA --> A1 --> JA
     FA --> A2 --> JA
@@ -939,11 +970,11 @@ flowchart TD
     M4 -- no --> M6
     M6 -- yes --> M3
     M6 -- no --> M7 --> M8 --> M9 --> T10
-    T10 -- yes --> V6 --> C9
+    T10 -- yes --> V6 --> C10
     T10 -- no --> T11 --> X
 ```
 
-The four forks are today's parallel passes, which M5 keeps: consumer aggregation (`market.rs:502-530`), price discovery (`:307-318`), and settlement's passes A and B (`:683-701`, `:722-770`). The three POP passes join by summing integers only (AGENTS.md §3), and discovery's jobs are independent markets, so the result is the same at any thread count. Merchants' and projects' orders join the order list that discovery and the sequential settlement read; they add no parallel pass.
+The server's fork after queuing is D22's order: a valid command is stamped and queued and answered with one `CommandResult` of `None` at once, carrying the day of the tick that will apply it (`crates/pax_server/src/sim.rs:387-388`, `:354-357`), while the command itself waits for that tick; every other path answers with its error and queues nothing. The four forks in the rayon lane are today's parallel passes, which M5 keeps: consumer aggregation (`market.rs:502-530`), price discovery (`:307-318`), and settlement's passes A and B (`:683-701`, `:722-770`). The three POP passes join by summing integers only (AGENTS.md §3), and discovery's jobs are independent markets, so the result is the same at any thread count. Merchants' and projects' orders join the order list that discovery and the sequential settlement read; they add no parallel pass.
 
 ## Entity-relationship diagram
 
@@ -1071,7 +1102,7 @@ erDiagram
         u8 kind "Private, Commercial or Chartered"
         u32 owner_nation FK "optional: Chartered only"
         Fixed cash "outside money: in total_money"
-        Fixed profit_avg
+        Fixed month_profit "realized since the last month end, reset there"
         Fixed purchases_avg
         u16 loss_months
         bool winding_up
@@ -1110,6 +1141,7 @@ Money holders after M5: `POP.cash`, `PRODUCER.cash`, `NATION.treasury` and `MERC
 13. A `PRODUCER`'s `capacity` is at least its `employed` (R-D12); depreciation never cuts below it (R-F31).
 14. `ROUTE_GAP` has one row per `ROUTE`, in the same order (R-F16).
 15. A `FOUNDING_REQUEST` lives from the `FoundProducer` that records it to the next month end, which answers and removes it; it satisfies the rules `World::validate` applied to the command (R-D16).
+16. A `MERCHANT`'s `month_profit` holds only the current month's realized profit: every month end tests it and sets it back to 0 (R-F15, C28).
 
 ## Traceability
 
@@ -1126,7 +1158,7 @@ Money holders after M5: `POP.cash`, `PRODUCER.cash`, `NATION.treasury` and `MERC
 | SR-7 | R-F18, R-F29, R-F42 to R-F53, R-N21, R-D13, R-D16 |
 | SR-8 | R-N1 to R-N4, R-D9, R-D10 |
 | SR-9 | R-F59, R-N5 to R-N9 |
-| SR-10 | R-N10 to R-N14, R-N25 to R-N27 |
+| SR-10 | R-F56, R-N10 to R-N14, R-N25 to R-N27 |
 | SR-11 | R-N15 to R-N17 |
 | SR-12 | R-F54 to R-F56, R-F63 to R-F67 |
 | SR-13 | R-N23 |
@@ -1136,22 +1168,22 @@ Money holders after M5: `POP.cash`, `PRODUCER.cash`, `NATION.treasury` and `MERC
 
 | Task | Requirements |
 |---|---|
-| M5-1 | R-F1 to R-F4, R-F57, R-F61, R-N12, R-N13, R-D1, R-D2, R-D4, R-D14 |
-| M5-2 | R-F5, R-F10, R-F54, R-N1, R-N4, R-N10, R-N12, R-D9, R-D10, R-D15 |
-| M5-3 | R-F7 to R-F9, R-F11 to R-F13, R-F17 to R-F19, R-F21, R-F42 to R-F44, R-F54, R-F67, R-N4, R-N7, R-N10, R-N15, R-N21, R-D8, R-D9, R-D13 |
-| M5-4 | R-F5, R-F6, R-F14, R-F15, R-F57, R-F62, R-F63, R-F67, R-N10, R-N26, R-D3, R-D4, R-D9, R-D15 |
+| M5-1 | R-F1 to R-F4, R-F56 (its first commit), R-F57, R-F61, R-N12, R-N13, R-N26 (the baseline), R-D1, R-D2, R-D4, R-D14 |
+| M5-2 | R-F5, R-F10, R-F54, R-F67, R-N1, R-N4, R-N10, R-N12, R-N25 (if queued after M5-7), R-D9, R-D10, R-D15 |
+| M5-3 | R-F7 to R-F9, R-F11 to R-F13, R-F17 to R-F19, R-F21, R-F42 to R-F44, R-F54, R-F67, R-N4, R-N7, R-N10, R-N12, R-N15, R-N21, R-N25 (if queued after M5-7), R-D8, R-D9, R-D13 |
+| M5-4 | R-F5, R-F6, R-F14, R-F15, R-F57, R-F62, R-F63, R-F67, R-N10, R-N12, R-N25 (if queued after M5-7), R-N26, R-D3, R-D4, R-D9, R-D15 |
 | M5-5 | R-F20, R-F55, R-F58, R-F64, R-N6, R-N10, R-N22 |
 | M5-6 | R-F22, R-F23, R-F32, R-F57, R-N12, R-D7, R-D11 |
 | M5-7 | R-F24 to R-F27, R-F32, R-F57, R-F65, R-F67, R-N4, R-N10, R-N25 to R-N27, R-D5 |
-| M5-8 | R-F28 to R-F30, R-F32, R-F42 to R-F44, R-F57, R-F65, R-F67, R-N7, R-N12, R-N15, R-N21, R-N26, R-D5, R-D12, R-D13, R-D16 |
-| M5-9 | R-F31, R-F32, R-F57, R-F65, R-F67, R-N26, R-D5, R-D12 |
+| M5-8 | R-F28 to R-F30, R-F32, R-F42 to R-F44, R-F57, R-F65, R-F67, R-N7, R-N12, R-N15, R-N21, R-N25, R-N26, R-D5, R-D12, R-D13, R-D16 |
+| M5-9 | R-F31, R-F32, R-F57, R-F65, R-F67, R-N12, R-N25, R-N26, R-D5, R-D12 |
 | M5-10 | R-F33 |
 | M5-11 | R-F34 to R-F36, R-F40, R-F57, R-F67, R-N10, R-D6 |
 | M5-12 | R-F37 to R-F40, R-F57, R-F66, R-F67, R-N4, R-N6, R-N26, R-D6 |
 | M5-13 | R-F44 to R-F46, R-F48, R-N14, R-N15, R-N21 |
 | M5-14 | R-F44, R-F47, R-F49 to R-F53, R-N15 |
-| M5-15 | R-F56, R-N6, R-N7, R-N10, R-N26, R-N27 |
-| M5-16 | R-F13, R-F16, R-F57, R-F60, R-F63, R-F67, R-N12, R-N26, R-D4 |
+| M5-15 | R-N6, R-N7, R-N10, R-N26, R-N27 |
+| M5-16 | R-F13, R-F16, R-F57, R-F60, R-F63, R-F67, R-N12, R-N25, R-N26, R-D4 |
 | Every task | R-F41, R-F59, R-N2, R-N3, R-N5, R-N8, R-N9, R-N11, R-N16 to R-N20, R-N22 to R-N24 |
 
-**Charter objectives to requirements:** O3 (a to g): R-F20, R-F21, R-F19, R-F15, R-F16, R-N3, R-N22, measured on R-F54 and R-F64. O4 (a to e): R-F33, R-F25, R-N22, measured on R-F65. O5: R-F34 to R-F40, R-F66. O6: R-F42 to R-F53, R-N7. O7: R-N5 to R-N12, R-N25 to R-N27. O8 and O9: R-N9, R-N23.
+**Charter objectives to requirements:** O3 (a to g): R-F20, R-F21, R-F19, R-F15, R-F16, R-N3, R-N22, measured on R-F54 and R-F64. O4 (a to e): R-F33, R-F25, R-N22, measured on R-F65. O5: R-F34 to R-F40, R-F66. O6: R-F42 to R-F53, R-N7. O7: R-F56, R-N5 to R-N12, R-N25 to R-N27. O8 and O9: R-N9, R-N23.
