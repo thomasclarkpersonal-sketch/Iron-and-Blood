@@ -154,7 +154,7 @@ Outcomes, not mechanisms. The Analysis stage (`03-requirements-specification.md`
 
 ## Initial assessment
 
-**Within the existing decisions.** With D17, D27 and D28 accepted for this run, the milestone can be planned and built on accepted decisions alone, and no new decision is needed to start. The later stages must settle the points below as choices within D17, D27 and D28, each recorded for the maintainer to check. The Analysis stage settled items 1 and 2 as the [requirements specification](03-requirements-specification.md#choices-this-page-makes-within-the-contract)'s choices C1 to C23.
+**Within the existing decisions.** With D17, D27 and D28 accepted for this run, the milestone can be planned and built on accepted decisions alone, and no new decision is needed to start. The later stages must settle the points below as choices within D17, D27 and D28, each recorded for the maintainer to check. The Analysis stage settled items 1 and 2 as the [requirements specification](03-requirements-specification.md#choices-this-page-makes-within-the-contract)'s choices C1 to C27.
 
 **1. Where the milestone and its designs disagree:**
 - **Merchant goods:** dense per-good merchant columns (M5-2, `MILESTONE_5.md:65`; `docs/TRADE.md:39-41`) against a sparse cargo table (`docs/DATA_MODEL_M5_M6.md:25`).
