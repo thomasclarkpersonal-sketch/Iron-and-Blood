@@ -1,4 +1,4 @@
-//! `pax_server --scenario DIR [--bind ADDR] [--port-file PATH] [--saves DIR] [--players N] [--sandbox] [--admin NAME --admin-password-file PATH] [--password-file PATH] [--commands-per-second N] [--pause-after S] [--drop-after S] [--updates-per-second N] [--map-every N] [--tls-self-signed | --tls-cert PEM --tls-key PEM] [--fingerprint-file PATH] [--exit-when-idle] [--exit-when-stdin-closes]`
+//! `pax_server --scenario DIR [--bind ADDR] [--port-file PATH] [--saves DIR] [--players N] [--sandbox] [--admin NAME --admin-password-file PATH] [--password-file PATH] [--commands-per-second N] [--pause-after S] [--drop-after S] [--updates-per-second N] [--map-every N] [--subscribe-answers-per-second N] [--tls-self-signed | --tls-cert PEM --tls-key PEM] [--fingerprint-file PATH] [--exit-when-idle] [--exit-when-stdin-closes]`
 //!
 //! The authoritative game server (D10). In single player the client launches it with
 //! `--scenario <dir> --bind 127.0.0.1:0 --sandbox --exit-when-idle --exit-when-stdin-closes`
@@ -26,7 +26,7 @@ use std::time::Duration;
 use pax_server::{Config, Secret, Server, TlsSetting};
 use tracing::error;
 
-const USAGE: &str = "usage: pax_server --scenario DIR [--bind ADDR] [--port-file PATH] [--saves DIR] [--players N] [--sandbox] [--admin NAME --admin-password-file PATH] [--password-file PATH] [--commands-per-second N] [--pause-after S] [--drop-after S] [--updates-per-second N] [--map-every N] [--tls-self-signed | --tls-cert PEM --tls-key PEM] [--fingerprint-file PATH] [--exit-when-idle] [--exit-when-stdin-closes]";
+const USAGE: &str = "usage: pax_server --scenario DIR [--bind ADDR] [--port-file PATH] [--saves DIR] [--players N] [--sandbox] [--admin NAME --admin-password-file PATH] [--password-file PATH] [--commands-per-second N] [--pause-after S] [--drop-after S] [--updates-per-second N] [--map-every N] [--subscribe-answers-per-second N] [--tls-self-signed | --tls-cert PEM --tls-key PEM] [--fingerprint-file PATH] [--exit-when-idle] [--exit-when-stdin-closes]";
 
 /// The most players `--players` allows. Player ids are `u16` on the wire; the cap is
 /// far below that, a sanity limit for a server whose every player gets every update.
@@ -102,6 +102,9 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> Result<(Config, Launche
                 config.bandwidth.updates_per_second = count("--updates-per-second", it.next())?;
             }
             "--map-every" => config.bandwidth.map_every = count("--map-every", it.next())?,
+            "--subscribe-answers-per-second" => {
+                config.subscribe_answers_per_second = count("--subscribe-answers-per-second", it.next())?;
+            }
             "--admin" => admin_name = Some(it.next().ok_or("--admin needs a value")?),
             "--password-file" => config.password = Some(secret("--password-file", it.next())?),
             "--admin-password-file" => admin_password = Some(secret("--admin-password-file", it.next())?),
@@ -285,6 +288,10 @@ mod tests {
         let (config, _) = parse_args(args("--scenario s --updates-per-second 10 --map-every 1")).unwrap();
         assert_eq!(config.bandwidth, pax_server::Bandwidth { updates_per_second: 10, map_every: 1 });
         assert!(parse_args(args("--scenario s --updates-per-second 0")).is_err());
+        assert_eq!(config.subscribe_answers_per_second, pax_server::SUBSCRIBE_ANSWERS_PER_SECOND);
+        let (config, _) = parse_args(args("--scenario s --subscribe-answers-per-second 10")).unwrap();
+        assert_eq!(config.subscribe_answers_per_second, 10, "the temporary map-request limit is a setting");
+        assert!(parse_args(args("--scenario s --subscribe-answers-per-second 0")).is_err());
         assert!(parse_args(args("--scenario s --map-every x")).is_err());
     }
 

@@ -122,13 +122,14 @@ Loading a save goes through the lobby, and players reclaim their nations.
 | 3 | Met | A real stall pauses everyone and is named in `ServerState.waiting_for`; a return resumes; 30 s of silence drops the player while the other plays on (`tests/multiplayer.rs`, with real time); the resume token reclaims the nation (`sim.rs`; M4-4). The thresholds are settings with D24's defaults, which a playtest should confirm |
 | 4 | Met | `session_replay.rs`: a two-player game saves, replays through `pax_cli replay` to its `state_hash`, and reloads through the lobby (M4-5) |
 | 5 | Met | 53.5 KB/s per remote client at speed 3, at 10,000 provinces and about 1M POP rows with every view (`game::tests::remote_bandwidth_budget`, M4-7) |
-| 6 | Met | TLS whenever several players are off localhost; passwords; 20 commands a second (whether other requests count too is an open follow-up, below); the hostile-input test and the cargo-fuzz target cover every request, the lobby's included (M4-6) |
+| 6 | Met | TLS whenever several players are off localhost; passwords; 20 commands a second, and temporarily 4 map (`Subscribe`) answers a second (whether other requests count too is an open follow-up, below); the hostile-input test and the cargo-fuzz target cover every request, the lobby's included (M4-6) |
 | 7 | Met | `docker compose up`: saves and the TLS certificate on volumes; CI builds the image and waits until it is healthy (M4-8) |
 | 8 | Met | ≈91 ms/day at about 1M POP rows on 8 threads (D13, M4-11) |
 
 ## Open follow-ups (owner decisions)
 
 - **Which requests D24's rate limit covers.** Today only `SubmitCommand` is limited (20 a second). A `Subscribe` makes the sim thread build a full `DayUpdate` with its map (about 91 KB at long-term scale), outside the flow-control window and the update cap, and `ClaimNation`/`SetReady` each broadcast a `LobbyState`. A remote client that repeats them in a tight loop costs the sim thread and the bandwidth cap far more than its commands could. Proposal: one per-session limit checked once in `Sim::handle`, next to the admission choke point, covering every request except `Hello`, `Ack` and `Ping`, with an over-limit `SubmitCommand` answered `RateLimited` and anything else dropped. This needs a D24 addition (raised by the critic on #57 and #58).
+  - **In the meantime, a temporary limit on map requests:** each session gets at most 4 `Subscribe` answers a second (`--subscribe-answers-per-second`, by default 4, like D24's other numbers; the `answer_limit` module, the session's `answers` field and this setting are all there is to remove). A `Subscribe` that comes sooner still changes the subscription at once; its answer, for the latest subscription, goes out when the gap has passed, so a burst of clicks costs one deferred answer and nothing is lost. It applies to every session, local ones too, because the cost is the sim thread's. `ClaimNation`/`SetReady` are still unlimited. When D24 decides the general rule, replace this limit with it (and make it a setting if it stays separate).
 
 ## Out of scope for M4
 

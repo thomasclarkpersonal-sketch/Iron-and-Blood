@@ -16,6 +16,7 @@
 //! Built so far: M3 (single player, `docs/MILESTONE_3.md`) and several players at
 //! once (M4-1). The lobby, authority and lag rules follow in `docs/MILESTONE_4.md`.
 
+mod answer_limit;
 mod clock;
 mod commands;
 mod encode;
@@ -67,6 +68,11 @@ pub const UPDATES_PER_SECOND: u32 = 4;
 /// D24's default map refresh for a remote session: its `MapView` goes out with every
 /// this-many-th update, and whenever its subscription changes (`--map-every`, M4-7).
 pub const MAP_EVERY: u32 = 5;
+
+/// D24's default for the temporary map-request limit: at most this many `Subscribe`
+/// answers a second per session, the ones in between coalesced
+/// (`--subscribe-answers-per-second`; MILESTONE_4, "Open follow-ups").
+pub const SUBSCRIBE_ANSWERS_PER_SECOND: u32 = 4;
 /// D24's default per-session command rate limit (`--commands-per-second`).
 pub const COMMANDS_PER_SECOND: u32 = 20;
 
@@ -124,6 +130,10 @@ pub struct Config {
     /// `--updates-per-second` and `--map-every`, by default [`UPDATES_PER_SECOND`]
     /// and [`MAP_EVERY`]. Local sessions are never throttled.
     pub bandwidth: Bandwidth,
+    /// The temporary map-request limit: at most this many `Subscribe` answers a
+    /// second per session, local ones too (`--subscribe-answers-per-second`, by
+    /// default [`SUBSCRIBE_ANSWERS_PER_SECOND`]; MILESTONE_4, "Open follow-ups").
+    pub subscribe_answers_per_second: u32,
 }
 
 impl Config {
@@ -131,7 +141,8 @@ impl Config {
     /// launcher):
     /// * the fairness pause is multiplayer only, and comes before the drop (D24), or
     ///   the connection task would drop a client when it should pause the game;
-    /// * a remote session gets updates, and a map, at some rate (M4-7);
+    /// * a remote session gets updates, and a map, at some rate (M4-7), and every
+    ///   session gets its `Subscribe`s answered (the temporary map-request limit);
     /// * D24's TLS rule: several players off localhost need TLS (M4-6);
     /// * a password never crosses the network in clear: a server with a password or
     ///   an admin needs TLS off localhost (M4-6);
@@ -147,6 +158,9 @@ impl Config {
         }
         if self.bandwidth.updates_per_second == 0 || self.bandwidth.map_every == 0 {
             return Err(ConfigError::NoUpdates);
+        }
+        if self.subscribe_answers_per_second == 0 {
+            return Err(ConfigError::NoSubscribeAnswers);
         }
         if self.max_players > 1 && !self.bind.ip().is_loopback() && self.tls.is_none() {
             return Err(ConfigError::MultiplayerNeedsTls { players: self.max_players, bind: self.bind });
@@ -191,6 +205,7 @@ impl Config {
             sandbox: true,
             admin: None,
             bandwidth: Bandwidth::default(),
+            subscribe_answers_per_second: SUBSCRIBE_ANSWERS_PER_SECOND,
             password: None,
             commands_per_second: COMMANDS_PER_SECOND,
             tls: None,
@@ -217,6 +232,9 @@ pub enum ConfigError {
     /// `--updates-per-second` or `--map-every` is 0: a remote session would never
     /// get an update, or never a map.
     NoUpdates,
+    /// `--subscribe-answers-per-second` is 0: no `Subscribe` would ever be answered
+    /// (the temporary map-request limit; goes with it).
+    NoSubscribeAnswers,
     /// D24: TLS off localhost.
     MultiplayerNeedsTls { players: u16, bind: SocketAddr },
     /// A password in `Hello` would cross the network in clear: off localhost, a
@@ -234,6 +252,7 @@ impl std::fmt::Display for ConfigError {
             }
             ConfigError::PauseNotBeforeDrop => write!(f, "--pause-after must be shorter than --drop-after"),
             ConfigError::NoUpdates => write!(f, "--updates-per-second and --map-every must be at least 1"),
+            ConfigError::NoSubscribeAnswers => write!(f, "--subscribe-answers-per-second must be at least 1"),
             ConfigError::MultiplayerNeedsTls { players, bind } => write!(
                 f,
                 "--players {players} on {bind} needs TLS (D24): add --tls-self-signed, or --tls-cert and --tls-key"
@@ -456,6 +475,9 @@ mod tests {
         config.password = Some(Secret::new("pw"));
         assert!(matches!(config.validate(), Err(ConfigError::PasswordNeedsTls { .. })));
         config.password = None;
+        let mut no_answers = config.clone();
+        (no_answers.subscribe_answers_per_second, no_answers.bind) = (0, SocketAddr::from(([127, 0, 0, 1], 0)));
+        assert_eq!(no_answers.validate(), Err(ConfigError::NoSubscribeAnswers), "named, not lumped in");
         config.admin = Some(Admin { name: "ada".into(), password: Secret::new("pw") });
         assert!(matches!(config.validate(), Err(ConfigError::PasswordNeedsTls { .. })));
         config.tls = Some(TlsSetting::SelfSigned);

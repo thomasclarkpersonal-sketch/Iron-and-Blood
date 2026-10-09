@@ -18,6 +18,7 @@
 use std::collections::BTreeMap;
 use std::num::NonZeroU64;
 
+use crate::answer_limit::AnswerLimit;
 use crate::net::{ConnHandle, Outbound};
 use crate::throttle::{Bandwidth, Throttle};
 use crate::view::CheckedSubscription;
@@ -35,6 +36,9 @@ pub(crate) struct Session {
     pub window: UpdateWindow,
     /// How often, and with the map or not (D24 bandwidth, M4-7; remote sessions only).
     pub throttle: Throttle,
+    /// Its `Subscribe` answers, under the temporary map-request limit
+    /// (`answer_limit`, MILESTONE_4 "Open follow-ups").
+    pub answers: AnswerLimit,
     /// The name the client gave in `Hello`, for the lobby. Display only.
     name: String,
     /// Marked ready in the lobby (M4-2). Cleared whenever the claim changes.
@@ -181,12 +185,14 @@ pub struct LobbyEntry {
 
 impl Session {
     /// Starts the session's update stream again, as for a new connection: the
-    /// default subscription, an empty window (D23) and a fresh throttle (M4-7). For
-    /// a new game (a load) and an ended seat; the three always reset together.
+    /// default subscription, an empty window (D23), a fresh throttle (M4-7) and no
+    /// pending `Subscribe` answer (the temporary `answer_limit`). For a new game (a
+    /// load) and an ended seat; they always reset together.
     pub(crate) fn restart_updates(&mut self) {
         self.subscription = CheckedSubscription::default();
         self.window = UpdateWindow::default();
         self.throttle.restart();
+        self.answers.reset();
     }
 }
 
@@ -206,10 +212,12 @@ impl SessionTable {
 
     /// A new connection, not yet welcomed.
     /// `bandwidth` throttles it if it is remote (D24, M4-7).
-    pub(crate) fn connect(&mut self, id: u64, conn: ConnHandle, bandwidth: Bandwidth) {
+    /// `answers` limits its `Subscribe` answers (temporary, `answer_limit`).
+    pub(crate) fn connect(&mut self, id: u64, conn: ConnHandle, bandwidth: Bandwidth, answers: AnswerLimit) {
         let throttle = Throttle::new(conn.remote, bandwidth);
         let row = Session {
             throttle,
+            answers,
             conn,
             subscription: CheckedSubscription::default(),
             seat: None,
@@ -508,6 +516,14 @@ impl SessionTable {
             .filter_map(|(&id, s)| s.throttle.ready_at().map(|at| (id, at)))
     }
 
+    /// The seated sessions whose `Subscribe` answer was deferred by the temporary
+    /// map-request limit (`answer_limit`), with when it
+    /// may go out. `Sim::next_flush` and `Sim::flush` use it beside
+    /// [`Self::held_updates`].
+    pub(crate) fn pending_answers(&self) -> impl Iterator<Item = (u64, std::time::Instant)> + '_ {
+        self.rows.iter().filter(|(_, s)| s.seat.is_some()).filter_map(|(&id, s)| s.answers.due_at().map(|at| (id, at)))
+    }
+
     /// Every connection, welcomed or not, in session order.
     pub(crate) fn all(&self) -> impl Iterator<Item = &Session> {
         self.rows.values()
@@ -578,7 +594,7 @@ mod tests {
     /// Connects session `id` and seats it, checking it got player id `player`.
     fn seated(table: &mut SessionTable, id: u64, player: u16, nation: Option<u32>) {
         let (conn, _rx) = ConnHandle::for_test();
-        table.connect(id, conn, Bandwidth::default());
+        table.connect(id, conn, Bandwidth::default(), AnswerLimit::default());
         let claim = nation.map_or(Claim::Unclaimed, Claim::Nation);
         assert_eq!(table.sit(id, "p", claim, 8, false), Ok(Seat { player, claim }));
     }
@@ -620,18 +636,18 @@ mod tests {
         seated(&mut t, 1, 0, None);
         assert_eq!(t.host(), None, "the first player isn't host on a dedicated server");
         let (conn, _rx) = ConnHandle::for_test();
-        t.connect(2, conn, Bandwidth::default());
+        t.connect(2, conn, Bandwidth::default(), AnswerLimit::default());
         assert!(t.sit(2, "ada", Claim::Unclaimed, 8, false).is_ok());
         assert_eq!(t.host(), None, "the admin's name without its password is nobody");
         let (conn, _rx) = ConnHandle::for_test();
-        t.connect(3, conn, Bandwidth::default());
+        t.connect(3, conn, Bandwidth::default(), AnswerLimit::default());
         assert!(t.sit(3, "ada", Claim::Unclaimed, 8, true).is_ok());
         assert_eq!(t.host(), Some(3));
         assert_eq!(t.remove(3, OnLeave::EndSeat).map(|v| v.new_host), Some(None));
         assert_eq!(t.host(), None);
         let _ = t.remove(2, OnLeave::EndSeat);
         let (conn, _rx) = ConnHandle::for_test();
-        t.connect(2, conn, Bandwidth::default());
+        t.connect(2, conn, Bandwidth::default(), AnswerLimit::default());
         assert!(t.sit(2, "ada", Claim::Unclaimed, 8, true).is_ok());
         assert_eq!(t.host(), Some(2));
         assert_eq!(t.remove(2, OnLeave::EndSeat).map(|v| v.new_host), Some(None));
@@ -655,7 +671,7 @@ mod tests {
         seated(&mut t, 1, 0, Some(0));
         for id in [2, 3] {
             let (conn, _rx) = ConnHandle::for_test();
-            t.connect(id, conn, Bandwidth::default());
+            t.connect(id, conn, Bandwidth::default(), AnswerLimit::default());
         }
         assert_eq!(t.sit(2, "p", Claim::Nation(0), 8, false), Err(Refusal::NationTaken { nation: 0, player: 0 }));
         assert_eq!(t.sit(2, "p", Claim::Nation(1), 1, false), Err(Refusal::Full));
@@ -689,7 +705,7 @@ mod tests {
         seated(&mut t, 1, 0, None);
         seated(&mut t, 2, 1, Some(1));
         let (conn, _rx) = ConnHandle::for_test();
-        t.connect(3, conn, Bandwidth::default()); // connected, not welcomed
+        t.connect(3, conn, Bandwidth::default(), AnswerLimit::default()); // connected, not welcomed
         assert_eq!((t.holder(0), t.holder(1)), (None, Some(1)));
         assert_eq!(t.players(), 2);
     }
