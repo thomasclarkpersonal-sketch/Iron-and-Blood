@@ -329,7 +329,7 @@ impl Sim {
     /// [`Self::subscribe`] at `now`, the time the limit sees (tests pass their own).
     /// The subscription changes at once; the answer, a full update with the map,
     /// goes out now, or, within the temporary map-request limit's gap
-    /// (`throttle::SUBSCRIBE_ANSWERS_PER_SECOND`), later through [`Self::flush`],
+    /// (`answer_limit`), later through [`Self::flush`],
     /// for whatever the subscription is by then.
     fn subscribe_at(&mut self, session: u64, requested: Subscription, now: Instant) {
         let subscription = match requested.checked(self.game.world()) {
@@ -338,7 +338,7 @@ impl Sim {
         };
         let Some(s) = self.sessions.get_mut(session) else { return };
         s.subscription = subscription;
-        if s.throttle.admit_answer(now) {
+        if s.answers.admit(now) {
             answer_subscription(s, &self.game.views(), self.clock.speed(), now);
         } else {
             debug!(session, "Subscribe answer deferred (the temporary map-request limit)");
@@ -841,6 +841,7 @@ impl Sim {
 /// answer for the temporary map-request limit.
 fn answer_subscription(s: &mut Session, views: &DayViews<'_>, speed: wire::Speed, now: Instant) {
     s.throttle.resubscribed(now);
+    s.answers.answered(now);
     s.conn.send(Outbound::Frame(view::day_update(views, &s.subscription, speed, 0, MapPart::Include)));
 }
 

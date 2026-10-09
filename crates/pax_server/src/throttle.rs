@@ -20,21 +20,6 @@ use std::time::{Duration, Instant};
 
 use crate::view::MapPart;
 
-/// **Temporary** (until D24 says which requests a per-session limit covers:
-/// MILESTONE_4, "Open follow-ups"): at most this many `Subscribe` answers a second
-/// per session. Each answer is a full `DayUpdate` with the `MapView`, built on the
-/// sim thread, so a client re-subscribing in a tight loop would cost the thread and
-/// the bandwidth cap far more than its commands could. A `Subscribe` that comes
-/// sooner still changes the subscription at once; its answer, for the latest
-/// subscription, goes out when the gap has passed, so nothing is lost, only
-/// coalesced. Every session, local ones too: the cost is the sim thread's, which a
-/// player on the server's machine shares with everyone. A server constant, not a
-/// setting, until that decision.
-pub(crate) const SUBSCRIBE_ANSWERS_PER_SECOND: u32 = 4;
-
-/// The shortest gap between two `Subscribe` answers to a session.
-const ANSWER_GAP: Duration = Duration::from_millis(1000 / SUBSCRIBE_ANSWERS_PER_SECOND as u64);
-
 /// A server's bandwidth settings for remote sessions (D24, M4-7).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Bandwidth {
@@ -64,10 +49,6 @@ pub(crate) struct Throttle {
     held: bool,
     /// Updates since the last one with a map; `None`: the next one carries it.
     since_map: Option<u32>,
-    /// When the last `Subscribe` answer went out ([`SUBSCRIBE_ANSWERS_PER_SECOND`]).
-    last_answer: Option<Instant>,
-    /// A `Subscribe` was accepted, and its answer waits for the gap.
-    answer_pending: bool,
 }
 
 impl Throttle {
@@ -81,8 +62,6 @@ impl Throttle {
             last_sent: None,
             held: false,
             since_map: None,
-            last_answer: None,
-            answer_pending: false,
         }
     }
 
@@ -92,23 +71,6 @@ impl Throttle {
         self.last_sent = None;
         self.held = false;
         self.since_map = None;
-        self.last_answer = None;
-        self.answer_pending = false;
-    }
-
-    /// Admits a `Subscribe` answer at `now`, or defers it: then it waits until
-    /// [`Self::answer_due_at`], when the sim thread answers the latest subscription
-    /// ([`SUBSCRIBE_ANSWERS_PER_SECOND`], temporary). Not a query: call it only to
-    /// answer.
-    pub(crate) fn admit_answer(&mut self, now: Instant) -> bool {
-        let early = self.answer_pending || self.last_answer.is_some_and(|t| now < t + ANSWER_GAP);
-        self.answer_pending = early;
-        !early
-    }
-
-    /// When a deferred `Subscribe` answer may go out; `None` if none waits.
-    pub(crate) fn answer_due_at(&self) -> Option<Instant> {
-        self.last_answer.filter(|_| self.answer_pending).map(|t| t + ANSWER_GAP)
     }
 
     /// Admits an update at `now`, or holds it: then the day waits until
@@ -144,8 +106,6 @@ impl Throttle {
     pub(crate) fn resubscribed(&mut self, now: Instant) {
         self.since_map = Some(0);
         self.last_sent = Some(now);
-        self.last_answer = Some(now);
-        self.answer_pending = false;
     }
 }
 
@@ -220,26 +180,5 @@ mod tests {
             MapPart::Include,
             "the first update after a restart carries the map"
         );
-    }
-
-    /// The temporary map-request limit: four answers a second, and the ones in
-    /// between coalesce into one answer when the gap has passed.
-    #[test]
-    fn subscribe_answers_are_limited_and_coalesced() {
-        let mut t = Throttle::new(false, Bandwidth::default());
-        let start = Instant::now();
-        assert!(t.admit_answer(start), "the first goes out");
-        t.resubscribed(start);
-        assert_eq!(t.answer_due_at(), None);
-        for ms in [10, 50, 200] {
-            assert!(!t.admit_answer(start + Duration::from_millis(ms)), "too soon: deferred");
-        }
-        assert_eq!(t.answer_due_at(), Some(start + ANSWER_GAP), "one answer, when the gap has passed");
-        assert!(!t.admit_answer(start + ANSWER_GAP), "a pending answer goes out through the flush");
-        t.resubscribed(start + ANSWER_GAP);
-        assert_eq!(t.answer_due_at(), None);
-        assert!(t.admit_answer(start + ANSWER_GAP * 2));
-        t.restart();
-        assert!(t.admit_answer(start + ANSWER_GAP * 2), "a restart forgets the limit");
     }
 }

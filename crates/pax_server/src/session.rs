@@ -18,6 +18,7 @@
 use std::collections::BTreeMap;
 use std::num::NonZeroU64;
 
+use crate::answer_limit::AnswerLimit;
 use crate::net::{ConnHandle, Outbound};
 use crate::throttle::{Bandwidth, Throttle};
 use crate::view::CheckedSubscription;
@@ -35,6 +36,9 @@ pub(crate) struct Session {
     pub window: UpdateWindow,
     /// How often, and with the map or not (D24 bandwidth, M4-7; remote sessions only).
     pub throttle: Throttle,
+    /// Its `Subscribe` answers, under the temporary map-request limit
+    /// (`answer_limit`, MILESTONE_4 "Open follow-ups").
+    pub answers: AnswerLimit,
     /// The name the client gave in `Hello`, for the lobby. Display only.
     name: String,
     /// Marked ready in the lobby (M4-2). Cleared whenever the claim changes.
@@ -181,12 +185,14 @@ pub struct LobbyEntry {
 
 impl Session {
     /// Starts the session's update stream again, as for a new connection: the
-    /// default subscription, an empty window (D23) and a fresh throttle (M4-7). For
-    /// a new game (a load) and an ended seat; the three always reset together.
+    /// default subscription, an empty window (D23), a fresh throttle (M4-7) and no
+    /// pending `Subscribe` answer (the temporary `answer_limit`). For a new game (a
+    /// load) and an ended seat; they always reset together.
     pub(crate) fn restart_updates(&mut self) {
         self.subscription = CheckedSubscription::default();
         self.window = UpdateWindow::default();
         self.throttle.restart();
+        self.answers = AnswerLimit::default();
     }
 }
 
@@ -210,6 +216,7 @@ impl SessionTable {
         let throttle = Throttle::new(conn.remote, bandwidth);
         let row = Session {
             throttle,
+            answers: AnswerLimit::default(),
             conn,
             subscription: CheckedSubscription::default(),
             seat: None,
@@ -509,14 +516,11 @@ impl SessionTable {
     }
 
     /// The seated sessions whose `Subscribe` answer was deferred by the temporary
-    /// map-request limit (`throttle::SUBSCRIBE_ANSWERS_PER_SECOND`), with when it
+    /// map-request limit (`answer_limit`), with when it
     /// may go out. `Sim::next_flush` and `Sim::flush` use it beside
     /// [`Self::held_updates`].
     pub(crate) fn pending_answers(&self) -> impl Iterator<Item = (u64, std::time::Instant)> + '_ {
-        self.rows
-            .iter()
-            .filter(|(_, s)| s.seat.is_some())
-            .filter_map(|(&id, s)| s.throttle.answer_due_at().map(|at| (id, at)))
+        self.rows.iter().filter(|(_, s)| s.seat.is_some()).filter_map(|(&id, s)| s.answers.due_at().map(|at| (id, at)))
     }
 
     /// Every connection, welcomed or not, in session order.

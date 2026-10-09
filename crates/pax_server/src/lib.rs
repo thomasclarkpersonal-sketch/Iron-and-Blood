@@ -16,6 +16,7 @@
 //! Built so far: M3 (single player, `docs/MILESTONE_3.md`) and several players at
 //! once (M4-1). The lobby, authority and lag rules follow in `docs/MILESTONE_4.md`.
 
+mod answer_limit;
 mod clock;
 mod commands;
 mod encode;
