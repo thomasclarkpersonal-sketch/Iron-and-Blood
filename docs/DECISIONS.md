@@ -425,7 +425,14 @@ The state → national → sphere → global roll-up in the old ECONOMY_SYSTEM w
   - In single player the simulation never waits for the client. Multiplayer fairness rules are in D24.
 - **Saves** are the scenario (path and content hash), the day, every applied command with the player who sent it (none for the scenario's scripted commands), and `state_hash` checkpoints every 30 days, plus a binary snapshot of the saved day (D10). The file format is in [DATA_FORMAT.md](DATA_FORMAT.md#save-files-savesnametoml-d23). Rules:
   - **Names** are 1 to 64 characters of `[A-Za-z0-9_-]`, so a name can't escape the saves directory. Anything else gets an error `SaveResult`.
-  - **Loading never replays**, because replay runs at tick speed (about 4 minutes for a 20-year game at the D13 scale, over a 30-second limit; [PERFORMANCE.md](PERFORMANCE.md)). It reads the snapshot, and refuses a save whose content hash, command log, checkpoints or snapshot don't agree; DATA_FORMAT lists every check. Beyond these checks the log is trusted until a replay checks it. A refusal is an error, and the running game is left untouched.
+  - **Loading never replays**, because replay runs at tick speed (about 4 minutes for a 20-year game at the D13 scale, over a 30-second limit; [PERFORMANCE.md](PERFORMANCE.md)). It reads the snapshot, and refuses the save if:
+    - the scenario's content hash changed;
+    - a command is invalid (`World::validate`), out of day order, or not before the saved day;
+    - the checkpoints aren't exactly the checkpoint days up to the saved day;
+    - on a checkpoint day, the last checkpoint differs from the snapshot's hash;
+    - the snapshot isn't the saved day's state.
+
+    Beyond these checks the log is trusted until a replay checks it. A refusal is an error, and the running game is left untouched. DATA_FORMAT says how each check reads the file.
   - **Replaying** (`pax_data::save::load_by_replay`, `pax_cli replay`) is the full check. It makes the same checks, then re-applies every logged command on its day through `step_day`, verifies every checkpoint, and must end exactly at the snapshot. The session replay test (M3-9) runs it in CI.
   - A successful load pauses the game and sends every session a new `Welcome`. Commands queued for the next tick are discarded, because they never applied.
   - The scenario's scripted commands for days already played are in the log; later ones still come from the scenario, so nothing applies twice.

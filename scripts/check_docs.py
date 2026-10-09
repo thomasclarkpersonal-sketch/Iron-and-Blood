@@ -17,6 +17,7 @@ away from the code. This script checks the facts that drift silently:
 It needs nothing beyond the standard library and git.
 """
 
+import functools
 import re
 import subprocess
 import sys
@@ -50,19 +51,18 @@ def slug(heading):
     return kept.replace(" ", "-")
 
 
-def anchors(path, cache={}):
-    if path not in cache:
-        seen, result = {}, set()
-        for line in re.sub(r"^```.*?^```", "", path.read_text(), flags=re.S | re.M).splitlines():
-            m = re.match(r"#{1,6}\s+(.*?)\s*#*\s*$", line)
-            if not m:
-                continue
-            base = slug(m.group(1))
-            n = seen.get(base, 0)
-            seen[base] = n + 1
-            result.add(base if n == 0 else f"{base}-{n}")
-        cache[path] = result
-    return cache[path]
+@functools.cache
+def anchors(path):
+    seen, result = {}, set()
+    for line in re.sub(r"^```.*?^```", "", path.read_text(), flags=re.S | re.M).splitlines():
+        m = re.match(r"#{1,6}\s+(.*?)\s*#*\s*$", line)
+        if not m:
+            continue
+        base = slug(m.group(1))
+        n = seen.get(base, 0)
+        seen[base] = n + 1
+        result.add(base if n == 0 else f"{base}-{n}")
+    return result
 
 
 # 1. Links and anchors.
@@ -86,7 +86,10 @@ decided = {int(n) for n in re.findall(r"^## D(\d+)\.", decisions_text, flags=re.
 for source in markdown + tracked("*.rs"):
     if "generated" in source.parts:
         continue
-    cited = {int(n) for n in re.findall(r"\bD(\d{1,3})\b", source.read_text())}
+    text = source.read_text()
+    if source.suffix == ".rs":  # only comments cite decisions; code may name a `D3`
+        text = "\n".join(line.partition("//")[2] for line in text.splitlines())
+    cited = {int(n) for n in re.findall(r"\bD(\d{1,3})\b", text)}
     for n in sorted(cited - decided):
         failures.append(f"{source.relative_to(root)}: cites D{n}, which DECISIONS.md has no entry for")
 
@@ -106,7 +109,13 @@ systems = {
     p.stem for p in (root / "crates/pax_engine/src/systems").glob("*.rs") if p.stem != "mod"
 }
 require("docs/ARCHITECTURE.md", {f"systems/{s}.rs" for s in systems}, "the system module")
-tree = (root / "docs/BACKEND_SCHEMA.md").read_text()
+# The workspace tree is BACKEND_SCHEMA's first fenced block; prose elsewhere may
+# mention `systems/` too.
+schema = (root / "docs/BACKEND_SCHEMA.md").read_text()
+tree_block = re.search(r"^```text\n(.*?)^```", schema, flags=re.S | re.M)
+tree = tree_block.group(1) if tree_block else ""
+if not tree:
+    failures.append("docs/BACKEND_SCHEMA.md: no ```text workspace tree found (update check_docs.py)")
 systems_line = re.search(r"systems/\s+(.*)", tree)
 listed = set(re.findall(r"\w+", systems_line.group(1))) if systems_line else set()
 for s in sorted(systems - listed):

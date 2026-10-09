@@ -20,7 +20,7 @@ All on 8 threads.
 - **Headroom:** the M2-content row is within budget with little room. The cost grows with goods and markets, so content growing towards D13's 50 goods needs more.
 - **The per-day `state_hash`** costs about 31 ms at 1M POP rows (M3). FNV over 8-byte words would cut it to a few ms but changes every golden file (D11).
 - **Where the time goes** (M2, N3; 3,000 markets / 36k producers): `clear_markets` 21 ms, `firms` 2.3 ms, everything else under 1 ms. Price discovery's cold-start iterations dominate.
-- CI's `Benchmark regression` job compares a PR's base and head on the same runner (`scripts/bench-compare.sh`) and fails above +20%.
+- CI's regression gate is a rule, so it lives in D13.
 
 ## Views and bandwidth (D22, D24)
 

@@ -9,7 +9,7 @@ Every fact has **one home**. Other documents link to it rather than restating it
 | Rules code must follow, and why | [DECISIONS.md](DECISIONS.md): the binding contract, enforced by the critic | Mechanism, flags, measurements |
 | Rules for contributors and agents | [AGENTS.md](../AGENTS.md) | Design |
 | How a system works: maths, algorithm, tuning | The system document: [ECONOMY_SYSTEM](ECONOMY_SYSTEM.md), [POP_SYSTEM](POP_SYSTEM.md), [POLITICS_SYSTEM](POLITICS_SYSTEM.md), [MACROECONOMICS](MACROECONOMICS.md), [MAP_AND_LOGISTICS](MAP_AND_LOGISTICS.md) | Rules (link the decision) |
-| The tick's system order | D4 (binding) and [ARCHITECTURE.md](ARCHITECTURE.md#-the-game-loop) (with modules) | Anywhere else: link to them |
+| The tick's system order | D4. [ARCHITECTURE.md](ARCHITECTURE.md#-the-game-loop) mirrors it with each step's module, and changes with it | Anywhere else: link to D4 |
 | Rust structure: crates, tables, columns, modules | [BACKEND_SCHEMA.md](BACKEND_SCHEMA.md); field names are the code's | |
 | File formats | [DATA_FORMAT.md](DATA_FORMAT.md) | |
 | The wire protocol | the schemas in `schemas/`, explained by [NETWORK_PROTOCOL.md](NETWORK_PROTOCOL.md) | |
