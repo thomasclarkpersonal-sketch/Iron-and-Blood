@@ -12,6 +12,7 @@ How Milestone 5 will be built: the Design stage of the [Project Workbook](README
 - **Rules are linked, not restated:** a function's contract says what it computes and links the PL rule or decision that defines it.
 - **Measurements** are from a release build of `aa2133a`'s engine on the run's machine, through an uncommitted probe built outside the worktree (the [correspondence log](README.md#correspondence-log), 05:13).
 - **Round 3's minor findings.** The Analysis stage was approved with six minor findings; how each is handled is in the [review log](README.md#analysis-round-3-minor-findings). Findings 1 to 3 are answered here (S8, S9), finding 4 by S6, and findings 5 and 6 by corrections to the requirements specification.
+- **Design round 2.** Round 1 was returned with one major and eight minor findings; how each is handled is in the [review log](README.md#design-round-1-findings). The major one, settlement's hand-offs to `trade.rs`, is answered in 1.3, S5, S6 and 4.1: no `Cargo` row index leaves `trade.rs`.
 
 ## 1. Architecture
 
@@ -41,7 +42,7 @@ D17, D27 and D28 amend D4 ([its new text](#d4-tick-schedule-and-goods-persistenc
 | 0 | Arrival | `systems::trade::land_cargo` | M5-2 | `cargo` in transit, `network`, `geography.market_nation` | `cargo`, merchant cash, treasuries, `month_profit` (M5-4), today's `TradeReport` |
 | 1 | Labour, with strikes | `systems::labor::assign_employment`, calling `systems::unrest::working_members` per POP | M5-11 | sizes, militancy, capacities | `producers.employed`, `LabourReport` with `striking` |
 | 2 | Production | `systems::production::produce` | unchanged | | |
-| 3 | Market | `systems::market::clear_markets`, with orders from `investment::construction_orders` (M5-7) and `trade::merchant_orders` (M5-3), offers from `trade::merchant_offers` (M5-3), and settlement's hand-offs `trade::book_purchases`, `trade::book_sales` (M5-3) and `investment::deliver` (M5-7) | M5-3, M5-5, M5-7 | as today, plus merchants, cargo, tariffs, projects | as today, plus merchant cash, cargo, project needs, spending by market |
+| 3 | Market | `systems::market::clear_markets`, with orders from `investment::construction_orders` (M5-7) and `trade::merchant_orders` (M5-3), offers from `trade::merchant_offers` (M5-3), and settlement's hand-offs, keyed by merchant or producer and good: `investment::deliver` (M5-7) and `trade::book_purchases` (M5-3) after the buy orders, `trade::book_sales` (M5-3) after the sellers (4.1) | M5-3, M5-5, M5-7 | as today, plus merchants, cargo, tariffs, projects | as today, plus merchant cash, cargo, project needs, spending by market |
 | 4 | Firms | `systems::firms::pay_wages_and_dividends` (wages to working members, M5-11; the project reserve, M5-7; state owners, M5-8), then `systems::trade::pay_merchant_dividends` (M5-4) | M5-4, M5-7, M5-8, M5-11 | as today, plus projects, merchants | as today, plus merchant cash and `purchases_avg` |
 | 4b | Government | `systems::government::pay_transfers` | unchanged | | |
 | 5 | Mobility | `systems::mobility` (D18, D20, D25), unchanged code; D18 reads `LabourReport::unemployed`, which excludes strikers (M5-11, C16) | — | | |
@@ -85,7 +86,7 @@ fn step_systems(world: &mut World) -> DayReport {
 
 ### 1.3 How data and control flow between the modules
 
-- **`market.rs` keeps the clearing machinery; the agents' rules live with the agents.** Order formation calls `trade::merchant_orders` and `investment::construction_orders`, which return `market::BuyOrder`s, and `trade::merchant_offers`, which returns `market::SellOffer`s, so D1's discovery and settlement treat every buyer and seller alike (D17's Rule, D27's Rule, construction). Settlement debits the buyer's cash, as it does for producers and nations today (`crates/pax_engine/src/systems/market.rs:785-806`), and hands the rest back: merchants' purchases and sales to `trade::book_purchases` and `trade::book_sales`, which keep `Cargo` sorted and account for goods (PL-3), and deliveries to `investment::deliver` (PL-10). All merchant bookkeeping other than the cash debit is in `trade.rs` (S6).
+- **`market.rs` keeps the clearing machinery and the market step's money; the agents' rules live with the agents.** Order formation calls `trade::merchant_orders` and `investment::construction_orders`, which return `market::BuyOrder`s, and `trade::merchant_offers`, which returns `market::SellOffer`s, so D1's discovery and settlement treat every buyer and seller alike (D17's Rule, D27's Rule, construction). Settlement moves all of the step's money, as it does today (`crates/pax_engine/src/systems/market.rs:785-830`): it debits each buyer's cash, merchants' and projects' included, and credits each seller's, merchants' included. It hands the goods to the agents' modules in the order it settles: after the buy-order loop, each construction delivery to `investment::deliver` (PL-10) and the merchants' purchases to `trade::book_purchases`, which merges them into `Cargo` as in-transit rows and asserts R-D9 before any sale's receipts are credited; after the seller loop, the merchants' sales to `trade::book_sales`, which takes each sale's units and its share of landed cost off its for-sale row (PL-3). **No `Cargo` row index leaves `trade.rs`:** an offer names its merchant (`Seller::Merchant`) and its good, and a purchase or a sale names its merchant and good, the key by which `trade.rs` finds the row (R-D10). The purchases' merge moves every row after a new in-transit row, so a row index taken at order formation would be stale by the time the sales are booked; a key can't be, whichever hand-off runs first (S5, S6; the sequence is in [4.1](#41-pax_engine)).
 - **`firms.rs` asks the systems for what it needs:** `investment::project_reserve` for the dividend reserve (PL-11) and `World::credit_pops_by_working` for the wage split (PL-15).
 - **The month end runs on one fresh layout** (6b, 6c), because mobility can append POP rows (`crates/pax_engine/src/systems/mobility.rs:107-111`); riots, foundings and merchant entry move cash between existing rows only, so the layout stays valid through them.
 - **Loading** (`pax_data::build_world`) parses links and routes, pushes the links, calls `pax_engine::horizon::trade_horizon` on them, checks each route with `horizon::resolve_route`, pushes the routes, and drops the horizon (PL-1, R-N20).
@@ -236,14 +237,16 @@ Authorised by the same two Amends lines. D24 asks a command that can conflict fo
 
 For the maintainer to check. None needs a new or amended decision beyond 2.3. They continue the requirements' C1 to C29.
 
+These are run choices, not decisions: they go into the plan pull request's description and the [workbook](README.md), each for the maintainer to confirm or overturn, and never into DECISIONS.md, whose entries hold rules, not mechanism (`docs/DECISIONS.md:14-20`). The plan adds nothing to DECISIONS.md when it is approved: the run decisions are recorded already (`bd08ee6`), and each text of 2.3 lands in the pull request of the task named beside it (S1).
+
 | # | Choice | Why |
 |---|---|---|
 | S1 | **No new decision, and every amendment lands in DECISIONS.md with its code.** The texts in 2.3 reach the plan PR as Proposed on this page; DECISIONS.md takes each part in the pull request that implements it, and the plan PR's description lists them with their tasks | DECISIONS.md: "edit its entry in the same pull request as the code" (`docs/DECISIONS.md:12`), as #64 did for D4's schedule (`4788b6d`). Writing them into accepted entries early would make those entries describe code that doesn't exist |
 | S2 | **D4 keeps its step numbers**: arrival is 0, riots 6b, investment and the merchants' month end 6c | D18, D19 and REBELLIONS.md cite steps 5, 6 and 1 (`docs/DECISIONS.md:340`, `:360`; `docs/REBELLIONS.md:25`); the data model's 0 to 10 (`docs/DATA_MODEL_M5_M6.md:313-326`) would break them |
 | S3 | **Trade topology is `World::network`** (`Links`, `Routes`), beside `geography`, not inside it. Like geography it is neither hashed nor snapshotted; a restored world copies it from its scenario (PL-18) | `World::new` keeps its signature (`world.rs:212-229`), so the six test sites that build a `Geography` literal (`crates/pax_engine/tests/common/mod.rs:117`, `extremes.rs:27`, `:58`, `mobility.rs:41`, `demographics.rs:29`, `:116`) don't change; the snapshot destructures `Geography` exhaustively (`crates/pax_data/src/snapshot.rs:103`) |
 | S4 | **A project's needs are keyed by its producer row**, not by a project row | One project per producer (R-D11), and producer rows never move (R-F32), so closing a project renumbers nothing. The ER diagram's `PROJECT_NEED.project` is this key |
-| S5 | **`Cargo` is rebuilt by merge passes, never by inserting rows**: settlement merges the day's purchases (at most one per merchant and good) into the table in one sorted pass; arrival lands every in-transit row and drops emptied for-sale rows in one linear pass | Inserting rows one at a time into a sorted table of about 300,000 rows (60,000 routes, a few goods each) is quadratic |
-| S6 | **Merchant bookkeeping is in `trade.rs`.** Settlement debits a merchant's cash and passes its purchases and sales to `trade::book_purchases` and `trade::book_sales`; M5-4's `month_profit` hooks (PL-3, PL-4) are therefore edits to `trade::book_sales` and `trade::land_cargo`, both in `trade.rs` | One home for cargo's rules; answers round 3's minor finding 4 |
+| S5 | **`Cargo` is rebuilt by merge passes, never by inserting rows, and its row indices never leave `trade.rs`**: `trade::book_purchases` merges the day's purchases (at most one per merchant and good) into the table in one sorted pass; arrival lands every in-transit row and drops emptied for-sale rows in one linear pass. Offers, purchases and sales name `(merchant, good)`, and `trade.rs` finds the row by that key with a binary search on the sorted table (R-D10) | Inserting rows one at a time into a sorted table of about 300,000 rows (60,000 routes, a few goods each) is quadratic. The merge moves every row after a new in-transit row, so a row index taken before it would book a merchant's same-day sale on a shifted row, with the wrong quantity and landed cost; the money assert can't see that (Design round 1's major finding) |
+| S6 | **Merchant goods bookkeeping is in `trade.rs`; the market step's money stays in `market.rs`.** Settlement debits a merchant's cash for its purchases and credits it for its sales, as it does every buyer and seller, and passes the purchases to `trade::book_purchases` after the buy-order loop and the sales to `trade::book_sales` after the seller loop (4.1); M5-4's `month_profit` hooks (PL-3, PL-4) are therefore edits to `trade::book_sales` and `trade::land_cargo`, both in `trade.rs` | One home for cargo's rules, and one function where every unit of the step's money moves; answers round 3's minor finding 4. Booking purchases before any receipt is credited lets `book_purchases` assert R-D9 on the cash the purchases left |
 | S7 | **Strikes land before investment**: M5-7 depends on M5-11, so PL-8's available workers count working members from M5-7's first commit, and R-F24's `no_project_for_strikers` lands with M5-7 | Otherwise PL-8 would be built by size and rebuilt later. Both are in the queue's one-at-a-time order (`parallel` 1), so the edge only orders it |
 | S8 | **M5-1 is the DAG's root**: every other task depends on it, directly or through others. M5-2 already does (`docs/MILESTONE_5.md:65`), and C29 adds M5-7 and M5-12; the new edges are M5-1 → M5-6 and M5-1 → M5-11, the two tasks with no dependency, after which every task reaches M5-1 | M5-1's first commit, the bench print, measures the baseline on `main`'s engine; it is `aa2133a`'s only if no other engine change has landed (round 3's minor finding 2) |
 | S9 | **`bench`'s new lines give times in "ms", never "ms/day"**, and its summary line keeps today's form; R-N26 also compares each month-end task's median with M5-1's baseline (a cumulative 20% trigger) | `scripts/bench-compare.sh:19-21` reads `: <number> ms/day`, greedily, from every line (minor finding 1); per-task comparisons alone miss a drift of many small steps (minor finding 3) |
@@ -257,12 +260,16 @@ For the maintainer to check. None needs a new or amended decision beyond 2.3. Th
 | S17 | **Per-pool working members for the investment ledger are counted once a day, in `views::ProvinceStats::of`'s existing pass over the POP table** | R-F46 needs unclaimed workers per province; counting them per session and update would add a pass over every POP row to each view (R-N14) |
 | S18 | **Unrest values in `data/rules.toml`: `strike_threshold` 0.3, `strike_rate` 1, `riot_threshold` 0.3, `riot_destruction` 0.2, `riot_security_rate` 0.01** ([3.7](#37-planned-data-values-and-the-measurements-behind-them)) | Measured: they meet R-F40, and keep `two_states` riot-free at 12% tax. Peaks' starving miners (militancy up to 0.355) strike in the famine years, so M5-11 changes `two_states`' results and re-records it, under the bands clause |
 | S19 | **Investment, trade and recipe values** as in 3.7, calibrated by M5-6 to M5-10 and M5-16 against R-F33 and the bands clause | Measured where the economy has room: unemployed farmers (880 and 740), farms 25% above the wage bill, with 52.5k and 35.3k in cash |
-| S20 | **D19's "It has no effects yet" is updated by M5-11** (2.3), its rule untouched | Run decision 4 keeps D19's update rule; the status sentence would be false once strikes exist ([AGENTS.md §8](../../../AGENTS.md#8-documentation-maintenance)) |
+| S20 | **D19's "It has no effects yet" is updated by M5-11** (2.3), its rule untouched, and so is `Pops::militancy`'s rustdoc, which says the same (`crates/pax_engine/src/world.rs:67`) | Run decision 4 keeps D19's update rule; the status sentence would be false once strikes exist ([AGENTS.md §8](../../../AGENTS.md#8-documentation-maintenance)) |
 | S21 | **`RouteFlow` also carries units sold and their receipts**, beside R-F54's bought, landed, lost, cost and tariff | R-N4's daily goods check needs the units sold; the trade panel shows them |
 | S22 | **The riot step groups POP rows by province itself** (`Groups::build`, `crates/pax_engine/src/groups.rs:17-32`) | The layout has labour, owner and nation groups but no province groups (`crates/pax_engine/src/layout.rs:78-90`) |
 | S23 | **A seeded merchant names its route by `from` and `to` markets** | Routes have no keys (R-F6); `TRADE.md:86-91`'s `route = "lowland-highland"` is updated by M5-4 |
 | S24 | **`mini_valley`'s frozen rules name `capitalist` for both merchant owners** | It has no merchant profession (`scenarios/mini_valley/defs/professions.toml`), and nothing trades there (R-F59) |
 | S25 | **The client gets two tabs, Trade and Construction**, beside World, Nation, Market and Province (`client/main.gd:435-455`); tariffs are per-mille sliders like the nation panel's (`client/ui/nation_panel.gd:20-25`, `:61-68`) | R-F49 to R-F51; one pattern for every rate the player sets |
+| S26 | **`owner_nation` is ownership, kept as state** on producers and merchants ([3.1](#31-engine-state-world)). `check_tables` pins it to the producer's market's nation (R-D12) and the chartered merchant's route origin's (R-D3) only while market ownership is topology, as it is in M5 | D7 forbids storing what other state determines (`docs/DECISIONS.md:190`). Ownership is set once, by a founding or a charter, and no other state determines it after; deriving it from the market would decide, in the data layout, that state property passes with a market that changes hands, which is for the decision that makes market ownership state (`docs/DATA_MODEL_M5_M6.md:29`) to say, as the data model asks of deposits (`:292`). Design round 1's minor finding 3 |
+| S27 | **M5-10 depends on M5-9**, beside M5-7 and M5-8 | 3.7's investment values count on depreciation being in when the growth test runs: the half-empty peaks mines shrink by about 5,000 slots, which R-F33's capacity bound must outgrow. With the edge, M5-10 measures the economy with all three mechanisms, and any recalibration is M5-10's, never left to M5-9's pull request (Design round 1's minor finding 8) |
+| S28 | **`TradeRouteView`'s fallback, if the full update outgrows D22's 128 KB:** first drop `sold` and `receipts` from `TradeRoute`, then list at most the 40 routes of most value traded today, with a count of the rest ([3.5](#35-wire-schema)) | Measured at 6,456 bytes under the budget at D13's long-term scale (3.5); both steps stay within D22, whose budget is the maintainer's |
+| S29 | **A `FoundProducer` from the Construction tab names the nation of the selected province's market**, in sandbox and in a claimed seat alike; its Found button is disabled when that market is stateless or, in a claimed seat, another nation's ([6](#6-dialogue-design)) | D27 founds only in the commanding nation's own markets (`docs/DECISIONS.md:525`), so that nation is the only one `World::validate` accepts: a sandbox chooser could offer only refusals (`ForeignProvince`) |
 
 ## 3. Physical data design
 
@@ -307,7 +314,7 @@ For the maintainer to check. None needs a new or amended decision beyond 2.3. Th
 | `route` | `Vec<u32>` | a route row |
 | `cash` | `Vec<Fixed>` | ≥ 0, and ≥ its in-transit cargo's `Σ tariff_due` (R-D9) |
 | `kind` | `Vec<MerchantKind>` | `Private`, `Commercial` or `Chartered` |
-| `owner_nation` | `Vec<Option<u32>>` | `Some` exactly when `Chartered`, and then its route origin's nation (R-D3, R-D9) |
+| `owner_nation` | `Vec<Option<u32>>` | `Some` exactly when `Chartered`: the payload of that kind, the chartering nation (R-D9); in M5 its route origin's nation (R-D3), a check for as long as market ownership is topology (S26) |
 | `month_profit` | `Vec<Fixed>` | any sign; 0 after every month end (C28) |
 | `purchases_avg` | `Vec<Fixed>` | ≥ 0 |
 | `loss_months` | `Vec<u16>` | < `trade.exit_months` unless winding up |
@@ -327,7 +334,9 @@ For the maintainer to check. None needs a new or amended decision beyond 2.3. Th
 
 **`Nations::tariff`** (M5-3): row-major `[nation × good]`, each in [0, 1] (R-D8). `World::push_nation` pushes `goods` zeros, so tariffs start at 0 (R-F17); `NewNation` doesn't change.
 
-**`Producers`** gains `owner_nation: Vec<Option<u32>>` (M5-8; when `Some`, the nation of the producer's market, R-D12) and `idle_months: Vec<u16>` (M5-9). `World::push_producer` pushes `None` and 0, so `NewProducer` (`world.rs:199-208`) and its six construction sites (the loader, `bench.rs` and four in the engine's tests) don't change; the investment step sets `owner_nation` on the rows it founds.
+**`Producers`** gains `owner_nation: Vec<Option<u32>>` (M5-8; `Some(n)` for a producer nation `n` founded, R-F30; in M5 the nation of the producer's market, R-D12, S26) and `idle_months: Vec<u16>` (M5-9). `World::push_producer` pushes `None` and 0, so `NewProducer` (`world.rs:199-208`) and its six construction sites (the loader, `bench.rs` and four in the engine's tests) don't change; the investment step sets `owner_nation` on the rows it founds.
+
+**Why `owner_nation` is state, not derived (S26).** D7 forbids storing what other state determines: a POP's nation follows its province, so a stored copy would go stale on conquest (`docs/DECISIONS.md:190`). Ownership is a different kind of fact. A founding (M5-8) or a charter (a seeded merchant, M5-4) sets it once, and nothing else in the world determines it afterwards. Deriving it from the market's nation would decide, in the data layout, that a state's property passes to whoever later owns the market; the data model raises that question for deposits (`docs/DATA_MODEL_M5_M6.md:292`) and leaves market ownership to M6 (`:29`). In M5 market ownership is topology and never changes, and D27 founds only in the commanding nation's own markets (`docs/DECISIONS.md:525`), so `check_tables` pins every `Some(n)` to the market's nation (R-D12) or the route origin's (R-D3). Those two checks are M5's: the decision that makes market ownership state says what happens to state property when a market changes hands, and changes or drops them; the rustdoc of each column says so. "`Some` exactly when `Chartered`" is not one of them: it ties a payload to its tag, `MerchantKind` staying a `u8` column (D8), and holds after M6 too.
 
 **`Projects`** (M5-6): `producer: Vec<u32>` sorted and unique (one project per producer), `slots: Vec<u32>` > 0. **`ProjectNeeds`** (M5-6): `producer: Vec<u32>`, `good: Vec<u16>`, `remaining: Vec<Fixed>`, sorted and unique by `(producer, good)`; every producer in it has a project, and every project has exactly one row per good of its type's recipe, `remaining` ≥ 0 (R-D11, S4). The producer's type has a recipe.
 
@@ -601,7 +610,20 @@ table InvestmentLedgerView {
 }
 ```
 
-Size (R-N14) at D13's long-term scale, with 20 routes out of and 20 into each market, 10 of the 50 goods flowing on each, and every tariff sent: about 19 KB for `TradeRouteView` and 2 KB for the ledger, against 91 KB measured for today's views with a map (`docs/PERFORMANCE.md:45`), so about 112 KB of 128. The test that checks it is in [8.4](#84-performance-d13).
+**Size (R-N14)** at D13's long-term scale: about 60,000 routes over 3,000 markets is 20 out of and 20 into each market, so 40 `TradeRoute` tables, each with 10 of the 50 goods flowing; and every tariff sent. An uncommitted probe (the [correspondence log](README.md#correspondence-log), 06:05) built today's full update of `crates/pax_protocol/tests/size_budget.rs` and then the two views, with flatbuffers' table API in the field order above:
+
+| Part | Bytes |
+|---|---|
+| Today's full update (`size_budget.rs`'s frame, with the map; `docs/PERFORMANCE.md:45` says 90.8 KB) | 92,816 |
+| `TradeRouteView`: 40 routes of 10 goods (728 bytes a route, of which 60 for each good flowing on it), and 50 tariffs | 29,600 |
+| `InvestmentLedgerView`: 10 projects of 3 needs, 50 founding options, 10 pending requests, 10 results | 2,200 |
+| **The full update** | **124,616 of 131,072** |
+
+That leaves 6,456 bytes: 8 more routes of 10 goods, or 2 more goods on each of the 40 routes. `size_budget.rs` builds exactly this case (M5-13, [8.4](#84-performance-d13)). If it fails, M5-13 makes room within D22's budget in this order, and says so in its pull request (S28):
+1. `TradeRoute` leaves out `sold` and `receipts`, the panel's columns (S21): 176 bytes a route, 7,048 at 40 (measured). `DayReport` keeps both for R-N4, so only the panel loses its Sold column.
+2. The view lists at most the 40 routes with the most value traded today (purchase cost plus sales receipts, ties to the lower route row), with `routes_omitted: uint` appended to `TradeRouteView`, the count of the rest, which the panel shows as "and N more routes".
+
+Neither raises the budget, which is D22's and the maintainer's.
 
 ### 3.6 Compatibility
 
@@ -631,7 +653,7 @@ Starting values for the tasks that calibrate them. Each task measures, keeps the
 |---|---|---|
 | Unrest: `strike_threshold` 0.3, `strike_rate` 1, `riot_threshold` 0.3, `riot_destruction` 0.2, `riot_security_rate` 0.01 (S18) | M5-11, M5-12 | R-F40's riot before day 1800 and none from day 2520 need a threshold below 0.433 (the highest province mean on day 1800) and above 0.175 (the highest on day 2520); above 0.188, the 12% baseline's highest, also keeps `two_states` riot-free. At 0.3 all four provinces riot by day 1440, and all are below it again by day 1980 (the highest, the peaks, at 0.293). Strikes at the same level start no later than riots; at 0.3 only the peaks' miners strike at 12% tax (up to 5.5%, around days 400 to 1080), so M5-11 changes `two_states`' results and re-records it |
 | Recipes: `step` 400 for farms, 200 for cotton, fisheries, lumber camps and mines, 100 for vineyards and every workshop and mill; inputs per slot `tools` 0.02 and `timber` 0.05 for every type, plus `steel` 0.02 for mines, mills and tool works | M5-6 | A project needs `step` unclaimed unemployed workers (R-F24): 400 fits the farms' 880 and 740, 100 the craftsmen's 220 and 140. Every recipe buys tools and timber, and the heavy ones steel, which DoD 2's construction demand names |
-| Investment: `enabled` true, `profit_margin` 0.1, `investor_reserve_days` 5, `slack` 0.25, `idle_months_before_shrink` 12 | M5-7 to M5-9 | At 0.1 the farms (1.25) and the dale's workshops (2.0) pass the profit test; at 5 days a capitalist (spend rate 0.1) keeps half its cash and may give the rest. With slack 0.25 the half-empty peaks mines shrink, by about 5,000 slots over the years, which M5-10's capacity test (R-F33) must outgrow; M5-9 reports it and M5-10 recalibrates within these rules if it doesn't |
+| Investment: `enabled` true, `profit_margin` 0.1, `investor_reserve_days` 5, `slack` 0.25, `idle_months_before_shrink` 12 | M5-7 to M5-9 | At 0.1 the farms (1.25) and the dale's workshops (2.0) pass the profit test; at 5 days a capitalist (spend rate 0.1) keeps half its cash and may give the rest. With slack 0.25 the half-empty peaks mines shrink, by about 5,000 slots over the years, which M5-10's capacity test (R-F33) must outgrow; M5-9 reports it, and M5-10, which follows M5-9 (S27), recalibrates within these rules if it doesn't |
 | Trade: `min_retention` 0.5, `exit_months` 3, `entry_months` 3 | M5-1, M5-4, M5-16 | `TRADE.md:110`'s example; three months of loss or of an open gap before acting |
 | `two_states`' link and routes: `iceberg` 0.05, `capacity` 200, both ways; `margin` 0.05, `k` 0.2, both ways; one Private merchant each way with `cash` 500 | M5-5 | `TRADE.md:100-107`'s example and `:86-91`'s seed; the friction band is then 1.105, above which every good but fish trades (R-F20) |
 
@@ -713,12 +735,19 @@ pub enum CommandError {
 |---|---|---|
 | `Buyer` | `pub(crate) enum Buyer { Producer(usize), Nation(usize), Merchant(usize), Project(usize) }` (`Project` is a producer row) | M5-3 (`Merchant`), M5-7 (`Project`) |
 | `BuyOrder` | `pub(crate) struct BuyOrder { pub(crate) buyer: Buyer, pub(crate) market: usize, pub(crate) good: usize, pub(crate) need: Fixed, pub(crate) budget: Fixed }`, `demand` as today (`market.rs:185-198`) | M5-3 |
-| `Seller` | `pub(crate) enum Seller { Producer(usize), Cargo(usize) }` (a `Cargo` row) | M5-3 |
+| `Seller` | `pub(crate) enum Seller { Producer(usize), Merchant(usize) }`: a producer row, or a merchant row offering its for-sale stock of the offer's `good`; rows of both tables never move (R-F32, R-D15), and no `Cargo` row index appears (S5) | M5-3 |
 | `SellOffer` | `pub(crate) struct SellOffer { pub(crate) seller: Seller, pub(crate) market: usize, pub(crate) good: usize, pub(crate) stock: Fixed, pub(crate) reservation: Fixed }`, replacing `producer: usize` (`market.rs:202-208`) | M5-3 |
 | `clear_markets` | `pub fn clear_markets(world: &mut World, layout: &PopLayout, trade: &mut TradeReport) -> MarketOutcome` | M5-3 |
 | `MarketOutcome` | gains `merchant_purchases: Vec<Fixed>` (per merchant row: cost plus assessed tariff, PL-3; M5-3), `household_spending_by_market`, `government_spending_by_market: Vec<Fixed>` (M5-5), `construction_spending: Vec<Fixed>` (per market, M5-7) | M5-3, M5-5, M5-7 |
 
-Orders are listed producers' inputs, then construction, then governments, then merchants, before the stable sort by market (`market.rs:296-298`), so each market's order is fixed. Settlement adds an arm per buyer kind to `market.rs:791-803` and a seller arm to `:825-828`.
+Orders are listed producers' inputs, then construction, then governments, then merchants, before the stable sort by market (`market.rs:296-298`), so each market's order is fixed. Settlement (`settle`, `market.rs:666-852`) keeps today's sequence and adds these arms and hand-offs, in this order:
+1. Passes A and B, the households, unchanged (`:682-779`).
+2. The buy-order loop (`:785-806`) gains two arms beside `:791-803`'s. `Buyer::Project(i)` debits producer `i`'s cash, asserts it isn't negative, and records the delivery `(i, good, q)` (M5-7). `Buyer::Merchant(j)` debits merchant `j`'s cash by the cost, asserts it isn't negative, and records `CargoPurchase { merchant: j, good, units: q, cost, price: p* }` (M5-3).
+3. After the loop: `investment::deliver` for each recorded delivery, in order (M5-7), then `trade::book_purchases(world, purchases, trade)`, whose result is `MarketOutcome::merchant_purchases` (M5-3).
+4. The seller loop (`:808-830`) gains `Seller::Merchant(j)` beside `:825-828`'s producer arm: merchant `j`'s cash gains the offer's receipts, and `CargoSale { merchant: j, good, units: q, receipts }` is recorded (M5-3).
+5. After the loop: `trade::book_sales(world, &sales, trade)` (M5-3).
+
+Every hand-off names a merchant or producer row and a good, rows that never move, and `trade.rs` and `investment.rs` find their `Cargo` and `ProjectNeeds` rows by that key. So step 3's merge, which moves the `Cargo` rows after each new in-transit row, can't misdirect step 5's sales, and swapping steps 3 and 5 would book the same table (S5; tested in 8.1).
 
 **`systems/trade.rs`** (new)
 
@@ -730,9 +759,9 @@ Orders are listed producers' inputs, then construction, then governments, then m
 | `merchant_orders` | `pub(crate) fn merchant_orders(world: &World) -> Vec<BuyOrder>` | M5-3 | PL-2 |
 | `merchant_offers` | `pub(crate) fn merchant_offers(world: &World) -> Vec<SellOffer>` | M5-3 (M5-4: reservation 0 while winding up) | PL-3 |
 | `CargoPurchase` | `pub(crate) struct CargoPurchase { pub merchant: u32, pub good: u16, pub units: Fixed, pub cost: Fixed, pub price: Fixed }` | M5-3 | |
-| `CargoSale` | `pub(crate) struct CargoSale { pub cargo: u32, pub units: Fixed, pub receipts: Fixed }` | M5-3 | |
-| `book_purchases` | `pub(crate) fn book_purchases(world: &mut World, purchases: Vec<CargoPurchase>, report: &mut TradeReport) -> Vec<Fixed>` (returns `merchant_purchases`) | M5-3 | PL-3, S5; asserts R-D9 |
-| `book_sales` | `pub(crate) fn book_sales(world: &mut World, sales: &[CargoSale], report: &mut TradeReport)` | M5-3 (M5-4 adds `month_profit`) | PL-3 |
+| `CargoSale` | `pub(crate) struct CargoSale { pub merchant: u32, pub good: u16, pub units: Fixed, pub receipts: Fixed }`: keyed like `CargoPurchase`, never by a `Cargo` row (S5) | M5-3 | |
+| `book_purchases` | `pub(crate) fn book_purchases(world: &mut World, purchases: Vec<CargoPurchase>, report: &mut TradeReport) -> Vec<Fixed>` (returns `merchant_purchases`, one per merchant row) | M5-3 | PL-3, S5: sorts the purchases by `(merchant, good)`, which are unique, and merges them into `Cargo` as in-transit rows in one pass; called before any sale's receipts are credited, so its R-D9 assert reads the cash the purchases left |
+| `book_sales` | `pub(crate) fn book_sales(world: &mut World, sales: &[CargoSale], report: &mut TradeReport)` | M5-3 (M5-4 adds `month_profit`) | PL-3, S5: finds each sale's `(merchant, good, ForSale)` row by binary search, then splits its landed cost by `alloc::allocate`; panics if the row is missing or holds fewer units than were sold. Cash isn't touched: settlement credited it |
 | `TradeReport::finish` | `pub fn finish(&mut self)` | M5-2 | Sorts `flows` by `(route, good)` and merges rows with one key |
 | `pay_merchant_dividends` | `pub fn pay_merchant_dividends(world: &mut World, layout: &PopLayout, purchases: &[Fixed]) -> MerchantDividends` | M5-4 | PL-5, PL-17 |
 | `run_month_end` | `pub fn run_month_end(world: &mut World, layout: &PopLayout) -> MerchantMonth` | M5-4 (wind-up), M5-16 (entry) | PL-6, PL-7 |
@@ -870,7 +899,7 @@ For the DAG: what each task adds and what it calls that another task added.
 | M5-7 | `systems/investment.rs` with `project_reserve`, `construction_orders`, `deliver`, `Openings`, `run_month_end` (complete, expand); `Buyer::Project`; `InvestmentRules` (`enabled`, `profit_margin`); `bench --warmup`; D4 steps 3 and 6c, D6 | M5-6's tables; M5-11's `working_members` (S7) |
 | M5-8 | `owner_nation`; `FoundingRequests`; `founding_cost`, `owner_funds`, `take_funds`; requests and owner founding in `run_month_end`; `Command::FoundProducer` and its errors; wire `FoundProducer`, protocol 1.8; `SAVE_FORMAT` 3; D6, D21, D24 | M5-7's month end |
 | M5-9 | `idle_months`; depreciation in `run_month_end` | M5-7's month end |
-| M5-10 | the growth test (`crates/pax_data/tests/growth.rs`) | M5-7, M5-8 |
+| M5-10 | the growth test (`crates/pax_data/tests/growth.rs`) | M5-7, M5-8, and M5-9's depreciation (S27) |
 | M5-11 | `systems/unrest.rs` with `strike_share`, `working_members`; `LabourReport::striking`; `credit_pops_by_working`; D6's split; D19's sentence | — (after M5-1, S8) |
 | M5-12 | `unrest::riot`, `RiotReport`; D4 step 6b | M5-11's rules |
 | M5-13 | `views::trade_routes`, `tariffs`, `investment_ledger`, `ProvinceStats::available`, `Openings::with_available`; wire views, `StaticData.routes`, `Subscribe` fields, protocol 1.9; the bridge's encoders, decoders, keys, funcs; D22's list | M5-5's and M5-8's state and reports |
@@ -880,7 +909,7 @@ For the DAG: what each task adds and what it calls that another task added.
 
 ## 5. Class diagrams
 
-The static structure after M5, adapted to D8: each table is a class whose attributes are its `Vec` columns, each tick system a class with the stereotype `<<system>>` whose operations are its functions, crates are namespaces, and associations are row-index references with their multiplicities. Nothing inherits from anything: simulation entities are rows of tables, not objects (D8, [AGENTS.md §1](../../../AGENTS.md#1-core-architecture-rust--data-oriented-design)), so no diagram here has an inheritance or realisation edge. Unchanged tables are drawn only where a new one refers to them, with the columns that matter.
+The static structure after M5, adapted to D8: each table is a class whose attributes are its `Vec` columns, each tick system a class with the stereotype `<<system>>` whose operations are its functions, crates are namespaces, and associations are row-index references with their multiplicities. Nothing inherits from anything: simulation entities are rows of tables, not objects (D8, [AGENTS.md §1](../../../AGENTS.md#1-core-architecture-rust--data-oriented-design)), so no diagram here has an inheritance or realisation edge. Unchanged tables and definitions are drawn wherever a new table or column refers to them, with the columns that matter; what is left out on purpose is listed under the diagram.
 
 ### Class diagram: engine tables and systems
 
@@ -889,6 +918,7 @@ classDiagram
     namespace pax_engine {
         class World {
             <<state>>
+            +Arc~Defs~ defs
             +Geography geography
             +TradeNetwork network
             +Pops pops
@@ -907,6 +937,7 @@ classDiagram
             +push_link(new: NewLink) usize
             +push_route(new: NewRoute) usize
             +push_merchant(new: NewMerchant) usize
+            +push_cargo(new: NewCargo) usize
             +start_project(producer: usize, slots: u32)
             +credit_pops_by_working(rows: &[u32], amount: Fixed) bool
         }
@@ -985,7 +1016,31 @@ classDiagram
             <<table>>
             +Vec~u32~ size
             +Vec~Fixed~ cash
+            +Vec~u32~ province
             +Vec~Fixed~ militancy
+        }
+        class Geography {
+            <<topology>>
+            +Vec~u32~ province_market
+            +Vec~Option~u32~~ market_nation
+            +province_count() usize
+            +market_count() usize
+        }
+        class Defs {
+            <<definition>>
+            +Vec~GoodDef~ goods
+            +Vec~ProducerTypeDef~ producer_types
+            +Rules rules
+        }
+        class GoodDef {
+            <<definition>>
+            +String key
+        }
+        class ProducerTypeDef {
+            <<definition>>
+            +String key
+            +GoodId output
+            +Option~ExpansionRecipe~ expansion
         }
         class MerchantKind {
             <<enumeration>>
@@ -1056,17 +1111,36 @@ classDiagram
     World *-- ProjectNeeds
     World *-- FoundingRequests
     World *-- Pops
+    World *-- Geography
+    World --> "1" Defs : defs, shared and read-only
+    Defs *-- GoodDef
+    Defs *-- ProducerTypeDef
+    ProducerTypeDef "1" *-- "0..1" ExpansionRecipe : expansion
+    ExpansionRecipe "0..*" --> "1..*" GoodDef : inputs
+    Links "0..*" --> "1" Geography : origin market
+    Links "0..*" --> "1" Geography : destination market
+    Routes "0..*" --> "1" Geography : origin market
+    Routes "0..*" --> "1" Geography : destination market
     Routes "0..1" --> "1" Links : link
     RouteGaps "1" --> "1" Routes : same row
+    Geography "0..*" --> "0..1" Nations : market_nation
     Merchants "0..*" --> "1" Routes : route
     Merchants "0..*" --> "0..1" Nations : owner_nation
     Merchants ..> MerchantKind
     Cargo "0..*" --> "1" Merchants : merchant
+    Cargo "0..*" --> "1" GoodDef : good
     Cargo ..> CargoStage
+    Nations "0..*" --> "1..*" GoodDef : tariff, one per good
+    Producers "0..*" --> "1" ProducerTypeDef : kind
+    Producers "0..*" --> "1" Geography : province
     Producers "0..*" --> "0..1" Nations : owner_nation
+    Pops "0..*" --> "1" Geography : province
     Projects "0..1" --> "1" Producers : producer
     ProjectNeeds "1..*" --> "1" Projects : producer
+    ProjectNeeds "0..*" --> "1" GoodDef : good
     FoundingRequests "0..*" --> "1" Nations : nation
+    FoundingRequests "0..*" --> "1" Geography : province
+    FoundingRequests "0..*" --> "1" ProducerTypeDef : producer_type
     horizon ..> Links : reads at load
     trade ..> Cargo : lands, books
     trade ..> Merchants : cash, profit, dividends
@@ -1083,7 +1157,9 @@ classDiagram
     firms ..> investment : project reserve
 ```
 
-`GoodAndUnits` stands for the `(GoodId, Fixed)` pair of `ExpansionRecipe::inputs`; `Reach` is `horizon::Reach`. `Projects` to `ProjectNeeds` is keyed by the producer row (S4), and `RouteGaps` shares the route's row index.
+`GoodAndUnits` stands for the `(GoodId, Fixed)` pair of `ExpansionRecipe::inputs`; `Reach` is `horizon::Reach`. `Projects` to `ProjectNeeds` is keyed by the producer row (S4), and `RouteGaps` shares the route's row index. `Geography` holds both kinds of row the tables refer to: a link's or route's two ends are market rows, and a producer's, POP's or founding request's province is a province row (`crates/pax_engine/src/world.rs:22-35`). `Nations::tariff` refers to goods by position, row-major `[nation × good]`, not by a column.
+
+Left out on purpose, because no new table or column refers to them and M5 doesn't change them: the professions (`Pops.profession`, a producer type's worker and owner, and `TradeRules`' two owner professions refer to them), the rules other than `ExpansionRecipe` (3.2 lists their new fields), the `Markets` price table (row-major by market and good, referred to by position), and the producer, POP and nation columns no M5 system reads or writes.
 
 ### Class diagram: loader, server, protocol and bridge
 
@@ -1200,17 +1276,22 @@ Two things a person uses change: the Godot client (two new tabs, the tariff slid
 
 ### Dialogue diagram: the client's screens
 
-States are screens and panels, transitions the player's actions; the composite states are the two new tabs. The game screen's tab bar is the menu tree, and its breadcrumb is *Start screen › (Lobby ›) Game › tab*, with the map and its mode bar beside every tab (`client/main.gd:401-459`).
+States are screens and panels, transitions the player's actions. The game screen has two regions that run side by side, drawn as the two concurrent halves of `Game` (`client/main.gd:401-459`): the tab region, the screen's right side, whose tab bar is the menu tree; and the map region, its left side, whose mode bar is there whichever tab is open. The tab bar's choice point stands for "press any tab": from every tab, each tab is one press away. The composite states are the two new tabs. The breadcrumb is *Start screen › (Lobby ›) Game › tab*, with the map mode beside it.
 
 ```mermaid
 stateDiagram-v2
     state "Start screen" as Start
     state "Lobby (multiplayer)" as Lobby
+    state "Connection lost" as Lost
     [*] --> Start
     Start --> Lobby : Host or Join
     Start --> Game : Single player
     Lobby --> Game : the host starts
-    Game --> Start : quit, or the connection is lost
+    Lobby --> Lost : the connection is lost
+    Game --> Lost : the connection is lost
+    Lost --> Start : Restart
+    Lost --> Game : Rejoin (a multiplayer seat)
+    Lost --> [*] : Quit
     state Game {
         state "World tab" as WorldTab
         state "Nation tab" as NationTab
@@ -1218,18 +1299,21 @@ stateDiagram-v2
         state "Province tab" as ProvinceTab
         state "Trade tab" as TradeTab
         state "Construction tab" as ConstructionTab
-        state "Map: Trade flow mode" as FlowMap
+        state TabBar <<choice>>
         [*] --> WorldTab
+        WorldTab --> TabBar : press a tab
+        NationTab --> TabBar : press a tab
+        MarketTab --> TabBar : press a tab
+        ProvinceTab --> TabBar : press a tab
+        TradeTab --> TabBar : press a tab
+        ConstructionTab --> TabBar : press a tab
+        TabBar --> WorldTab : World
+        TabBar --> NationTab : Nation
+        TabBar --> MarketTab : Market
+        TabBar --> ProvinceTab : Province
+        TabBar --> TradeTab : Trade
+        TabBar --> ConstructionTab : Construction
         WorldTab --> ProvinceTab : click a province on the map
-        WorldTab --> TradeTab : open the Trade tab
-        WorldTab --> ConstructionTab : open the Construction tab
-        NationTab --> TradeTab : open the Trade tab
-        MarketTab --> TradeTab : open the Trade tab
-        ProvinceTab --> ConstructionTab : open the Construction tab
-        TradeTab --> WorldTab : open another tab
-        ConstructionTab --> WorldTab : open another tab
-        WorldTab --> FlowMap : press Trade flow on the mode bar
-        FlowMap --> WorldTab : press another mode
         state TradeTab {
             state "Routes and tariffs" as Routes
             state "Dragging a tariff slider" as Dragging
@@ -1255,10 +1339,20 @@ stateDiagram-v2
             FoundSent --> Pending : CommandResult accepted
             Pending --> Ledger : month end (founded, or dropped with its reason)
         }
+        --
+        state "Map in its chosen mode" as AnyMode
+        state "Map: Trade flow mode" as FlowMap
+        [*] --> AnyMode
+        AnyMode --> AnyMode : click a province (selects it, and every tab's views follow)
+        AnyMode --> FlowMap : press Trade flow on the mode bar
+        FlowMap --> AnyMode : press another mode
+        FlowMap --> FlowMap : click a province (its net imports in the info line)
     }
 ```
 
-In sandbox the Trade tab's nation chooser picks whose tariffs the sliders set, as the nation panel's does (`client/ui/nation_panel.gd:38-44`); with a nation claimed it is fixed. The Found button is disabled outside the player's own nation's provinces, so the dialogue never offers a command `World::validate` would refuse as `ForeignProvince`.
+The map region doesn't depend on the tab: a mode chosen on any tab stays when another tab is pressed, and a province clicked on the map is the selection every tab shows (`client/main.gd:357-363`); only from the World tab does a click also open the Province tab, as today.
+
+**Whose commands.** In sandbox the Trade tab's nation chooser picks whose tariffs the sliders set, as the nation panel's does (`client/ui/nation_panel.gd:38-44`); in a claimed seat it is fixed to the player's nation (`:89-94`). A `FoundProducer` from the Construction tab always names the nation of the selected province's market, the only nation `World::validate` accepts for that province (D27: only in the commanding nation's own markets), so the tab has no chooser (S29). Its Found button is disabled when that market has no nation, and in a claimed seat when the market is another nation's, so the dialogue never offers a command that would be refused as `ForeignProvince`. The smoke test runs in sandbox and founds in province 0, the riverlands, whose market's nation is nation 0, Lowland Kingdom (`scenarios/two_states/scenario.toml:14-40`).
 
 ### Wireframes
 
@@ -1304,10 +1398,10 @@ The **Construction tab** (`client/ui/construction_panel.gd`, M5-14), for the sel
 |                                                                        |
 | Projects        Slots  Owner     Still needed                          |
 | Farm              400  private   tools 3.2   timber 0.0                |
-| Tailor            100  state     tools 1.0   timber 2.5   steel 0.0    |
+| Textile mill      100  state     tools 1.0   timber 2.5   steel 0.0    |
 |                                                                        |
 | Found a producer: [Farm v]   cost 462.10   workers available 880       |
-|                   [ Found ]                                            |
+|                   [ Found ]  (for Lowland Kingdom, the market's nation)|
 |   +-- Found a Farm in Riverlands for 462.10? --[ Cancel ] [ Confirm ]+ |
 |                                                                        |
 | Pending: Farm (Lowland Kingdom), answered at the month end             |
@@ -1341,30 +1435,32 @@ pax_cli report <scenario-dir> [--days N] [--every K] [--market KEY]
 
 ## 8. Test design
 
-Test names are the requirements' where they named one, planned until they exist. Engine tests drive the engine alone; `pax_data` tests drive files and scenarios; release-only tests are ignored in debug as `economic_bands.rs` is (`crates/pax_data/tests/economic_bands.rs:17-18`). The integration tests under `crates/pax_engine/tests/` see only the public API (the tick, its `DayReport`, the tables, `trade::gap`, `investment::project_reserve`); a test of a `pub(crate)` item, such as `merchant_orders` or `book_sales`, is a unit test in its own module.
+Test names are the requirements' where they named one, planned until they exist. Engine tests drive the engine alone; `pax_data` tests drive files and scenarios; release-only tests are ignored in debug as `economic_bands.rs` is (`crates/pax_data/tests/economic_bands.rs:17-18`). Each test below is named with its file:
+- an **integration test** in `crates/<crate>/tests/*.rs` sees only the public API: the tick and its `DayReport`, the tables' `pub` columns, `World`'s `pub` methods, and the `pub` system functions, which today's tests already call (`crates/pax_engine/tests/mobility.rs:10-11`). In M5 that includes `horizon`, `trade::land_cargo`, `trade::gap`, `trade::tariff_rate`, `trade::pay_merchant_dividends`, `trade::run_month_end`, `market::clear_markets`, `investment::project_reserve`, `investment::run_month_end`, `investment::founding_cost` and every `unrest` function;
+- a **unit test** in the `#[cfg(test)] mod tests` of the source file named, for a `pub(crate)` item: `trade::merchant_orders`, `merchant_offers`, `book_purchases`, `book_sales`, and `investment::construction_orders`, `deliver`. `crates/pax_engine/src/world.rs` and `systems/trade.rs` and `systems/investment.rs` gain such a module; `crates/pax_cli/src/main.rs` and `report.rs` have theirs (`crates/pax_cli/src/report.rs:109`).
 
 ### 8.1 Tests by task
 
-| Task | Unit and integration tests |
+| Task | Unit and integration tests, by file |
 |---|---|
-| M5-1 | `pax_cli`'s `bench_times_the_first_month_end_day` and `bench_has_one_ms_per_day_line` (the output matches `bench-compare.sh`'s pattern exactly once); `crates/pax_engine/tests/trade.rs`: `horizon_matches_a_hand_computed_one`, `horizon_is_independent_of_link_order`, `a_route_takes_its_links_retention_and_whole_capacity`, `horizon_build_at_scale` (ignored, R-N13); `crates/pax_data/tests/validation.rs`: `links_load_both_ways`, `routes_load_with_their_tuning`, `bad_links_are_refused`, `bad_routes_are_refused`, `trade_rules_are_checked` |
-| M5-2 | `trade.rs`: `cargo_lands_next_day_less_the_iceberg_share`, `tariffs_reach_the_importing_treasury`, `merchant_tables_keep_their_invariants`, `merchant_rows_are_stable`; `world.rs`: `a_new_table_is_hashed_once_it_has_rows`; `crates/pax_data/src/snapshot.rs`: merchants and cargo round trip, crafted cargo refused |
-| M5-3 | `trade.rs`: `export_orders_follow_the_flow_rule`, `a_merchant_never_owes_more_than_its_cash`, `imports_are_offered_at_landed_cost_plus_margin`, `settlement_books_purchases_and_sales`, `exporters_and_locals_get_the_same_fraction`, `capacity_binds_however_many_merchants`, `equal_prices_mean_no_trade_and_no_entry` (no orders), `tariffs_apply_only_between_nations`, `a_higher_tariff_cuts_the_flow_and_the_treasury_gets_it_all`, `prices_converge_to_the_friction_band`; `crates/pax_engine/tests/commands.rs`: `set_tariff_is_validated`; `crates/pax_data/tests/saves.rs`: `new_commands_round_trip_through_a_save`, `another_format_is_refused_by_name`; `validation.rs`: `command_logs_take_the_new_commands`; `crates/pax_server/tests/session.rs`: `new_commands_are_checked_in_order`; `roundtrip.rs`: `set_tariff` |
-| M5-4 | `trade.rs`: `each_kind_pays_its_owner`, `a_loss_maker_winds_up_and_returns_its_cash`, `an_idle_merchant_is_never_wound_up`; `validation.rs`: `merchants_seed_by_route_and_kind`, `bad_merchants_are_refused` |
-| M5-5 | `crates/pax_data/tests/trade_two_states.rs` (release): `trade_narrows_gaps_and_both_markets_gain`; `report.rs`: `report_shows_a_market_on_its_own`; a unit test that spending by market sums to the totals |
-| M5-6 | `validation.rs`: `expansion_recipes_load`, `bad_recipes_are_refused`; `crates/pax_engine/tests/investment.rs`: `one_project_per_producer`, `producer_rows_are_stable` |
-| M5-7 | `investment.rs`: `no_project_without_profit`, `no_project_without_spare_workers`, `no_project_for_strikers` (S7), `no_project_without_cash`, `a_project_starts_when_all_hold`, `a_project_orders_every_day_until_delivered`, `construction_leaves_inputs_and_wages`, `delivery_then_month_end_adds_capacity`, `dividends_leave_the_project_reserve`; `crates/pax_data/src/bench.rs`: `a_replica_of_one_region_hashes_like_its_base` (R-N25) |
-| M5-8 | `commands.rs`: `found_producer_is_validated`; `investment.rs`: `owners_found_a_producer_where_workers_wait`, `founding_moves_exactly_its_cost`, `a_request_founds_at_the_month_end_when_funded`, `an_unfunded_request_is_dropped`, `state_producers_pay_their_treasury`, `requests_are_answered_at_the_month_end`; `saves.rs`: `a_founding_logged_with_a_full_treasury_loads` |
-| M5-9 | `investment.rs`: `idle_capacity_shrinks`, `capacity_in_use_never_does`; `world.rs`: `a_new_column_is_hashed_once_it_differs` |
-| M5-10 | `crates/pax_data/tests/growth.rs` (release): `investment_grows_two_states` |
-| M5-11 | `crates/pax_engine/tests/unrest.rs`: `strikes_cut_labour_and_output`, `strikers_get_no_wage`; `labour_report.rs`: `strikers_are_neither_employed_nor_unemployed`; `validation.rs`: `unrest_rules_are_checked`; `crates/pax_data/tests/unrest_two_states.rs` (release): the strikers of `a_high_tax_causes_riots_that_end_when_it_falls`. `economic_bands.rs`'s `employed` helper (`crates/pax_data/tests/economic_bands.rs:90-93`), workforce less unemployed, would then count strikers as employed, so it sums the worker pools' `employed` instead |
-| M5-12 | `unrest.rs`: `riots_destroy_output_stock_never_money`, `the_security_transfer_is_exactly_what_the_treasury_pays`, `a_stateless_province_riots_without_a_transfer`, `the_riot_transfer_has_no_direct_relief`; `unrest_two_states.rs`: the riots and their end |
-| M5-13 | `crates/pax_server/tests/views.rs`: `trade_route_view_matches_the_day`, `investment_ledger_view_matches_the_world`; `view.rs`'s `subscriptions_naming_missing_ids_are_refused` gains a bad `tariff_nation`; `sim.rs`: `a_subscribe_naming_no_nation_says_goodbye`; `roundtrip.rs`: every new table, and `a_1_6_client_reads_every_later_update`; `crates/pax_godot/tests/client.rs`: the new encoders and decoders |
-| M5-14 | `view.rs`: `every_map_mode_has_one_value_per_province` covers `TradeFlow`, and `trade_flow_is_sales_less_purchases_by_value`; the client smoke test (8.6) |
+| M5-1 | `crates/pax_cli/src/main.rs` (unit): `bench_times_the_first_month_end_day`, `bench_has_one_ms_per_day_line` (the output matches `bench-compare.sh`'s pattern exactly once). `crates/pax_engine/tests/trade.rs`: `horizon_matches_a_hand_computed_one`, `horizon_is_independent_of_link_order`, `a_route_takes_its_links_retention_and_whole_capacity`, `horizon_build_at_scale` (ignored, R-N13). `crates/pax_data/tests/validation.rs`: `links_load_both_ways`, `routes_load_with_their_tuning`, `bad_links_are_refused`, `bad_routes_are_refused`, `trade_rules_are_checked`. `crates/pax_data/src/snapshot.rs` (unit): `a_restored_world_has_the_scenarios_routes` (R-N17, S3). `crates/pax_data/src/bench.rs` (unit): `replicas_copy_the_trade_and_investment_tables`, created with links and routes (R-N12) |
+| M5-2 | `crates/pax_engine/tests/trade.rs`: `cargo_lands_next_day_less_the_iceberg_share`, `tariffs_reach_the_importing_treasury`, `merchant_tables_keep_their_invariants`, `merchant_rows_are_stable`, and `market_figures_sum_their_routes` (R-F54: each market's tariffs are the sum of its incoming routes'; M5-3 adds purchases over the outgoing routes and sales over the incoming). `crates/pax_engine/src/world.rs` (unit): `a_new_table_is_hashed_once_it_has_rows`. `crates/pax_data/src/snapshot.rs` (unit): `a_snapshot_restores_the_exact_state_and_it_runs_on_identically` (`snapshot.rs:325`) gains merchants and cargo, and `crafted_merchants_and_projects_are_refused` refuses crafted merchant and cargo rows (R-N17; M5-6 adds projects). `crates/pax_data/src/bench.rs` (unit): `replicas_copy_the_trade_and_investment_tables` gains merchants and cargo. `crates/pax_cli/src/report.rs` (unit): `new_columns_follow_todays`, created with arrival's columns (`tariffs`, `iceberg%`): today's columns keep their headers and values, and each new column follows them (R-F67) |
+| M5-3 | `crates/pax_engine/src/systems/trade.rs` (unit): `export_orders_follow_the_flow_rule`, `imports_are_offered_at_landed_cost_plus_margin`, `exporters_and_locals_get_the_same_fraction` (it compares a merchant order's `need` with what it got), and `settlement_books_purchases_and_sales`. The last books purchases and sales on a `Cargo` table holding two merchants' for-sale rows. In one case merchant 0 buys good `g` in its origin and sells some of its for-sale `g` in its destination on the same day, while merchant 1, whose rows sort after merchant 0's, sells `g` too. The test checks that each sale comes off its own for-sale row, with `Q − s` units and its `allocate` share of landed cost; that the purchase is a new in-transit row with its units, cost and tariff due; and that booking in settlement's order (purchases, then sales) and in the other order give the same table (S5). `crates/pax_engine/tests/trade.rs`: `a_merchant_never_owes_more_than_its_cash`, `capacity_binds_however_many_merchants`, `equal_prices_mean_no_trade_and_no_entry` (no flows), `tariffs_apply_only_between_nations`, `a_higher_tariff_cuts_the_flow_and_the_treasury_gets_it_all`, `prices_converge_to_the_friction_band`. `crates/pax_engine/tests/commands.rs`: `set_tariff_is_validated`. `crates/pax_data/tests/saves.rs`: `new_commands_round_trip_through_a_save`, `another_format_is_refused_by_name`. `crates/pax_data/tests/validation.rs`: `command_logs_take_the_new_commands`. `crates/pax_server/tests/session.rs`: `new_commands_are_checked_in_order`. `crates/pax_protocol/tests/roundtrip.rs`: `set_tariff`. `crates/pax_cli/src/report.rs`: `new_columns_follow_todays` gains `trade` |
+| M5-4 | `crates/pax_engine/tests/trade.rs`: `each_kind_pays_its_owner`, `a_loss_maker_winds_up_and_returns_its_cash`, `an_idle_merchant_is_never_wound_up`. `crates/pax_engine/src/systems/trade.rs` (unit): `settlement_books_purchases_and_sales` gains each merchant's `month_profit`, `R − cost_sold` (PL-3). `crates/pax_data/tests/validation.rs`: `merchants_seed_by_route_and_kind`, `bad_merchants_are_refused`. `crates/pax_cli/src/report.rs`: `new_columns_follow_todays` gains `merch.div` and `wound_up`. `crates/pax_data/tests/content_stability.rs`'s header comment counts 7 professions once `merchant` is appended (`content_stability.rs:3`) |
+| M5-5 | `crates/pax_data/tests/trade_two_states.rs` (release): `trade_narrows_gaps_and_both_markets_gain`. `crates/pax_cli/src/report.rs` (unit): `report_shows_a_market_on_its_own`. `crates/pax_engine/tests/market_properties.rs`: `spending_by_market_sums_to_the_totals` (R-F64). `scenarios/two_states/scenario.toml`'s header, which says the markets don't trade (`:3`), is rewritten with the route |
+| M5-6 | `crates/pax_data/tests/validation.rs`: `expansion_recipes_load`, `bad_recipes_are_refused`. `crates/pax_engine/tests/investment.rs`: `one_project_per_producer`, `producer_rows_are_stable`. `crates/pax_data/src/snapshot.rs` (unit): the round trip and `crafted_merchants_and_projects_are_refused` gain projects and their needs. `crates/pax_data/src/bench.rs` (unit): `replicas_copy_the_trade_and_investment_tables` gains them |
+| M5-7 | `crates/pax_engine/tests/investment.rs`: `no_project_without_profit`, `no_project_without_spare_workers`, `no_project_for_strikers` (S7), `no_project_without_cash`, `a_project_starts_when_all_hold`, `a_project_orders_every_day_until_delivered` (through `DayReport::investment`), `delivery_then_month_end_adds_capacity`, `dividends_leave_the_project_reserve`. `crates/pax_engine/src/systems/investment.rs` (unit): `construction_leaves_inputs_and_wages`, on `construction_orders`' budgets. `crates/pax_data/tests/validation.rs`: `investment_rules_are_checked` (R-D5's `enabled` and `profit_margin`; M5-8 and M5-9 add their keys). `crates/pax_data/src/bench.rs` (unit): `a_replica_of_one_region_hashes_like_its_base` (R-N25). `crates/pax_cli/src/report.rs`: `new_columns_follow_todays` gains `invest`, `started` and `capacity` |
+| M5-8 | `crates/pax_engine/tests/commands.rs`: `found_producer_is_validated`. `crates/pax_engine/tests/investment.rs`: `owners_found_a_producer_where_workers_wait`, `founding_moves_exactly_its_cost`, `a_request_founds_at_the_month_end_when_funded`, `an_unfunded_request_is_dropped`, `state_producers_pay_their_treasury`, `requests_are_answered_at_the_month_end`. `crates/pax_data/tests/saves.rs`: `a_founding_logged_with_a_full_treasury_loads`. `crates/pax_cli/src/report.rs`: `new_columns_follow_todays` gains `founded` |
+| M5-9 | `crates/pax_engine/tests/investment.rs`: `idle_capacity_shrinks`, `capacity_in_use_never_does`. `crates/pax_engine/src/world.rs` (unit): `a_new_column_is_hashed_once_it_differs`. `crates/pax_cli/src/report.rs`: `new_columns_follow_todays` gains `shrunk` |
+| M5-10 | `crates/pax_data/tests/growth.rs` (release): `investment_grows_two_states`, with M5-7 to M5-9 in (S27) |
+| M5-11 | `crates/pax_engine/tests/unrest.rs`: `strikes_cut_labour_and_output`, `strikers_get_no_wage`. `crates/pax_engine/tests/labour_report.rs`: `strikers_are_neither_employed_nor_unemployed`. `crates/pax_data/tests/validation.rs`: `unrest_rules_are_checked`. `crates/pax_data/tests/unrest_two_states.rs` (release): the strikers of `a_high_tax_causes_riots_that_end_when_it_falls`. `crates/pax_cli/src/report.rs`: `new_columns_follow_todays` gains `strike%`. `economic_bands.rs`'s `employed` helper (`crates/pax_data/tests/economic_bands.rs:90-93`), workforce less unemployed, would then count strikers as employed, so it sums the worker pools' `employed` instead |
+| M5-12 | `crates/pax_engine/tests/unrest.rs`: `riots_destroy_output_stock_never_money`, `the_security_transfer_is_exactly_what_the_treasury_pays`, `a_stateless_province_riots_without_a_transfer`, `the_riot_transfer_has_no_direct_relief`. `crates/pax_data/tests/unrest_two_states.rs`: the riots and their end. `crates/pax_cli/src/report.rs`: `new_columns_follow_todays` gains `riots` |
+| M5-13 | `crates/pax_server/tests/views.rs`: `trade_route_view_matches_the_day`, `investment_ledger_view_matches_the_world`. `crates/pax_server/src/view.rs` (unit): `subscriptions_naming_missing_ids_are_refused` (`:525`) gains a bad `tariff_nation`. `crates/pax_server/src/sim.rs` (unit): `a_subscribe_naming_no_nation_says_goodbye`. `crates/pax_protocol/tests/roundtrip.rs`: every new table, and `a_1_6_client_reads_every_later_update`. `crates/pax_protocol/tests/size_budget.rs`: both views (8.4). `crates/pax_godot/tests/client.rs`: the new encoders and decoders |
+| M5-14 | `crates/pax_server/src/view.rs` (unit): `every_map_mode_has_one_value_per_province` (`:444`) covers `TradeFlow`, and `trade_flow_is_sales_less_purchases_by_value`; the client smoke test (8.6) |
 | M5-15 | `crates/pax_server/tests/session_replay.rs` extended (R-N7); the determinism test of 8.3 asserting all four mechanisms |
-| M5-16 | `trade.rs`: `a_persistent_gap_founds_a_merchant`, `entry_never_charters`, `equal_prices_mean_no_trade_and_no_entry` (no entry) |
+| M5-16 | `crates/pax_engine/tests/trade.rs`: `a_persistent_gap_founds_a_merchant`, `entry_never_charters`, and `equal_prices_mean_no_trade_and_no_entry` extended to no entry. `crates/pax_cli/src/report.rs`: `new_columns_follow_todays` gains `m.founded` |
 
-Every task also keeps `crates/pax_engine/tests/conservation.rs`, `crates/pax_server/src/hostile.rs` and `crates/pax_server/tests/hostile.rs` passing with its new values (R-N21), and extends `crates/pax_engine/tests/extremes.rs` with its quantities at the price ceiling (R-N24). `hostile.rs`'s request generator (`crates/pax_server/src/hostile.rs:174-182`) gains `SetTariff` (M5-3) and `FoundProducer` (M5-8), each with fields sometimes absent or out of range, and the new `Subscribe` fields (M5-13).
+Each task that adds a table or column R-N12 copies (M5-1 to M5-4, M5-6, M5-8, M5-9, M5-16) extends `replicas_copy_the_trade_and_investment_tables`, each that adds a snapshot block extends the snapshot round trip and the crafted-row refusals, and each that adds a `rules.toml` key extends its section's `*_rules_are_checked` test. Every task also keeps `crates/pax_engine/tests/conservation.rs`, `crates/pax_server/src/hostile.rs` and `crates/pax_server/tests/hostile.rs` passing with its new values (R-N21), and extends `crates/pax_engine/tests/extremes.rs` with its quantities at the price ceiling (R-N24). `hostile.rs`'s request generator (`crates/pax_server/src/hostile.rs:174-182`) gains `SetTariff` (M5-3) and `FoundProducer` (M5-8), each with fields sometimes absent or out of range, and the new `Subscribe` fields (M5-13).
 
 ### 8.2 Conservation, and goods
 
@@ -1395,7 +1491,7 @@ Every task also keeps `crates/pax_engine/tests/conservation.rs`, `crates/pax_ser
 | The first month end (R-N26) | the same with `--days 30`, five runs before and five after; the printed month-end day's median and range; a reason in the PR if the median rises more than 20% against the task's own "before", or against M5-1's baseline (S9) | M5-4, M5-7, M5-8, M5-9, M5-12, M5-16; M5-1 records the baseline |
 | A warmed world (R-N27) | `pax_cli bench scenarios/two_states --warmup DAYS --scale 55 --regions 1500 --threads 8`, with a warm-up long enough that a project runs | M5-7, M5-15 |
 | The horizon at scale (R-N13) | `cargo test -p pax_engine --release -- --ignored horizon_build_at_scale --nocapture` (3,000 markets, 20 links each, under 1 s on one thread) | M5-1 |
-| View budgets (R-N14) | `crates/pax_protocol/tests/size_budget.rs` with the new views at 3.5's sizes, and `view_building_budget` (`crates/pax_server/src/view.rs:549-589`) with trade and investment subscribed | M5-13 |
+| View budgets (R-N14) | `crates/pax_protocol/tests/size_budget.rs`, whose `LONG_TERM` scale (`crates/pax_protocol/tests/common/mod.rs:44-47`) gains 3.5's counts (40 routes of 10 goods, 50 tariffs, and the ledger's), so `update_with_every_view_fits_its_budget` carries both new views; and `view_building_budget` (`crates/pax_server/src/view.rs:549-589`) with trade and investment subscribed. If the first fails, S28's fallback, in its order | M5-13 |
 | The regression gate (R-N11) | CI's Benchmark regression job, every PR | every task |
 
 At `aa2133a` on the run's machine the cold days took 69.0 to 74.2 ms and the first month-end day a median of 105.7 ms (`03-requirements-specification.md`, R-N10, R-N26). D13's budget leaves about 25 ms for M5's daily work. If a task's mean exceeds 100 ms/day, it optimises within its own rules (fewer orders for goods without a gap, say); a fix that needs D1's adaptive step as the default is blocked on the maintainer's decision (2.2).
@@ -1418,10 +1514,10 @@ At `aa2133a` on the run's machine the cold days took 69.0 to 74.2 ms and the fir
 | M5-15 | unchanged, unless an earlier task's change is still unrecorded | The gate itself |
 | M5-16 | re-recorded | `RouteGaps` has a row per route from day 0, and is hashed (PL-18) |
 
-Each re-record states why in the commit's `Evidence:` and the pull request (R-N9, D11), and keeps the bands clause (R-N22).
+Each re-record states why in the commit's `Evidence:` and the pull request (R-N9, D11), and keeps the bands clause (R-N22) and `crates/pax_data/tests/content_stability.rs`. The second runs `two_states` for 20 years in release and 5 in debug, both in CI (`ci.yml:108-111`), and asserts that every good trades in every market in the last 30 days, that no price sits at a technical bound, that the population ends at 95% of its start or more, and that life-needs coverage ends at 0.95 or more (`content_stability.rs:20-63`). Every task that changes `two_states`' results (M5-5, M5-7, M5-8 and M5-9 if they change it, M5-11, M5-12 if it does, M5-16, and any recalibration of M5-10's) runs it and names it in its `Evidence:`; a bound it can't keep is reported as blocked, never relaxed, since the test is the content's acceptance (`docs/MILESTONE_1.md:38`, A11), not a band of the bands clause.
 
 ### 8.6 End to end
 
 - **Session replay (R-N7):** `a_saved_session_replays_to_the_servers_final_state` (`crates/pax_server/tests/session_replay.rs:52-53`) submits a `SetTariff` (M5-3), a `FoundProducer` (M5-8), and a tax high enough to cause strikes and riots (M5-15), saves, and `pax_cli replay` reaches the server's final state hash on all three platforms.
 - **The client (R-F53):** `client/smoke.gd` (`client/smoke.gd:1-7`) selects province 0, subscribes to both new views through `subscribe_views`, sets nation 0's tariff on good 0 to 50 per mille, and founds a farm in province 0; it fails unless both `CommandResult`s are `None` and an update carries both a `TradeRouteView` with that tariff and an `InvestmentLedgerView` for province 0, then saves and loads as today, in CI's `client-smoke` job (`ci.yml:189-228`).
-- **Scenarios:** `pax_cli verify` for both scenarios; the release-only scenario tests of R-F20, R-F33 and R-F40; `economic_bands.rs` with every band kept or moved with its reason (R-N22).
+- **Scenarios:** `pax_cli verify` for both scenarios; the release-only scenario tests of R-F20, R-F33 and R-F40; `economic_bands.rs` with every band kept or moved with its reason (R-N22); and `content_stability.rs` unchanged, in debug and release, after every task that changes `two_states`' results (8.5).

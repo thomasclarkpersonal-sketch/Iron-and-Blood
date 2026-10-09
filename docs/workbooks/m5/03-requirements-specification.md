@@ -5,7 +5,7 @@
 
 What Milestone 5 must do, not yet how: the Analysis stage of the [Project Workbook](README.md). It turns the [System Service Request](01-system-service-request.md#service-requirements)'s SR-1 to SR-13 and the [charter](02-project-charter.md)'s objectives into testable requirements, gives the rules they need as process logic in `Fixed` terms, and draws the system's data flows, use cases, main activity and data model. Code is cited at `aa2133a`, which the plan's commits don't change; documents are cited as they stand on `m5/plan` at this page's commit. Measurements are from a release build of `aa2133a` on the run's machine (32 cores, `bench` at 8 threads). The month-end day's own time was measured with an uncommitted probe of R-F56's print: `pax_cli` built outside the worktree from `m5/plan`, whose engine is `aa2133a`'s, timing each day of `bench`'s loop ([README](README.md#correspondence-log), 04:21).
 
-This is round 3 of the stage. How each finding of rounds 1 and 2 was handled is in the workbook's review log ([round 1](README.md#analysis-round-1-findings), [round 2](README.md#analysis-round-2-findings)). Round 3 was approved with six minor findings, and Design round 1 corrected this page for them ([round 3](README.md#analysis-round-3-minor-findings)): R-F5, R-F56, R-N26, C29, PL-3 and the level-0 DFD.
+This is round 3 of the stage. How each finding of rounds 1 and 2 was handled is in the workbook's review log ([round 1](README.md#analysis-round-1-findings), [round 2](README.md#analysis-round-2-findings)). Round 3 was approved with six minor findings, and Design round 1 corrected this page for them ([round 3](README.md#analysis-round-3-minor-findings)): R-F5, R-F56, R-N26, C29, PL-3 and the level-0 DFD. Design round 2 corrected it for two of the design review's findings ([Design round 1](README.md#design-round-1-findings), 1 and 7): PL-3's "Rows" paragraph, the `D2` store of the level-0 and 3.0 DFDs, and the name `route_gaps`.
 
 ## How to read this page
 
@@ -304,6 +304,8 @@ Why the budget holds: the units bought `q` satisfy `q × p ≤ b'`, the tariff (
 
 **Sales:** sellers are paid pro rata to the quantity offered (`market.rs:809-830`). A merchant's row selling `s` of its `Q` units at receipts `R` gives `merchant.cash += R`, and `allocate(landed_cost, [Q − s, s])` splits the landed cost into the part kept and the part sold, `cost_sold`; the row keeps `quantity = Q − s` and its part. The merchant's `month_profit` gains `R − cost_sold`, a signed sum that rounds nothing (C28). It falls below 0 when the destination's price is below the row's landed cost per unit: D1's supply sells `stock × p ÷ reservation` of a row whose reservation is above the price `p` (`market.rs:200-217`); `r` is the route's retention throughout this page.
 
+**Rows:** a purchase is booked on the in-transit row of its key `(merchant, g)`, and a sale on the for-sale row of its key, never on a row found by position: a merchant that buys `g` in its origin and sells `g` in its destination on the same day has both rows, and the purchases' rows are merged into the sorted table (R-D10), which moves the rows after them (Design S5).
+
 ### PL-4. Arrival
 
 At the start of each day, after commands: for each *in transit* `Cargo` row (merchant `j` on route `A → B`, good `g`, `q`, `landed_cost K`, `due`), in row order:
@@ -338,7 +340,7 @@ Then every merchant's `month_profit = 0`. A month without sales or write-offs le
 ### PL-7. Merchant entry
 
 At month end, after exits, with today's executed prices:
-1. **Gap months:** for each route, `open` if any good's `gap_g > 0` (PL-2, steps 1-2); its `route_gap.gap_months = min(gap_months + 1, trade.entry_months)` if open, else 0.
+1. **Gap months:** for each route, `open` if any good's `gap_g > 0` (PL-2, steps 1-2); its `route_gaps.gap_months = min(gap_months + 1, trade.entry_months)` if open, else 0.
 2. **Candidates:** routes with `trade.entry_months > 0` and `gap_months ≥ trade.entry_months`, whose active merchants' cash `S = Σ cash_j` is below the value of a day's capacity `V = Σ_g C_g.mul_ceil(p(A, g))`, with `C_g` from PL-2 step 3. The shortfall is `K = V − S`.
 3. **Order:** by the route's largest `rel_g` (PL-2 step 4), descending, then by route row.
 4. **For each candidate:**
@@ -516,7 +518,7 @@ flowchart LR
     P8("8.0 Build views and reports")
     P9("9.0 Save, replay, verify and bench")
     D1[("D1 World.defs")]
-    D2[("D2 World.geography: markets, provinces, links, routes")]
+    D2[("D2 World.geography and World.network: markets, provinces, links, routes")]
     D3[("D3 World state: pops, producers, projects, markets, nations, merchants, cargo, route gaps, founding requests")]
     D4[("D4 Commands: Scenario.commands, the server's queue, the applied-command log")]
     D5[("D5 Saves: name.toml and name.world")]
@@ -600,7 +602,7 @@ flowchart LR
 
 Balanced with the context diagram: the Player's commands and subscriptions go to 2.0 and 8.0, and its results and updates come from them; the host's requests and results are 9.0's; the author's files and errors are 1.0's; the developer's report requests go to 8.0 and its verify, record and bench requests to 9.0; the clock drives 2.0 to 7.0. Three kinds of flow are internal. 1.0 to 9.0: a load checks every logged command against the scenario's initial world (D21, D23) and the save's content hash against the scenario's, and a restored world takes its definitions, links and routes from it. 1.0 to `D4`: the scenario's command log (`commands.toml`), which `pax_data::step_day` applies first on each day, before the players' commands in stamp order (`crates/pax_data/src/lib.rs:615-624`; the server's `Game::step`, `crates/pax_server/src/game.rs:95-111`). 5.0 to 3.0 and 7.0: the day's figures settlement hands to the firms step, merchants' purchases (PL-3) as producers' revenue and input cost are today.
 
-The level-1 diagrams below split `D3` into its tables: `D3.1 World.merchants`, `D3.2 World.cargo`, `D3.3 World.nations`, `D3.4 World.markets.price`, `D3.5 World.pops`, `D3.6 World.producers`, `D3.7 World.projects` with their needs, `D3.8 World.route_gap` and `D3.9 World.founding_requests`. A level-0 process that a level-1 diagram's flows reach is drawn there as a box marked "off this diagram", not as one of its processes; its own flows are in the level-0 diagram.
+The level-1 diagrams below split `D3` into its tables: `D3.1 World.merchants`, `D3.2 World.cargo`, `D3.3 World.nations`, `D3.4 World.markets.price`, `D3.5 World.pops`, `D3.6 World.producers`, `D3.7 World.projects` with their needs, `D3.8 World.route_gaps` and `D3.9 World.founding_requests`. A level-0 process that a level-1 diagram's flows reach is drawn there as a box marked "off this diagram", not as one of its processes; its own flows are in the level-0 diagram.
 
 ### Level-1 DFD: 3.0 Run trade
 
@@ -615,13 +617,13 @@ flowchart LR
     P34("3.4 Wind up loss-makers")
     P35("3.5 Found merchants")
     RU[("D1 World.defs: firms, trade and investment rules, professions")]
-    R[("D2 World.geography: routes, links, markets' nations")]
+    R[("D2 World.network and World.geography: routes, links, markets' nations")]
     M[("D3.1 World.merchants")]
     C[("D3.2 World.cargo")]
     N[("D3.3 World.nations: tariff, treasury")]
     PR[("D3.4 World.markets.price")]
     PO[("D3.5 World.pops: owner pools")]
-    G[("D3.8 World.route_gap")]
+    G[("D3.8 World.route_gaps")]
 
     Clock -- "day tick" --> P31
     C -- "goods in transit, tariffs owed" --> P31
