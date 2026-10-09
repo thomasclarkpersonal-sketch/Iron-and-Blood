@@ -364,8 +364,8 @@ A proposed decision that changes an accepted one must amend it explicitly in the
 | P27 investment | D6 | Dividends only above the project reserve; `owner_nation` for state-founded producers; founding transfers from owner POPs |
 | | D4 | The month-end investment step |
 | | D21, D24 | `FoundProducer`: only in the commanding nation's own markets, paid from its treasury |
-| P28 unrest | D6 | Striking workers' pay: the pool's wages split by working members, or strikes cost strikers nothing |
-| | D19 | Whether a riot's transfer gives "militancy relief" directly. Today it would only act through life needs |
+| P28 unrest | D6 | Striking workers' pay, settled in [D28](DECISIONS.md#d28-economic-unrest-strikes-and-riots) on 2026-10-10 |
+| | D19 | None: [D28](DECISIONS.md#d28-economic-unrest-strikes-and-riots) settled on 2026-10-10 that a riot's transfer gives no direct "militancy relief", so D19 is unchanged |
 | | D4 | Riots after politics at month end |
 | P29 workforce | D7, D2, D18, D20, D25 | The reader table above; split and merge across three columns |
 | | D26 | Superseded by births into `dependents` |
@@ -380,9 +380,9 @@ A proposed decision that changes an accepted one must amend it explicitly in the
 
 ## Open questions for the owner
 
-1. **Route capacity:** each route takes its bottleneck link's capacity (simple), or routes share link capacity pro rata (D14 rule 3, a per-link pass each day)?
-2. **Merchants per route:** one, or several sharing it (the draft's `capacity_share`)?
-3. **Who funds founding:** the market's owner-profession POPs, by cash, or only the treasury in M5?
+1. **Route capacity:** each route takes its bottleneck link's capacity (simple), or routes share link capacity pro rata (D14 rule 3, a per-link pass each day)? *Answered on 2026-10-10 in [D17](DECISIONS.md#d17-inter-market-trade-routes-merchants-and-tariffs): the bottleneck link's.*
+2. **Merchants per route:** one, or several sharing it (the draft's `capacity_share`)? *Answered on 2026-10-09 in [TRADE.md](TRADE.md#decisions-owner-2026-10-09): several, through dynamic entry.*
+3. **Who funds founding:** the market's owner-profession POPs, by cash, or only the treasury in M5? *Answered on 2026-10-09 in [INVESTMENT.md](INVESTMENT.md#decisions-owner-2026-10-09): the market's capitalists, or the treasury by command.*
 4. **Bank granularity:** one per market (proposed: a POP's bank never changes), or one per nation?
 5. **Means of payment:** cash only, with deposits converted at the bank (proposed), or deposits spendable in the market?
 6. **Bonds:** held by banks only (proposed), or by POPs directly, which needs a per-nation POP column?
