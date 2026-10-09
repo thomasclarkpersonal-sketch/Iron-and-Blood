@@ -22,6 +22,18 @@ All on 8 threads.
 - **Where the time goes** (M2, N3; 3,000 markets / 36k producers): `clear_markets` 21 ms, `firms` 2.3 ms, everything else under 1 ms. Price discovery's cold-start iterations dominate.
 - CI's regression gate is a rule, so it lives in D13.
 
+## Price discovery: the opt-in adaptive step (D1)
+
+Measured 2026-10-07 (review PR #25); the step is opt-in and off by default (D1), so these compare what turning it on would do.
+
+| Case | Iterations, current → adaptive | Tick time |
+|---|---|---|
+| Steady state, `mini_valley` (mean per market-day) | 2.6 → 1.3 | — |
+| Steady state, `two_states` | 9.1 → 2.8 | — |
+| Cold start, 3,000 markets (first 10 days) | 42.7 → 8.2 | 8.5 → 5.6 ms/day (−34%) |
+
+With it on, `two_states`' 5-year GDP is unchanged (9,002,053 → 9,001,643) and its prices end within 2.5%.
+
 ## Views and bandwidth (D22, D24)
 
 At the D13 long-term scale (10,000 provinces, about 1M POP rows).

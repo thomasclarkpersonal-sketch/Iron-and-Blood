@@ -62,6 +62,8 @@ Prices are not hard-coded and are not anchored to a base price. Every day, each 
 
 Tunables live in `data/rules.toml` under `[market]`.
 
+**Opt-in adaptive step (D1).** With `market.adaptive_step = true` (default `false`), each good gets its own step instead of the decaying `λₖ`: it starts at `step`, grows ×1.25 while the good's excess demand keeps its sign, halves when the sign flips (Rprop-style), and is capped at 1. Everything else in the cycle above is unchanged. No scenario turns it on yet; the numbers are in [PERFORMANCE.md](PERFORMANCE.md), "Price discovery".
+
 ### Consumer demand (D2)
 
 A profession has subsistence needs `γ` per person per day (Victoria 2's *life needs*) and discretionary shares `β`. A POP with `N` people and daily budget `Y = cash × spend_rate`:

@@ -74,6 +74,8 @@ Mechanism (module layouts, file formats, flag names, step-by-step algorithms) be
 
 **Why it scales.** LES demand (D2) is linear in POP size and budget, so a market needs only `(Σ size, Σ budget)` per profession and regime to evaluate demand at any trial price. Discovery never touches the POP table.
 
+**Opt-in adaptive step (accepted as opt-in, owner, 2026-10-09):** discovery may use a per-good adaptive step instead of the decaying one, switched by a rule that is **off by default**, so no scenario's results change unless its data turns it on. Either way, the rules above hold: the same price band, `traded ≤ min(demand, supply)`, pro-rata rationing, and determinism at any thread count. **Revisit** (make it the default, re-recording the golden files) when the tick budget (D13) needs the cold-start saving, e.g. as M5's merchants add markets. Mechanism: [ECONOMY_SYSTEM.md](ECONOMY_SYSTEM.md); measurements: [PERFORMANCE.md](PERFORMANCE.md).
+
 **Code:** `crates/pax_engine/src/systems/market.rs`. **Docs:** [ECONOMY_SYSTEM.md](ECONOMY_SYSTEM.md).
 
 ## D2. Consumer demand: Linear Expenditure System (Stone-Geary)
