@@ -81,6 +81,14 @@ for doc in markdown:
             failures.append(f"{where}: link to missing heading {target}")
 
 # 2. Decision citations.
+def rust_comment(line):
+    """The comment on a line of Rust: after a `//` that isn't inside a string literal."""
+    for m in re.finditer(r"//", line):
+        if line[: m.start()].count('"') % 2 == 0:
+            return line[m.end():]
+    return ""
+
+
 decisions_text = (root / "docs/DECISIONS.md").read_text()
 decided = {int(n) for n in re.findall(r"^## D(\d+)\.", decisions_text, flags=re.M)}
 for source in markdown + tracked("*.rs"):
@@ -88,7 +96,7 @@ for source in markdown + tracked("*.rs"):
         continue
     text = source.read_text()
     if source.suffix == ".rs":  # only comments cite decisions; code may name a `D3`
-        text = "\n".join(line.partition("//")[2] for line in text.splitlines())
+        text = "\n".join(rust_comment(line) for line in text.splitlines())
     cited = {int(n) for n in re.findall(r"\bD(\d{1,3})\b", text)}
     for n in sorted(cited - decided):
         failures.append(f"{source.relative_to(root)}: cites D{n}, which DECISIONS.md has no entry for")

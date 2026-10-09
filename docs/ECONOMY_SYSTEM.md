@@ -8,7 +8,7 @@ The economic actors are:
 
 1. **RGOs** (farms, mines, camps): producer types with no inputs. They employ lower-strata professions, and their output is limited by labour and capacity.
 2. **Factories**: producer types with inputs. They turn input goods into output with a fixed-coefficient (Leontief) recipe.
-3. **Artisans** *(planned)*: POP-run production. They will be modelled as small producers owned and staffed by the same POP.
+3. **Artisans** *(planned; needs a decision, none drafted)*: POP-run production. They will be modelled as small producers owned and staffed by the same POP.
 
 ```mermaid
 flowchart LR

@@ -61,9 +61,9 @@ Rows are stored grouped by market: the loader sorts them stably. The market's pa
 | `profession` | `u16` | Index into `Defs::professions` |
 | `province` | `u32` | |
 | `life_needs` | `Fixed` | `[0, 1]`, subsistence satisfaction from the last market day (D2) |
-| *`culture`, `religion`* | *`u16`* | *Planned* |
+| *`culture`, `religion`* | *`u16`* | *Planned: needs a decision, none drafted* |
 | `militancy` | `Fixed` | `[0, 1]`, updated monthly (D19); no effects yet |
-| *`literacy`, `consciousness`* | *`Fixed`* | *Planned. Fixed-point, never `f32` (D3)* |
+| *`literacy`, `consciousness`* | *`Fixed`* | *Planned: needs a decision, none drafted. Fixed-point, never `f32` (D3)* |
 
 ### `Producers` (RGOs and factories; they differ only by recipe)
 | Column | Type | Notes |
@@ -99,9 +99,10 @@ Rows are stored grouped by market: the loader sorts them stably. The market's pa
 Orders and offers are **not** stored in state: they exist only during the market phase. The old `MarketNode { buy_orders: HashMap, … }` design is retired, because HashMap iteration order is non-deterministic (D3).
 
 ### *Planned tables*
-- Laws, and tariffs on `Nations`.
-- `Accounts` for inside money: deposits, loans and bonds as asset/liability pairs (D5).
-- `Shares` (owner POP/nation → producer).
+- Tariffs on `Nations` (trade proposal, [#18](https://github.com/thomasclarkpersonal-sketch/Iron-and-Blood/pull/18)).
+- Laws on `Nations` (needs a decision, none drafted).
+- `Accounts` for inside money: deposits, loans and bonds as asset/liability pairs (D5; needs a decision, none drafted).
+- `Shares` (owner POP/nation → producer; raised by the investment proposal, [#21](https://github.com/thomasclarkpersonal-sketch/Iron-and-Blood/pull/21), question 1).
 
 ## ⚙️ Core Systems
 

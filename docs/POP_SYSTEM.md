@@ -9,14 +9,14 @@ POPs are rows in the `Pops` table ([BACKEND_SCHEMA.md](BACKEND_SCHEMA.md#pops)).
 **Identity (key):**
 *   **Province.** The market, state and nation are *derived* from the province, never stored on the POP.
 *   **Profession:** e.g. farmer, labourer, craftsman, clerk, capitalist, aristocrat, soldier.
-*   **Culture** and **Religion** *(planned)*.
+*   **Culture** and **Religion** *(planned; needs a decision, none drafted)*.
 
 **State:**
 *   **Size:** number of people.
 *   **Cash:** the POP's **total** holdings, not per capita. Money stays with the survivors when size changes.
 *   **Life needs:** subsistence satisfaction `[0, 1]` from the last market day.
 *   **Militancy:** `[0, 1]`, updated monthly from hunger and taxes (D19); no effects yet.
-*   *Planned:* **Literacy** (promotion chance, research) and **Consciousness** (demand for reforms).
+*   *Planned (needs a decision, none drafted):* **Literacy** (promotion chance, research) and **Consciousness** (demand for reforms).
 
 Every one of these is `Fixed`, never a float (D3).
 
@@ -92,4 +92,4 @@ Merging and splitting keep the number of POP rows bounded:
 *   **Splitting:** when `⌊N × rate⌋` people promote, migrate or are conscripted, they move to the POP with the target identity. A new row is created only if none exists; lookup goes through a sorted identity index, never a `HashMap` (D3). They take cash in proportion to their share of the POP, split by largest remainder.
 *   **Merging:** below a size threshold (e.g. 50 people) a POP merges into the most similar POP in the province. Cash adds up. Literacy and militancy become size-weighted averages in `Fixed`.
 *   **Implemented:** rows are compacted at month end (`World::compact_pops`). Rows sharing `(province, profession)` merge and empty, cashless rows are dropped, so row indices stay dense.
-*   **Planned:** merging *small* POPs into the most similar identity (needs culture and religion columns).
+*   **Planned (needs a decision, none drafted):** merging *small* POPs into the most similar identity (needs culture and religion columns).

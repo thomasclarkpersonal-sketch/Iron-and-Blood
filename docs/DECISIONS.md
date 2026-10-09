@@ -142,7 +142,7 @@ Mechanism (module layouts, file formats, flag names, step-by-step algorithms) be
   A bank loan creates a deposit (asset of the borrower) and a loan (asset of the bank), offset by a liability on each side. This is endogenous money in Godley & Lavoie's sense, and it does not break conservation. A default writes off both sides; nobody's *cash* disappears.
 - **Every transfer debits one account and credits another by the same amount.** Splits use largest-remainder allocation.
 - **Death/extinction:** money stays with surviving POP members; an extinct POP's cash passes to an heir (D7).
-- **Firm failure (planned, with investment and banking):** cash goes to creditors first, then owners.
+- **Firm failure** *(planned; needs a decision, none drafted)*: cash goes to creditors first, then owners.
 - **Tests:** every day asserts outside-money conservation. `crates/pax_engine/tests/conservation.rs` runs 200 randomised economies through it.
 
 ## D6. Firms: production, wages, ownership
@@ -160,7 +160,7 @@ Mechanism (module layouts, file formats, flag names, step-by-step algorithms) be
   - A struggling producer can therefore always buy inputs, produce and sell. Its workers absorb the shortfall in pay instead of the firm dying.
   - Paying out the last cash in wages was a permanent trap: no inputs meant no output, no revenue, and no recovery.
 - **Dividends:** cash above `reserve_days × wage bill` is paid out at `dividend_payout_rate` per day to the producer type's **owner profession** in the same market, split by size.
-- **Ownership is profession-level in M1.** A share registry (who owns which firm, so capitalists in one market can own firms in another) is planned and will be needed for investment and bankruptcy.
+- **Ownership is profession-level in M1.** A share registry (who owns which firm, so capitalists in one market can own firms in another) is planned and will be needed for investment and bankruptcy; the investment proposal ([#21](https://github.com/thomasclarkpersonal-sketch/Iron-and-Blood/pull/21), question 1) raises it, and nothing designs it yet.
 
 ## D7. POP accounting
 
@@ -175,7 +175,7 @@ Mechanism (module layouts, file formats, flag names, step-by-step algorithms) be
   
   This keeps the POP table bounded as mobility, migration and extinctions create and empty rows.
 - **Promotion and migration are deterministic fractional flows** (`ΔN = ⌊N × rate⌋`), not dice rolls. The counter-based RNG (D3) is available where genuine randomness is wanted, e.g. rebellions.
-- **POP identity** is `(province, profession, culture, religion)`. Culture and religion columns are planned. Lookups by identity use a sorted index, never a `HashMap`.
+- **POP identity** is `(province, profession, culture, religion)`. Culture and religion columns are planned (they need a decision; none drafted). Lookups by identity use a sorted index, never a `HashMap`.
 - **Derived values are never stored as state.** Nation, market and state come from the province; storing `nation_id` on POPs would go stale on conquest.
   - **Exception: self-validating caches.** For performance, derived data may live in a cache *outside* state, under three conditions: it's excluded from equality and `World::state_hash`; it fingerprints all of its inputs on every use and rebuilds on mismatch; and debug builds check it against a fresh build.
   - The only such cache is `World::layout` (`layout.rs`). Its inputs are the POP row count, `pops.province`, `pops.profession`, `geography.province_market`, `geography.market_nation` (D15), and the number of professions, markets and nations.
