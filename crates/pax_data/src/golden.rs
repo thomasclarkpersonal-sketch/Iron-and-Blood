@@ -36,3 +36,33 @@ pub fn read(path: &Path) -> Result<Vec<u64>, String> {
     }
     Ok(hashes)
 }
+
+/// The minimum length of a golden file for a scenario (D11): at least
+/// [`DEFAULT_DAYS`], and past the last logged command, so every command is
+/// pinned. `pax_cli record` refuses to write less; `pax_cli verify` rejects less.
+pub fn min_days(log: &crate::CommandLog) -> u64 {
+    log.last_day().map_or(DEFAULT_DAYS, |last| DEFAULT_DAYS.max(last + 1))
+}
+
+/// Length of an existing golden file: `Ok(None)` if there is none yet; any
+/// other read or parse problem is an error, never a silent default.
+pub fn existing_len(path: &Path) -> Result<Option<u64>, String> {
+    if !path.exists() {
+        return Ok(None);
+    }
+    read(path).map(|h| Some(h.len() as u64))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn min_days_covers_the_command_log() {
+        assert_eq!(min_days(&crate::CommandLog::default()), DEFAULT_DAYS);
+        let world =
+            crate::load_scenario(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two_states"))
+                .expect("two_states loads");
+        assert_eq!(min_days(&world.commands), 721, "two_states' last command is on day 720");
+    }
+}

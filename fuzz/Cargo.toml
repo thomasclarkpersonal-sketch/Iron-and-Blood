@@ -1,0 +1,26 @@
+# Coverage-guided fuzzing of the wire format (M3-10). Needs nightly and cargo-fuzz:
+#   cargo +nightly fuzz run client_frames
+# Kept out of the main workspace (its own [workspace] below), so the pinned stable
+# toolchain and `cargo test --all` never build it.
+[package]
+name = "pax_fuzz"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+pax_protocol = { path = "../crates/pax_protocol" }
+pax_server = { path = "../crates/pax_server", features = ["fuzzing"] }
+
+[[bin]]
+name = "client_frames"
+path = "fuzz_targets/client_frames.rs"
+test = false
+doc = false
+bench = false
+
+[workspace]

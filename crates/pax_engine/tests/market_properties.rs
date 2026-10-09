@@ -93,12 +93,14 @@ fn life_needs_summary_matches_the_market_snapshot() {
     for seed in SEEDS.take(40) {
         let mut world = random_world(seed);
         for day in 0..DAYS {
-            // Sizes as the market sees them (demographics may change them after).
+            // Month-end systems (mobility, migration, demographics, compaction)
+            // rewrite rows after the market, so the market-time values are not
+            // observable from outside on those days. Check every other day.
+            let month_end = pax_engine::systems::demographics::is_month_end(&world);
+            // Sizes as the market sees them.
             let sizes = world.pops.size.clone();
             let report = step(&mut world);
-            if report.moved > 0 || report.migrated > 0 {
-                // Month-end mobility (D18, D20) rewrote rows after the market; the
-                // market-time values are no longer observable from outside.
+            if month_end {
                 continue;
             }
             let (mut people, mut deprived, mut weighted) = (0u64, 0u64, 0i128);
@@ -113,6 +115,19 @@ fn life_needs_summary_matches_the_market_snapshot() {
             }
             let s = report.life_needs;
             assert_eq!((s.people, s.deprived, s.weighted_raw), (people, deprived, weighted), "seed {seed} day {day}");
+            // Non-month-end day: militancy didn't change, so the end-of-day summary
+            // equals the column.
+            let mil: i128 = sizes
+                .iter()
+                .zip(&world.pops.militancy)
+                .filter(|(n, _)| **n > 0)
+                .map(|(&n, m)| n as i128 * m.raw() as i128)
+                .sum();
+            assert_eq!(
+                (report.militancy.people, report.militancy.weighted_raw),
+                (people, mil),
+                "seed {seed} day {day}"
+            );
         }
     }
 }

@@ -35,17 +35,32 @@ pub fn allocate_raw(total: i64, weights: &[i64]) -> Option<Vec<i64>> {
     if weight_sum == 0 {
         return if total == 0 { Some(vec![0; weights.len()]) } else { None };
     }
-    let total = total as i128;
     let mut shares = Vec::with_capacity(weights.len());
     let mut remainders = Vec::with_capacity(weights.len());
     let mut assigned: i128 = 0;
-    for (i, &w) in weights.iter().enumerate() {
-        let product = total * w as i128;
-        let share = product / weight_sum;
-        assigned += share;
-        shares.push(share as i64);
-        remainders.push((product % weight_sum, i));
+    // Fast path (M4-11): when every `total × w` and the weight sum fit i64, 64-bit
+    // division gives exactly the i128 shares and remainders, without i128 division's
+    // library call. Wages, dividends and transfers split over many rows here.
+    let max_weight = weights.iter().copied().max().unwrap_or(0);
+    if let (Ok(sum), Some(_)) = (i64::try_from(weight_sum), total.checked_mul(max_weight)) {
+        for (i, &w) in weights.iter().enumerate() {
+            let product = total * w;
+            let share = product / sum;
+            assigned += share as i128;
+            shares.push(share);
+            remainders.push(((product % sum) as i128, i));
+        }
+    } else {
+        let total = total as i128;
+        for (i, &w) in weights.iter().enumerate() {
+            let product = total * w as i128;
+            let share = product / weight_sum;
+            assigned += share;
+            shares.push(share as i64);
+            remainders.push((product % weight_sum, i));
+        }
     }
+    let total = total as i128;
     let leftover = (total - assigned) as usize;
     if leftover > 0 {
         // Largest remainder first; equal remainders go to the lower index.
@@ -125,6 +140,44 @@ mod tests {
             let total = (next() % 100_000) as i64;
             assert_eq!(allocate_raw(total, &weights).unwrap(), allocate_by_sorting(total, &weights));
         }
+    }
+
+    /// M4-11: both of `allocate_raw`'s paths (i64 when every `total × w` fits, i128
+    /// otherwise) give exactly the i128 reference's shares, with totals and weights
+    /// that land on both sides of the i64 boundary.
+    #[test]
+    fn both_paths_match_the_i128_reference() {
+        let mut s: u64 = 0x9E37_79B9_7F4A_7C15;
+        let mut next = || {
+            s ^= s << 13;
+            s ^= s >> 7;
+            s ^= s << 17;
+            s
+        };
+        let (mut fast, mut wide) = (0, 0);
+        for _ in 0..3_000 {
+            let n = (next() % 50 + 1) as usize;
+            // Magnitudes from tiny to near i64::MAX for both total and weights.
+            let magnitude = |v: u64, bits: u64| (v >> 1) as i64 >> (62 - bits % 62);
+            let weights: Vec<i64> = (0..n).map(|_| magnitude(next(), next())).collect();
+            let total = magnitude(next(), next());
+            if weights.iter().all(|&w| w == 0) {
+                continue;
+            }
+            let max = weights.iter().copied().max().unwrap_or(0);
+            let sum: i128 = weights.iter().map(|&w| w as i128).sum();
+            if total.checked_mul(max).is_some() && i64::try_from(sum).is_ok() {
+                fast += 1;
+            } else {
+                wide += 1;
+            }
+            assert_eq!(
+                allocate_raw(total, &weights).unwrap(),
+                allocate_by_sorting(total, &weights),
+                "{total} {weights:?}"
+            );
+        }
+        assert!(fast > 200 && wide > 200, "both paths exercised: {fast} fast, {wide} wide");
     }
 
     #[test]

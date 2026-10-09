@@ -1,0 +1,8 @@
+# Keep the build context small: build output, history, the client and run notes
+# never go into the image (M4-8).
+target/
+fuzz/target/
+.git/
+client/
+out/
+docs/

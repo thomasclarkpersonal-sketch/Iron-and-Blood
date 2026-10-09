@@ -1,0 +1,20 @@
+[package]
+name = "pax_map"
+description = "Province map files (M3-7): one reader for the server's loader and the client's renderer. No engine, no wire types."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# Both sides link it: pax_data (engine side) validates a scenario's map with it, and
+# pax_godot (wire side) draws the map with it. So it must not carry either side's
+# types (AGENTS.md section 2); CI checks it doesn't depend on pax_engine or pax_protocol.
+[dependencies]
+pax_content.workspace = true
+png = "0.18"
+serde.workspace = true
+toml.workspace = true
+
+[lints]
+workspace = true

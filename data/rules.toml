@@ -25,6 +25,8 @@ growth_rate = 0.0005          # ~0.6% a year
 starvation_rate = 0.05
 mobility_rate = 0.1             # share of a pool's unemployed who move to vacancies each month
 migration_rate = 0.05            # share of a province's surplus workers who migrate within their market each month
+occupational_migration_rate = 0.05   # D25: share of a pool's surplus workers who move to another profession's vacancies in another province of their market each month
+births_need_employment = true        # D26, a band-aid until dependents: a worker POP's births scale with its pool's employed share
 
 [politics]                  # D19, monthly militancy dynamics
 militancy_rise = 0.05       # per month at zero life-needs satisfaction
