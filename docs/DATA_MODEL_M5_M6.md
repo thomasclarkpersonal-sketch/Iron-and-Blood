@@ -1,9 +1,9 @@
 # Data Model for Milestones 5 and 6
 
 > [!NOTE]
-> **Status: proposed, for review with the [Milestone 5](MILESTONE_5.md) and [Milestone 6](MILESTONE_6.md) drafts** and their proposed decisions (D17, D27–D32). Nothing here is binding. Once accepted, each table moves into [BACKEND_SCHEMA.md](BACKEND_SCHEMA.md) and each rule into the decision it amends, and this document is deleted.
+> **Status: proposed, for review with the Milestone 5 and Milestone 6 drafts** (`docs/MILESTONE_5.md`, `docs/MILESTONE_6.md`, not yet on `main`) and the decisions they propose, which they number 17 and 27 to 32. This document calls those **P17** and **P27–P32** until they are entries in DECISIONS.md. Nothing here is binding. Once accepted, each table moves into [BACKEND_SCHEMA.md](BACKEND_SCHEMA.md) and each rule into the decision it amends, and this document is deleted.
 
-The milestone drafts describe their new tables in prose. Drawing them as entity–relationship diagrams shows nine defects: storage that grows as the matrix D17 avoids, references to unstable POP rows, money holders outside the conservation check, and a revolt rule that would make every later save refuse to load. This document gives the corrected model, the tick order and politics loop as connected diagrams, and the amendments each proposed decision needs.
+The milestone drafts describe their new tables in prose. Drawing them as entity–relationship diagrams shows nine defects: storage that grows as the matrix P17 avoids, references to unstable POP rows, money holders outside the conservation check, and a revolt rule that would make every later save refuse to load. This document gives the corrected model, the tick order and politics loop as connected diagrams, and the amendments each proposed decision needs.
 
 ## How to read the diagrams
 
@@ -22,7 +22,7 @@ Each table is one of four kinds, which decide whether it is hashed and saved:
 
 These come from the defects the drafts' prose hides. Each is a candidate for the decision that introduces the table.
 
-1. **Per-good columns only on tables bounded by the world's size.** Tables that grow with routes or projects keep goods in a sparse child table (`CARGO`, `PROJECT_NEED`), sorted by key so iteration order is deterministic (D3). Dense `transit`, `stock` and `cost_basis` columns on merchants would cost 60,000 routes × 50 goods × 3 × 8 bytes = **72 MB** at 3,000 markets with 20 routes each. That is the dense matrix D17 sets out to avoid, hashed every day.
+1. **Per-good columns only on tables bounded by the world's size.** Tables that grow with routes or projects keep goods in a sparse child table (`CARGO`, `PROJECT_NEED`), sorted by key so iteration order is deterministic (D3). Dense `transit`, `stock` and `cost_basis` columns on merchants would cost 60,000 routes × 50 goods × 3 × 8 bytes = **72 MB** at 3,000 markets with 20 routes each. That is the dense matrix P17 sets out to avoid, hashed every day.
 2. **Nothing references a POP row.** Compaction reorders and merges POP rows every month (D7). A POP's financial position is a POP column that follows D7's split, merge and heir rules. Every claim points at a stable table: banks, nations, producers.
 3. **Producer rows are never removed or reordered**, because loans and projects reference them. A closed producer has capacity 0.
 4. **No new holder of outside money unless it must hold cash.** Every holder is in `World::total_money` and the state hash (D5). M5 adds `MERCHANT.cash` and M6 adds `BANK.reserves`. Construction projects and founding hold none: no "investment pool" entity.
@@ -280,12 +280,12 @@ erDiagram
 ```
 
 What changes from the draft, and why:
-- **A POP's size is derived: `men + women + dependents`.** D29 adds the three columns without saying how they relate to `size`. Storing `size` too would be derived state (D7). Each decision that reads people must say which columns it reads:
+- **A POP's size is derived: `men + women + dependents`.** P29 adds the three columns without saying how they relate to `size`. Storing `size` too would be derived state (D7). Each decision that reads people must say which columns it reads:
 
   | Reader | Reads |
   |---|---|
   | Demand (D2), life needs, D7 cash splits | everyone: `men + women + dependents` |
-  | Labour pools (D18, D20, D25), strikes (D28) | the *effective* workforce: `men`, plus `women` and `dependents` as the nation's laws allow; derived, never stored |
+  | Labour pools (D18, D20, D25), strikes (P28) | the *effective* workforce: `men`, plus `women` and `dependents` as the nation's laws allow; derived, never stored |
   | Births | add to `dependents`. Their cost in goods replaces D26's band-aid |
   | Ageing (new) | moves `⌊dependents × ageing_rate⌋` into `men` and `women` with largest remainder |
   | Mobility, migration, promotion | move a household: one count split across the three columns with largest remainder, so each column stays exact |
@@ -293,11 +293,11 @@ What changes from the draft, and why:
 - **Loans and bonds are two tables, not one polymorphic `CLAIM`.** A `(kind, id)` reference can't be checked by `World::check_tables` the way a typed foreign key can, and the two have different rules: default, coupons, deficit financing.
 - **One bank per market.** Its `reserves` are outside money. Inside money is `POP.deposits` and `PRODUCER.deposits` (bank liabilities) against `LOAN` and `BOND` (bank assets). D5's invariant becomes checkable per bank: `reserves + Σ loans + Σ bonds − Σ deposits = equity`. A negative result means the bank fails.
 - **Cash stays the only means of payment in the tick** *(recommended; this is the central open decision)*. A loan credits the borrower's deposits, which is endogenous money (D5). Spending them converts deposits to cash from the bank's reserves, so a reserve ratio in `rules.toml` limits lending, and the market's hot loop keeps a single kind of money. The draft doesn't say which money buys goods.
-- **A credit limit comes from cash flow, not net worth.** D30's "positive net worth" needs producer assets to be valued, and nothing values capacity. A limit of `k × value_added_avg` is derived from existing state.
+- **A credit limit comes from cash flow, not net worth.** P30's "positive net worth" needs producer assets to be valued, and nothing values capacity. A limit of `k × value_added_avg` is derived from existing state.
 - **Interest groups draw on professions through weights** (`PROFESSION_INTEREST`, many-to-many), as POP_SYSTEM describes, and clout is derived each month. The only new state is each nation's `approval` of each group.
   - The draft's one-to-one table maps professions that don't exist: clergy, clerks, merchants. Its sixth group, Armed Forces, has no members until soldiers exist (M7). Adding professions is data, but it belongs in the task list.
-- **Laws are definitions; a nation's choice is a column.** Reforms set it with `SetLaw { nation, group, law }`, checked in `World::validate` (D21). Each law's parameters feed the rules other decisions read: the wage floor (D6), tax brackets (D15), labour participation (D29). Those effective rules are derived per nation, never copied.
-- **Revolts take markets, and market ownership becomes state** (rule 5). D32 writes `market_nation = None` for a province, but `market_nation` is per market. The snapshot loader refuses a save whose geography differs from the scenario's (`pax_data::snapshot`), so as drafted, **every save after a revolt would refuse to load.**
+- **Laws are definitions; a nation's choice is a column.** Reforms set it with `SetLaw { nation, group, law }`, checked in `World::validate` (D21). Each law's parameters feed the rules other decisions read: the wage floor (D6), tax brackets (D15), labour participation (P29). Those effective rules are derived per nation, never copied.
+- **Revolts take markets, and market ownership becomes state** (rule 5). P32 writes `market_nation = None` for a province, but `market_nation` is per market. The snapshot loader refuses a save whose geography differs from the scenario's (`pax_data::snapshot`), so as drafted, **every save after a revolt would refuse to load.**
   - `MARKET.owner` becomes hashed, saved state. The layout cache already fingerprints it (D7).
   - `REVOLT` remembers the nation to restore and the law that ends the revolt; the draft has nowhere to keep either.
   - Draw the RNG per market: `rng::Stream::REBELLION` keyed by `(seed, stream, day, market)`.
@@ -357,25 +357,25 @@ A proposed decision that changes an accepted one must amend it explicitly in the
 
 | Proposed | Amends | What |
 |---|---|---|
-| D17 trade | D4 | Arrival step and merchant orders (tick order above) |
+| P17 trade | D4 | Arrival step and merchant orders (tick order above) |
 | | D14 rule 5 | Sparse routes from links, computed at load, instead of a dense matrix |
 | | D5, D6 | `MERCHANT.cash` in `total_money`; merchant dividends follow `owner_nation` or the owner profession |
 | | D21, D24 | `SetTariff` and its validation; no conflict rule needed, since it touches only one's own imports |
-| D27 investment | D6 | Dividends only above the project reserve; `owner_nation` for state-founded producers; founding transfers from owner POPs |
+| P27 investment | D6 | Dividends only above the project reserve; `owner_nation` for state-founded producers; founding transfers from owner POPs |
 | | D4 | The month-end investment step |
 | | D21, D24 | `FoundProducer`: only in the commanding nation's own markets, paid from its treasury |
-| D28 unrest | D6 | Striking workers' pay: the pool's wages split by working members, or strikes cost strikers nothing |
+| P28 unrest | D6 | Striking workers' pay: the pool's wages split by working members, or strikes cost strikers nothing |
 | | D19 | Whether a riot's transfer gives "militancy relief" directly. Today it would only act through life needs |
 | | D4 | Riots after politics at month end |
-| D29 workforce | D7, D2, D18, D20, D25 | The reader table above; split and merge across three columns |
+| P29 workforce | D7, D2, D18, D20, D25 | The reader table above; split and merge across three columns |
 | | D26 | Superseded by births into `dependents` |
-| D30 banking | D5 | Means of payment, `BANK.reserves` in `total_money`, the per-bank invariant |
+| P30 banking | D5 | Means of payment, `BANK.reserves` in `total_money`, the per-bank invariant |
 | | D7 | `deposits` follow `cash`'s split, merge and heir rules |
 | | D6 | Firm failure: loans first, then owners |
 | | D15, D21 | Coupons, deficit financing, `IssueBonds` |
-| D31 politics | D6, D15, D19 | Wage-floor and tax-bracket laws; consciousness beside militancy; approval's effect on militancy |
+| P31 politics | D6, D15, D19 | Wage-floor and tax-bracket laws; consciousness beside militancy; approval's effect on militancy |
 | | D21 | `SetLaw`, with the parliamentary check in `World::validate` |
-| D32 revolutions | D15, D23 | Market ownership becomes state, hashed and saved; the snapshot's geography check no longer covers it |
+| P32 revolutions | D15, D23 | Market ownership becomes state, hashed and saved; the snapshot's geography check no longer covers it |
 | | D3 | The rebellion stream keyed by market |
 
 ## Open questions for the owner
