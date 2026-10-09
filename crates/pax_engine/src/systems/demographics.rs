@@ -5,13 +5,22 @@
 //! * `s = 1`: `+growth_rate`
 //! * `s < 1`: `−starvation_rate × (1 − s)`
 //!
-//! `ΔN = ⌊N × rate⌋`. A POP's cash is total holdings, so it stays with the
+//! `ΔN = ⌊N × rate⌋`.
+//!
+//! **Births band-aid (D26):** with `births_need_employment`, a worker POP's growth
+//! is scaled by its pool's employed share, `min(1, jobs ÷ workforce)` for its
+//! `(province, profession)`: people without an income don't raise children. Owner
+//! professions, and starvation, are unchanged. It stands in for a dependents model
+//! (POP_SYSTEM.md, "Future: dependents"), and goes when that arrives.
+//!
+//! A POP's cash is total holdings, so it stays with the
 //! survivors. Each month end, the cash of every empty row (a POP that died
 //! out, this month or earlier) passes to the largest living POP in the same
 //! province (lowest row on ties). Money is never destroyed. If nobody lives in
 //! the province, the empty row keeps the cash until someone does.
 
 use crate::fixed::Fixed;
+use crate::systems::mobility::Pools;
 use crate::world::World;
 
 /// True on the last day of each month, when the month-end systems and POP
@@ -28,9 +37,38 @@ pub fn days_until_month_end(world: &World) -> u64 {
     days - 1 - world.day % days
 }
 
+/// With the births band-aid on (D26), each POP row's birth scale: its pool's
+/// employed share `min(1, jobs ÷ workforce)` for a worker profession, 1 for an
+/// owner profession. `None` when the band-aid is off (D7's rule as written). Counted
+/// from the tables as they stand at month end, after mobility.
+fn births_scale(world: &World) -> Option<Vec<Fixed>> {
+    if !world.defs.rules.demographics.births_need_employment {
+        return None;
+    }
+    let profs = world.defs.professions.len();
+    let is_worker = world.defs.worker_professions();
+    let Pools { workforce, jobs } = Pools::count(world);
+    let share: Vec<Fixed> = workforce
+        .iter()
+        .zip(&jobs)
+        .enumerate()
+        .map(|(k, (&w, &j))| {
+            if !is_worker.contains(k % profs) || w <= j {
+                Fixed::ONE
+            } else {
+                // j < w, so the share is below 1; `div` rounds down (fewer births).
+                Fixed::from_int(j as i64).div(Fixed::from_int(w as i64))
+            }
+        })
+        .collect();
+    let pops = &world.pops;
+    Some((0..pops.len()).map(|i| share[pops.province[i] as usize * profs + pops.profession[i] as usize]).collect())
+}
+
 pub fn update_population(world: &mut World) {
     let rules = world.defs.rules.demographics.clone();
     let province_count = world.geography.province_count();
+    let employed_share = births_scale(world);
     let pops = &mut world.pops;
     for i in 0..pops.len() {
         let size = pops.size[i];
@@ -38,7 +76,11 @@ pub fn update_population(world: &mut World) {
             continue;
         }
         let s = pops.life_needs[i];
-        let rate = if s >= Fixed::ONE { rules.growth_rate } else { -rules.starvation_rate.mul(Fixed::ONE - s) };
+        let rate = if s >= Fixed::ONE {
+            employed_share.as_ref().map_or(rules.growth_rate, |share| rules.growth_rate.mul(share[i]))
+        } else {
+            -rules.starvation_rate.mul(Fixed::ONE - s)
+        };
         let delta = Fixed::from_int(size as i64).mul(rate).floor_int();
         let new_size = (size as i64 + delta).clamp(0, u32::MAX as i64) as u32;
         pops.size[i] = new_size;

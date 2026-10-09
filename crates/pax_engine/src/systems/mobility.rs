@@ -140,16 +140,7 @@ pub fn migrate_within_markets(world: &mut World, layout: &PopLayout) -> u64 {
     }
     let profs = world.defs.professions.len();
     let provinces = world.geography.province_count();
-    let mut workforce = vec![0u64; provinces * profs];
-    for i in 0..world.pops.len() {
-        workforce[world.pops.province[i] as usize * profs + world.pops.profession[i] as usize] +=
-            world.pops.size[i] as u64;
-    }
-    let mut jobs = vec![0u64; provinces * profs];
-    for i in 0..world.producers.len() {
-        let worker = world.defs.producer_types[world.producers.kind[i] as usize].worker;
-        jobs[world.producers.province[i] as usize * profs + worker] += world.producers.capacity[i] as u64;
-    }
+    let Pools { workforce, jobs } = Pools::count(world);
     let is_worker = world.defs.worker_professions();
     let mut moves = Vec::new();
     for market in 0..world.geography.market_count() {
@@ -178,6 +169,94 @@ pub fn migrate_within_markets(world: &mut World, layout: &PopLayout) -> u64 {
                     }
                     let n = movers.min(*open);
                     moves.push(Move { from: (source, c), to: (*dest, c), n });
+                    *open -= n;
+                    movers -= n;
+                }
+            }
+        }
+    }
+    execute_moves(world, layout, &moves)
+}
+
+/// Workforce and jobs of every `(province, profession)` pool, as the table stands
+/// now, indexed `province × professions + profession`. Not state (D7): counted from
+/// the POP and producer tables whenever a month-end flow needs them after earlier
+/// flows have moved people (D20, D25, and the births rule in demographics).
+pub(crate) struct Pools {
+    /// People in each pool (`Σ size`).
+    pub workforce: Vec<u64>,
+    /// Total capacity of the producers hiring from each pool.
+    pub jobs: Vec<u64>,
+}
+
+impl Pools {
+    pub(crate) fn count(world: &World) -> Pools {
+        let profs = world.defs.professions.len();
+        let provinces = world.geography.province_count();
+        let mut workforce = vec![0u64; provinces * profs];
+        for i in 0..world.pops.len() {
+            workforce[world.pops.province[i] as usize * profs + world.pops.profession[i] as usize] +=
+                world.pops.size[i] as u64;
+        }
+        let mut jobs = vec![0u64; provinces * profs];
+        for i in 0..world.producers.len() {
+            let worker = world.defs.producer_types[world.producers.kind[i] as usize].worker;
+            jobs[world.producers.province[i] as usize * profs + worker] += world.producers.capacity[i] as u64;
+        }
+        Pools { workforce, jobs }
+    }
+}
+
+/// Month-end occupational migration within a market (D25).
+///
+/// D18 changes profession inside a province, and D20 changes province inside a
+/// profession, so neither can move an unemployed farmer of one province into a
+/// mine of another. This flow does exactly that, after both have run: for each
+/// market, every worker pool with a surplus (workforce over jobs) sends
+/// `⌊surplus × occupational_migration_rate⌋` people to vacancies of **another
+/// profession in another province** of the same market. Destinations are taken by
+/// vacancy (largest first), then province, then profession; none beyond its
+/// vacancies. Movers take their cash under the D7 split rules, through the same
+/// `execute_moves` as D18 and D20. People and money are conserved. `layout` must be
+/// current (the tick passes a fresh one). Returns the number of people moved.
+pub fn retrain_within_markets(world: &mut World, layout: &PopLayout) -> u64 {
+    let rate = world.defs.rules.demographics.occupational_migration_rate;
+    if !rate.is_positive() {
+        return 0;
+    }
+    let profs = world.defs.professions.len();
+    let provinces = world.geography.province_count();
+    let Pools { workforce, jobs } = Pools::count(world);
+    let is_worker = world.defs.worker_professions();
+    let key = |p: u32, c: usize| p as usize * profs + c;
+    let mut moves = Vec::new();
+    for market in 0..world.geography.market_count() {
+        let members: Vec<u32> =
+            (0..provinces as u32).filter(|&p| world.geography.province_market[p as usize] as usize == market).collect();
+        if members.len() < 2 {
+            continue;
+        }
+        // Every vacancy in the market, shared by all of its sources.
+        let mut vacancies: Vec<(u32, usize, u64)> = members
+            .iter()
+            .flat_map(|&p| (0..profs).filter(|&c| is_worker.contains(c)).map(move |c| (p, c)))
+            .filter(|&(p, c)| jobs[key(p, c)] > workforce[key(p, c)])
+            .map(|(p, c)| (p, c, jobs[key(p, c)] - workforce[key(p, c)]))
+            .collect();
+        vacancies.sort_by(|a, b| b.2.cmp(&a.2).then(a.0.cmp(&b.0)).then(a.1.cmp(&b.1)));
+        for &source in &members {
+            for c in (0..profs).filter(|&c| is_worker.contains(c)) {
+                let surplus = workforce[key(source, c)].saturating_sub(jobs[key(source, c)]);
+                let mut movers = Fixed::from_int(surplus as i64).mul(rate).floor_int() as u64;
+                for (dest, dest_c, open) in vacancies.iter_mut() {
+                    if movers == 0 {
+                        break;
+                    }
+                    if *dest == source || *dest_c == c || *open == 0 {
+                        continue;
+                    }
+                    let n = movers.min(*open);
+                    moves.push(Move { from: (source, c), to: (*dest, *dest_c), n });
                     *open -= n;
                     movers -= n;
                 }

@@ -35,6 +35,8 @@ To change a decision, edit its entry in the same pull request as the code. Say w
 | [D22](#d22-wire-protocol-and-client-sessions) | Wire protocol and sessions | Accepted (M3) |
 | [D23](#d23-server-loop-pacing-flow-control-and-saves) | Server loop, pacing, saves | Accepted (M3) |
 | [D24](#d24-multiplayer-authority) | Multiplayer authority | Accepted (M4-0) |
+| [D25](#d25-occupational-migration-within-a-market) | Occupational migration within a market | Accepted (M2 fix) |
+| [D26](#d26-births-follow-employment-band-aid) | Births follow employment (band-aid) | Accepted, temporary |
 
 ---
 
@@ -110,7 +112,7 @@ To change a decision, edit its entry in the same pull request as the code. Say w
 | 3 | Market: orders (households, producers' inputs, governments D16) → price discovery → settlement | daily |
 | 4 | Firms: wages, dividends (income tax withheld, D15) | daily |
 | 4b | Government: transfers from treasuries to POPs (D15) | daily |
-| 5 | Labour mobility within a province (D18), then migration within a market (D20); *(M2)* promotion | month end |
+| 5 | Labour mobility within a province (D18), then migration within a market (D20), then occupational migration within a market (D25); *(M2)* promotion | month end |
 | 6 | Politics: militancy (D19); *(M2)* consciousness | month end |
 | 7 | Demographics, then POP row compaction (D7) | month end |
 
@@ -331,6 +333,7 @@ The state → national → sphere → global roll-up in the old ECONOMY_SYSTEM w
   - Population and money are conserved, and tested.
 - **Tuning:** `demographics.mobility_rate` in `rules.toml`. `mini_valley`'s frozen definitions use 0, which keeps it a pure regression fixture.
 - **What it does not fix:** unemployment caused by *total* job capacity lagging population. That needs investment (new and expanding producers), a later M2 item.
+  - **Measured (2026-10-09):** in `two_states` the 20-year unemployment drift (9.6%) was *not* this. Total workforce exceeded total jobs by only 4.5k at year 20, while 20k jobs stood empty: the unemployed and the vacancies were in different professions *and* provinces, which neither D18 nor D20 can bridge. D25 does.
 - **Later:** migration between provinces (D20 covers provinces of the same market), promotion to higher strata (literacy, D7), culture and religion.
 
 ## D19. Militancy
@@ -464,4 +467,26 @@ The state → national → sphere → global roll-up in the old ECONOMY_SYSTEM w
   - TLS whenever the server is not bound to localhost (rustls, M4-6). A player-hosted server makes a self-signed certificate at start (`--tls-self-signed`); a dedicated one loads PEM files (`--tls-cert`, `--tls-key`). Clients pin the certificate's SHA-256, which the server prints and the host shares. No certificate authority is involved, and clients still check the handshake's signatures against the pinned certificate;
   - an optional server password, sent in `Hello` (`--password-file`; M4-6). A wrong or missing one is `Rejected`, and passwords are compared in constant time. On a dedicated server the admin also proves who they are with an admin password (`--admin-password-file`, required with `--admin`): a name alone proves nothing;
   - a per-session command rate limit (default 20 per second, `--commands-per-second`): more get `RateLimited` (M4-6).
+
+## D25. Occupational migration within a market
+
+**Accepted (2026-10-09, fixing M2's "GDP bug").** The third month-end labour flow, after D18 and D20.
+
+- **Problem.** D18 changes profession inside a province, and D20 changes province inside a profession. A worker whose own province has no vacancy in any profession, and whose profession has no vacancy in any province, can never reach a vacancy of another profession in another province. In `two_states` farming and mining are in different provinces, so after the miners' year-1 famine about 20k unemployed farmers and craftsmen stood beside about 20k empty mine and labour jobs for good. Employment fell about 0.5% a year, and real GDP about 9% over 20 years.
+- **When:** at month end, right after D20, on the workforce as it stands then (a fresh layout).
+- **Rule, per market:** every worker pool `(province, profession)` whose workforce exceeds its jobs sends `⌊surplus × occupational_migration_rate⌋` people to vacancies (`jobs − workforce > 0`) of **another profession in another province** of the same market. Destinations are taken by vacancy (largest first), then province, then profession; none beyond its vacancies. Moves within a province (D18's) and within a profession (D20's) are left to those flows.
+- **Accounting (D7):** movers take the destination's profession and their share of cash, under D18's split and merge rules (`mobility::execute_moves`). People and money are conserved, and tested.
+- **Never across markets** (as D20).
+- **Tuning:** `demographics.occupational_migration_rate` in `rules.toml` (0.05 in `data/`, 0 in `mini_valley`'s frozen definitions, so that fixture is unchanged).
+- **Later:** retraining could take time or cost (literacy, D7's promotion), and moves across markets need friction (D14).
+
+## D26. Births follow employment (band-aid)
+
+**Accepted as a temporary band-aid (2026-10-09).** It goes when POPs model dependents ([POP_SYSTEM.md](POP_SYSTEM.md), "Future: dependents and births").
+
+- **Problem.** A POP row pools its members' income, so a farmer row 11% unemployed is still fully fed (food is cheap) and grows at the full rate, into more unemployment. The owner's intent is that people can't raise children without the money to do so; the model has no dependents to express that yet.
+- **Rule:** with `demographics.births_need_employment`, a **worker** POP's monthly growth (when its life needs are met) is scaled by its pool's employed share, `min(1, jobs ÷ workforce)` for its `(province, profession)`, counted at month end after D18, D20 and D25. `ΔN = ⌊N × growth_rate × share⌋`; `Fixed::div` and `mul` round down, so never more births than the share allows.
+- **Unchanged:** owner professions grow as before; starvation (`−starvation_rate × (1 − life_needs)`) is unchanged.
+- **Tuning:** `true` in `data/`, `false` in `mini_valley`'s frozen definitions.
+- **Why a band-aid:** employment is a proxy for income. Births should instead cost the household goods it can afford, and starvation should kill dependents before workers. That model needs a dependents column and a decision of its own.
 

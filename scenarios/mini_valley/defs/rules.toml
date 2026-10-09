@@ -25,6 +25,8 @@ growth_rate = 0.001
 starvation_rate = 0.05
 mobility_rate = 0             # frozen fixture: no mobility
 migration_rate = 0            # frozen fixture: no migration
+occupational_migration_rate = 0   # frozen fixture: no occupational migration (D25)
+births_need_employment = false    # frozen fixture: births as in D7 (D26)
 
 [politics]                  # D19, monthly militancy dynamics
 militancy_rise = 0.05       # per month at zero life-needs satisfaction
