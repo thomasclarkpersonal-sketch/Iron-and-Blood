@@ -508,6 +508,17 @@ impl SessionTable {
             .filter_map(|(&id, s)| s.throttle.ready_at().map(|at| (id, at)))
     }
 
+    /// The seated sessions whose `Subscribe` answer was deferred by the temporary
+    /// map-request limit (`throttle::SUBSCRIBE_ANSWERS_PER_SECOND`), with when it
+    /// may go out. `Sim::next_flush` and `Sim::flush` use it beside
+    /// [`Self::held_updates`].
+    pub(crate) fn pending_answers(&self) -> impl Iterator<Item = (u64, std::time::Instant)> + '_ {
+        self.rows
+            .iter()
+            .filter(|(_, s)| s.seat.is_some())
+            .filter_map(|(&id, s)| s.throttle.answer_due_at().map(|at| (id, at)))
+    }
+
     /// Every connection, welcomed or not, in session order.
     pub(crate) fn all(&self) -> impl Iterator<Item = &Session> {
         self.rows.values()

@@ -323,17 +323,26 @@ impl Sim {
     /// current day, so a newly opened panel fills at once, even when paused (D22).
     /// The refresh bypasses the flow-control window: the client asked for it.
     fn subscribe(&mut self, session: u64, requested: Subscription) {
+        self.subscribe_at(session, requested, Instant::now());
+    }
+
+    /// [`Self::subscribe`] at `now`, the time the limit sees (tests pass their own).
+    /// The subscription changes at once; the answer, a full update with the map,
+    /// goes out now, or, within the temporary map-request limit's gap
+    /// (`throttle::SUBSCRIBE_ANSWERS_PER_SECOND`), later through [`Self::flush`],
+    /// for whatever the subscription is by then.
+    fn subscribe_at(&mut self, session: u64, requested: Subscription, now: Instant) {
         let subscription = match requested.checked(self.game.world()) {
             Ok(s) => s,
             Err(reason) => return self.goodbye(session, &reason),
         };
         let Some(s) = self.sessions.get_mut(session) else { return };
         s.subscription = subscription;
-        // The answer always carries the map. It counts as an update for a remote
-        // session's throttle, so the next day keeps its distance (D24, M4-7).
-        s.throttle.resubscribed(Instant::now());
-        let answer = view::day_update(&self.game.views(), &subscription, self.clock.speed(), 0, MapPart::Include);
-        s.conn.send(Outbound::Frame(answer));
+        if s.throttle.admit_answer(now) {
+            answer_subscription(s, &self.game.views(), self.clock.speed(), now);
+        } else {
+            debug!(session, "Subscribe answer deferred (the temporary map-request limit)");
+        }
     }
 
     fn command_result(&self, session: u64, client_seq: u32, error: wire::CommandError) {
@@ -521,18 +530,29 @@ impl Sim {
     /// When the next update a throttle held may go out (D24, M4-7); `None` if none
     /// is owed.
     pub(crate) fn next_flush(&self) -> Option<Instant> {
-        self.sessions.held_updates().map(|(_, at)| at).min()
+        self.sessions.held_updates().chain(self.sessions.pending_answers()).map(|(_, at)| at).min()
     }
 
     /// Sends every held update whose time has come: the latest day, which a pause or a
     /// slow speed would otherwise keep from a remote session.
     pub(crate) fn flush(&mut self, now: Instant) {
-        let due: Vec<u64> = self.sessions.held_updates().filter(|&(_, at)| at <= now).map(|(id, _)| id).collect();
-        if due.is_empty() {
+        let due = |it: &mut dyn Iterator<Item = (u64, Instant)>| -> Vec<u64> {
+            it.filter(|&(_, at)| at <= now).map(|(id, _)| id).collect()
+        };
+        let answers = due(&mut self.sessions.pending_answers());
+        let updates = due(&mut self.sessions.held_updates());
+        if answers.is_empty() && updates.is_empty() {
             return;
         }
         let views = self.game.views();
-        for id in due {
+        // Deferred Subscribe answers first: each counts as an update, so a held day
+        // for the same session then waits its own gap.
+        for id in answers {
+            if let Some(s) = self.sessions.get_mut(id) {
+                answer_subscription(s, &views, self.clock.speed(), now);
+            }
+        }
+        for id in updates {
             if let Some(s) = self.sessions.get_mut(id) {
                 send_update(s, &views, self.clock.speed(), now);
             }
@@ -813,6 +833,15 @@ impl Sim {
             session.conn.send(Outbound::Close);
         }
     }
+}
+
+/// Answers `s`'s `Subscribe` at `now`: a full update for its current subscription,
+/// map included, outside the flow-control window (D23). It counts as an update for
+/// the session's throttle, so the next day keeps its distance (D24, M4-7), and as an
+/// answer for the temporary map-request limit.
+fn answer_subscription(s: &mut Session, views: &DayViews<'_>, speed: wire::Speed, now: Instant) {
+    s.throttle.resubscribed(now);
+    s.conn.send(Outbound::Frame(view::day_update(views, &s.subscription, speed, 0, MapPart::Include)));
 }
 
 /// Sends `s` an update for the current day and puts it in the session's window.
@@ -1604,6 +1633,62 @@ mod tests {
         sim.handle(Inbound::Request { session: 1, request: Request::Kick { player: 1 } });
         assert_eq!(rejoin(&mut sim, 6, token), [Sent::Rejected, Sent::Close], "the kick dropped the kept seat");
         assert_eq!(join(&mut sim, 7, Some(1)).1, [Sent::Welcome { player: 1 }]);
+    }
+
+    /// The temporary map-request limit (MILESTONE_4, "Open follow-ups"): a burst of
+    /// `Subscribe`s gets one answer at once and one more, for the latest
+    /// subscription, when the gap has passed; the ones in between change the
+    /// subscription without an answer of their own.
+    #[test]
+    fn a_burst_of_subscribes_is_answered_once_then_coalesced() {
+        use std::time::Duration;
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two_states");
+        let saves = test_saves_dir();
+        let mut config = crate::Config::local(&dir);
+        config.saves_dir = saves.0.clone();
+        let mut sim = Sim::new(pax_data::load_scenario(&dir).unwrap(), &config);
+        let (conn, mut rx) = ConnHandle::for_test();
+        sim.handle(Inbound::Connected { session: SESSION, conn });
+        let hello = Request::Hello {
+            major: PROTOCOL_MAJOR,
+            minor: 0,
+            name: None,
+            requested_nation: None,
+            resume_token: 0,
+            password: None,
+        };
+        sim.handle(Inbound::Request { session: SESSION, request: hello });
+        while rx.try_recv().is_ok() {}
+        let subscribe = |province| Subscription {
+            map_mode: wire::MapMode::Population,
+            map_good: 0,
+            market: None,
+            province: Some(province),
+        };
+        // The provinces of the answers that came out, each with its map.
+        let answers = |rx: &mut Receiver<Outbound>| {
+            let mut provinces = Vec::new();
+            while let Ok(Outbound::Frame(f)) = rx.try_recv() {
+                if let Some(u) = read_server_message(&f).unwrap().payload_as_day_update() {
+                    assert!(u.map().is_some(), "an answer carries the map");
+                    provinces.push(u.province().map(|p| p.province()));
+                }
+            }
+            provinces
+        };
+        let start = Instant::now();
+        for (i, province) in [0, 1, 2, 3].into_iter().enumerate() {
+            sim.subscribe_at(SESSION, subscribe(province), start + Duration::from_millis(20 * i as u64));
+        }
+        assert_eq!(answers(&mut rx), [Some(0)], "one answer at once");
+        let due = sim.next_flush().expect("the burst's answer waits");
+        assert!(due > start && due <= start + Duration::from_millis(250), "within a quarter second");
+        sim.flush(due);
+        assert_eq!(answers(&mut rx), [Some(3)], "one more, for the latest subscription");
+        assert_eq!(sim.next_flush(), None, "nothing else waits");
+        // After the gap, a Subscribe is answered at once again.
+        sim.subscribe_at(SESSION, subscribe(1), due + Duration::from_millis(300));
+        assert_eq!(answers(&mut rx), [Some(1)]);
     }
 
     /// M4-7: a remote session gets at most four updates a second, the days between
