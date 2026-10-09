@@ -64,21 +64,7 @@ cargo run --release -p pax_cli -- replay saves/<name>.toml   # replay a save; pr
 
 ## 3. One tick, in order
 
-Defined in `tick.rs` (D4):
-
-0. **Commands** (D21) are applied, in order.
-1. **Labour:** producers hire from `(province, profession)` pools.
-2. **Production:** Leontief recipes, limited by labour, inputs and an inventory target.
-3. **Market:**
-   - orders and offers form (households, producers' inputs, governments);
-   - **bounded tâtonnement** discovers prices per market, in parallel;
-   - **settlement** with pro-rata rationing.
-4. **Firms:** sticky wages, income tax withheld, dividends. **4b. Government:** transfers.
-5. **Month end only:**
-   - mobility between professions, then migration within the market;
-   - politics (militancy);
-   - demographics;
-   - compaction of the POP table.
+The order is binding (D4), and [ARCHITECTURE.md](ARCHITECTURE.md#-the-game-loop) lists it with the module for each step. Two facts to keep in mind: player commands apply before any system runs (D21), and some systems run only at month end.
 
 After every tick, `step` **asserts that total money is unchanged**. If you break conservation, the very next test that runs a tick fails.
 
@@ -179,6 +165,8 @@ To have Claude draft a feature, open an issue with the *Feature request* templat
 
 ## 8. Where the design is going
 
-[MILESTONE_2.md](MILESTONE_2.md) has M2's status, the measured state of the economy and the next tasks. DECISIONS.md D15–D21 cover what M2 has added so far.
+- **What is decided:** [DECISIONS.md](DECISIONS.md)'s index lists every decision with its status. *Proposed* entries are designs waiting for the maintainer; read the one for an area before working on it.
+- **What is being built:** the milestone documents linked from the [README](../README.md#-documentation). [MILESTONE_2.md](MILESTONE_2.md) has the measured state of the economy and the design questions still open.
+- **Where things are written down:** [docs/README.md](README.md).
 
-Open design questions are in proposal PRs: trade ([#18](https://github.com/thomasclarkpersonal-sketch/Iron-and-Blood/pull/18)), investment ([#21](https://github.com/thomasclarkpersonal-sketch/Iron-and-Blood/pull/21)) and rebellions ([#28](https://github.com/thomasclarkpersonal-sketch/Iron-and-Blood/pull/28)). Read those before working on any of these areas.
+Open design questions still on proposal PRs: trade ([#18](https://github.com/thomasclarkpersonal-sketch/Iron-and-Blood/pull/18)), investment ([#21](https://github.com/thomasclarkpersonal-sketch/Iron-and-Blood/pull/21)) and rebellions ([#28](https://github.com/thomasclarkpersonal-sketch/Iron-and-Blood/pull/28)). Read those before working on any of these areas.

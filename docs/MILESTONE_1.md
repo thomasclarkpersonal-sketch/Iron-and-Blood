@@ -2,6 +2,8 @@
 
 **Goal:** a headless, deterministic, money-conserving economy loop that a team can build on. This milestone proves the decisions in [DECISIONS.md](DECISIONS.md) in running code before any map, politics or UI work starts.
 
+**Status: closed on 2026-10-08:** its last task (#15) merged before M2's first (#17). Every acceptance criterion below is met. This document is now a record: its open notes and M2 preview were current when it closed, and the live plan is [MILESTONE_2.md](MILESTONE_2.md).
+
 ## Scope
 
 **In scope:**

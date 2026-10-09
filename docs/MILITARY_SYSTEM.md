@@ -1,6 +1,14 @@
 # Warfare & Military Supply Chains
 
-Warfare is an extension of economics and politics: a logistical effort that can bankrupt a nation or cause a demographic collapse. This is an **M2+** system. The economic accounting below follows D5 and D7 in [DECISIONS.md](DECISIONS.md).
+Warfare is an extension of economics and politics: a logistical effort that can bankrupt a nation or cause a demographic collapse. The economic accounting below follows D5 and D7 in [DECISIONS.md](DECISIONS.md).
+
+> [!NOTE]
+> **Status: vision, not designed or implemented.** Nothing here is in the engine yet; it describes intended play, and nothing in it is binding. Before any of it is built, it needs decisions (new `D#` entries) on at least:
+> - **Soldier and conscript POPs:** which professions, how mobilization splits POPs (D7), and whether conscripts come only from a working-age column ([POP_SYSTEM.md](POP_SYSTEM.md), "Workforce Composition", which needs its own decision first).
+> - **Military demand:** how upkeep replaces D16's abstract government basket.
+> - **Supply connectivity:** the precomputed structure and the discrete events that rebuild it (AGENTS.md §5).
+> - **War finance:** bonds, minting and default, which need inside money (D5) designed first.
+> - **Combat and operations:** the templates, stacks, frontlines and HQs below are ideas, not designs.
 
 ## 🪖 The Military-Industrial Complex
 

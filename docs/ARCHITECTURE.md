@@ -26,7 +26,7 @@ flowchart TD
     Server --> Engine
 ```
 
-## 🖥️ Processes and threads (M3)
+## 🖥️ Processes and threads
 
 ```mermaid
 flowchart LR

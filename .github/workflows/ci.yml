@@ -41,6 +41,8 @@ jobs:
           fi
       - name: Every crate applies the workspace lints
         run: python3 scripts/check_lints.py
+      - name: Docs match the repository (docs/README.md)
+        run: python3 scripts/check_docs.py
       - name: Crate boundaries (D10, D12, AGENTS.md section 2)
         run: |
           deps() { cargo tree -p "$1" -e normal --prefix none | tail -n +2; }

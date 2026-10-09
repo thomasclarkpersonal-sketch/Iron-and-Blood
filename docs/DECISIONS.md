@@ -7,8 +7,17 @@ Each entry has a status:
 - **Accepted (principle)**: the rules are binding, and the details are scheduled for a later milestone.
 - **Deferred**: deliberately undecided, with a deadline and the criteria for deciding.
 - **Proposed**: drafted for review; not binding until the team accepts it, which changes the status.
+- **Superseded by Dn**: replaced. The entry keeps its number and a one-line pointer to its successor, so old citations still resolve; its text moves to git history.
 
 To change a decision, edit its entry in the same pull request as the code. Say what changed and why, and update every document that cites it.
+
+**What an entry holds.** An entry is a contract: the critic treats any code that contradicts it as CRITICAL. So it holds only what should be that hard to change:
+- the **problem**, when it isn't obvious;
+- the **rule**: what code must and must not do, and the invariants tests check;
+- the **rationale**, including rejected options and the failure that taught us the rule;
+- the **revisit criteria**, when the rule is expected to change.
+
+Mechanism (module layouts, file formats, flag names, step-by-step algorithms) belongs in the system documents, and measurements in [PERFORMANCE.md](PERFORMANCE.md); an entry links to them. A temporary measure gets an entry only if it changes simulation results; its status says *temporary* and the entry names the condition for removing it. Any other temporary measure (a server limit, a workaround) lives in its milestone's follow-ups instead. If an entry grows past about a screen, its mechanism has crept in. See [docs/README.md](README.md) for where each kind of fact lives.
 
 | # | Topic | Status |
 |---|-------|--------|
@@ -124,7 +133,7 @@ To change a decision, edit its entry in the same pull request as the code. Say w
 **Problem.** "Total cash must equal M0" conflicted with banks that lend deposits (which creates broad money). Currencies were unspecified, and so was what happens to money when POPs die or firms fail.
 
 **Decision.**
-- **One world currency** until at least M3. Per-nation currencies would need a foreign-exchange market and are out of scope.
+- **One world currency.** Per-nation currencies would need a foreign-exchange market and a decision of their own.
 - **Outside money** (`Σ cash` over all agents) is constant. It may change only through an explicit, logged *mint* or *burn* event. Today none exists, and `tick::step` panics if the total moves.
 - **Inside money** (deposits, loans, bonds; M2) is always created as a matched asset/liability pair. The invariant becomes:
 
@@ -133,7 +142,7 @@ To change a decision, edit its entry in the same pull request as the code. Say w
   A bank loan creates a deposit (asset of the borrower) and a loan (asset of the bank), offset by a liability on each side. This is endogenous money in Godley & Lavoie's sense, and it does not break conservation. A default writes off both sides; nobody's *cash* disappears.
 - **Every transfer debits one account and credits another by the same amount.** Splits use largest-remainder allocation.
 - **Death/extinction:** money stays with surviving POP members; an extinct POP's cash passes to an heir (D7).
-- **Firm failure (M2):** cash goes to creditors first, then owners.
+- **Firm failure** *(planned; needs a decision, none drafted)*: cash goes to creditors first, then owners.
 - **Tests:** every day asserts outside-money conservation. `crates/pax_engine/tests/conservation.rs` runs 200 randomised economies through it.
 
 ## D6. Firms: production, wages, ownership
@@ -151,7 +160,7 @@ To change a decision, edit its entry in the same pull request as the code. Say w
   - A struggling producer can therefore always buy inputs, produce and sell. Its workers absorb the shortfall in pay instead of the firm dying.
   - Paying out the last cash in wages was a permanent trap: no inputs meant no output, no revenue, and no recovery.
 - **Dividends:** cash above `reserve_days × wage bill` is paid out at `dividend_payout_rate` per day to the producer type's **owner profession** in the same market, split by size.
-- **Ownership is profession-level in M1.** A share registry (who owns which firm, so capitalists in one market can own firms in another) is an M2 item and will be needed for investment and bankruptcy.
+- **Ownership is profession-level in M1.** A share registry (who owns which firm, so capitalists in one market can own firms in another) is planned and will be needed for investment and bankruptcy; the investment proposal ([#21](https://github.com/thomasclarkpersonal-sketch/Iron-and-Blood/pull/21), question 1) raises it, and nothing designs it yet.
 
 ## D7. POP accounting
 
@@ -166,7 +175,7 @@ To change a decision, edit its entry in the same pull request as the code. Say w
   
   This keeps the POP table bounded as mobility, migration and extinctions create and empty rows.
 - **Promotion and migration are deterministic fractional flows** (`ΔN = ⌊N × rate⌋`), not dice rolls. The counter-based RNG (D3) is available where genuine randomness is wanted, e.g. rebellions.
-- **POP identity** is `(province, profession, culture, religion)`. Culture and religion columns arrive in M2. Lookups by identity use a sorted index, never a `HashMap`.
+- **POP identity** is `(province, profession, culture, religion)`. Culture and religion columns are planned (they need a decision; none drafted). Lookups by identity use a sorted index, never a `HashMap`.
 - **Derived values are never stored as state.** Nation, market and state come from the province; storing `nation_id` on POPs would go stale on conquest.
   - **Exception: self-validating caches.** For performance, derived data may live in a cache *outside* state, under three conditions: it's excluded from equality and `World::state_hash`; it fingerprints all of its inputs on every use and rebuilds on mismatch; and debug builds check it against a fresh build.
   - The only such cache is `World::layout` (`layout.rs`). Its inputs are the POP row count, `pops.province`, `pops.profession`, `geography.province_market`, `geography.market_nation` (D15), and the number of professions, markets and nations.
@@ -216,8 +225,7 @@ All parsing lives in `pax_data`, so the format can change without touching the e
   - Cap'n Proto's distinctive feature, RPC with promise pipelining, doesn't fit a one-way stream of messages in each direction. Its built-in framing replaces only our 4-byte length prefix.
   - FlatBuffers has an official, mature C# library, which keeps D12's C# fallback cheap if the GDExtension route fails.
   - The FlatBuffers schema was already written, compiled and measured.
-- **Binary save format** (decided in M3-6b, as D23 scheduled once replay proved too slow): a versioned, little-endian, column-by-column dump of the `World` (`pax_data::snapshot`, magic `PAXW`).
-  - It is written next to each save, and loading reads it instead of replaying.
+- **Binary save format** (decided in M3-6b, as D23 scheduled once replay proved too slow): each save carries a versioned binary snapshot of the `World` (`pax_data::snapshot`; layout in [DATA_FORMAT.md](DATA_FORMAT.md#save-files-savesnametoml-d23)), and loading reads it instead of replaying. Its rules:
   - Restoring it runs the engine's table rules (`World::check_tables`), so a crafted file can't put the engine in an impossible state.
   - It stores no definitions; those come from the scenario, whose content hash must match.
   - A loaded snapshot must reproduce the state hash it recorded, so it can only restore exactly what was written.
@@ -248,11 +256,8 @@ All parsing lives in `pax_data`, so the format can change without touching the e
   - The bridge depends on `pax_protocol` only, **never on `pax_engine`**, so the client cannot simulate (D10).
   - *Side-neutral crates* are the exception to "`pax_protocol` only" (M3-8b). They carry neither engine nor wire types, so both sides may link them: `pax_content` (the hash scheme) and `pax_map` (the province-map reader the server validates with and the client draws with). Neither lets the client simulate, and CI checks that neither depends on `pax_engine` or `pax_protocol`. Anything else the bridge links must still be `pax_protocol`: CI allowlists the bridge's workspace dependencies (`pax_protocol`, `pax_map`, `pax_content`). Approved by the maintainer on 2026-10-08 (#45).
 - **Fallback: C# (Godot .NET)** with the official FlatBuffers C# library, if the M3-0 spike shows gdext can't do the job. gdext is pre-1.0 (0.5.x), so the spike is the risk gate.
-- **M3-0 spike: passed (2026-10-08), so the fallback isn't needed.**
-  - godot-rust **0.5.5** (`api-4-7`, pinned exactly) loads in **Godot 4.7.2**.
-  - The bridge decodes real `Welcome` and `DayUpdate` frames through `pax_protocol`.
-  - The province-ID shader draws a 300-province map coloured by the update's map values ([screenshot](images/m3-0-gdext-spike.png)).
-  - Like `pax_protocol`, the bridge *denies* rather than forbids `unsafe_code`, because godot-rust's entry point must be an `unsafe impl`. It allows `unsafe` in that one module only, and `scripts/check_lints.py` (CI) keeps both crates' copied lint tables equal to the workspace's apart from that exception.
+- **M3-0 spike: passed (2026-10-08), so the fallback isn't needed** ([MILESTONE_3.md](MILESTONE_3.md), M3-0). godot-rust is pinned exactly (0.5.5, `api-4-7`), because it is pre-1.0.
+- **`unsafe`:** like `pax_protocol`, the bridge *denies* rather than forbids `unsafe_code`, because godot-rust's entry point must be an `unsafe impl`. It allows `unsafe` in that one module only, and `scripts/check_lints.py` (CI) keeps both crates' copied lint tables equal to the workspace's apart from that exception.
 
 **Why GDExtension over C#.** The options considered:
 
@@ -264,11 +269,13 @@ All parsing lives in `pax_data`, so the format can change without touching the e
 
 ## D13. Performance budget
 
-| Target | Budget | Measured |
-|---|---|---|
-| M1: 1M POP rows, 1 market, 4 goods, 8 threads | ≤ 100 ms/day | **≈31 ms/day** after M4-11 (≈37 after T4, was 45; `pax_cli bench … --scale 170000 --threads 8`, which with `--scale` runs the 29 days before the first month end) |
-| Long-term: 2M POP rows, ~3,000 markets, ~50 goods, 8-core desktop | ≤ 100 ms/day | 1M rows / 3,000 markets / 4 goods: **≈31 ms/day** after M4-11 (≈35 after T5; 49 on M4-11's machine before it; `bench --scale 56 --regions 3000 --days 29`) |
-| M2 content: `two_states` (12 goods, nations, taxes) replicated to about 1M POP rows, 8 threads | ≤ 100 ms/day | **≈91 ms/day** after M4-11 at 3,000 markets (`bench scenarios/two_states --scale 55 --regions 1500 --days 29`; was 138), and an 84.5 ms tick in `pax_server`'s `server_day_budget` (was 126). M4-11 removed i128 division from `Fixed` and `allocate_raw` wherever the intermediate fits i64, with identical results. Within budget, but with little room: content growing towards 50 goods needs more |
+| Target | Budget |
+|---|---|
+| M1: 1M POP rows, 1 market, 4 goods, 8 threads | ≤ 100 ms/day |
+| Long-term: 2M POP rows, ~3,000 markets, ~50 goods, 8-core desktop | ≤ 100 ms/day |
+| M2 content: `two_states` (12 goods, nations, taxes) replicated to about 1M POP rows, 8 threads | ≤ 100 ms/day |
+
+Measurements, the commands that take them and their history are in [PERFORMANCE.md](PERFORMANCE.md).
 
 At 100 ms/day, the fastest game speed runs at about 10 in-game days per second. CI fails a PR that makes the tick more than 20% slower. The `Benchmark regression` job times the PR's base and head on the same runner (`scripts/bench-compare.sh`), so runner speed cancels out.
 
@@ -313,7 +320,7 @@ The state → national → sphere → global roll-up in the old ECONOMY_SYSTEM w
 - **Same market rules as everyone else:** government orders enter price discovery (D1) and are rationed pro rata with every other buyer. No priority for the state.
 - **Settlement:** the treasury pays `q × p` to the sellers through the normal receipts split. The goods are consumed, standing in for administration and public works. Money is conserved; goods leave the economy.
 - **Reporting:** `DayReport::government_spending`. `pax_cli report` counts it in GDP (C + G).
-- **Later (M2+):** state-employed POPs (bureaucrats, soldiers) and military upkeep (MILITARY_SYSTEM.md) will replace the abstract basket with real demand.
+- **Later:** state-employed POPs (bureaucrats, soldiers) and military upkeep (MILITARY_SYSTEM.md) will replace the abstract basket with real demand.
 
 ## D18. Labour mobility
 
@@ -393,9 +400,8 @@ The state → national → sphere → global roll-up in the old ECONOMY_SYSTEM w
   - `StaticData.map_hash` covers only the two map files (M3-7). The client hashes its own copy of them the same way and refuses to draw a map that doesn't match.
 - **Ids:** every id is a `uint` index into the `StaticData` tables sent in `Welcome`, fixed for the session (player ids are `ushort`). "None" is an absent optional field, never a sentinel such as `-1`, so a missing id can't be cast into a huge index. POPs are identified by `(province, profession)`, never by row index, because compaction reorders rows (D7).
 - **Views, not state:** a `DayUpdate` carries `WorldSummary` and `NationTable` always, plus the subscribed `MapView`, `MarketDetail` and `ProvinceDetail` (a remote multiplayer session gets its `MapView` only with some updates: D24, M4-7). The full POP and producer tables are never sent.
-  - The views themselves are built from the engine's read-only `views::ProvinceStats` and the day's report, in about 3 ms at that scale (M3-3).
-  - Budget at the D13 long-term scale: ≤ 16 KB summary-only and ≤ 128 KB with every view subscribed.
-  - Measured on the schema: 8.3 KB and 91 KB.
+  - The views themselves are built from the engine's read-only `views::ProvinceStats` and the day's report.
+  - Budget at the D13 long-term scale: ≤ 16 KB summary-only and ≤ 128 KB with every view subscribed (measured in [PERFORMANCE.md](PERFORMANCE.md)).
 - **Values:** simulation values travel as `Fixed { raw: long }` (D3), in both directions. Clients use floats for display only.
 - **Commands:** `SubmitCommand { client_seq, command }` mirrors `pax_engine::Command`.
   - The server checks, in order: well-formedness, permission (D24), then `World::validate` (D21).
@@ -417,29 +423,20 @@ The state → national → sphere → global roll-up in the old ECONOMY_SYSTEM w
   - While its window is full, the server keeps simulating but sends that client nothing.
   - When the client acknowledges, the server sends only the latest day, with `skipped` counting the days skipped.
   - In single player the simulation never waits for the client. Multiplayer fairness rules are in D24.
-- **Saves:** `<saves dir>/<name>.toml` (`pax_data::save`; the server's `--saves DIR`, default `saves/`). It contains:
-  - the scenario path and content hash;
-  - the current day;
-  - every applied command, in the DATA_FORMAT command format (D21), plus the player who sent it (absent for the scenario's scripted commands);
-  - `state_hash` checkpoints every 30 days.
-
-  Rules:
+- **Saves** are the scenario (path and content hash), the day, every applied command with the player who sent it (none for the scenario's scripted commands), and `state_hash` checkpoints every 30 days, plus a binary snapshot of the saved day (D10). The file format is in [DATA_FORMAT.md](DATA_FORMAT.md#save-files-savesnametoml-d23). Rules:
   - **Names** are 1 to 64 characters of `[A-Za-z0-9_-]`, so a name can't escape the saves directory. Anything else gets an error `SaveResult`.
-  - **Loading** (`LoadGame`, `pax_data::save::load`) never replays. It refuses the save if:
+  - **Loading never replays**, because replay runs at tick speed (about 4 minutes for a 20-year game at the D13 scale, over a 30-second limit; [PERFORMANCE.md](PERFORMANCE.md)). It reads the snapshot, and refuses the save if:
     - the scenario's content hash changed;
     - a command is invalid (`World::validate`), out of day order, or not before the saved day;
     - the checkpoints aren't exactly the checkpoint days up to the saved day;
     - on a checkpoint day, the last checkpoint differs from the snapshot's hash;
-    - the snapshot isn't the saved day's state (see "Load time" below).
+    - the snapshot isn't the saved day's state.
 
-    Beyond these checks the log is trusted until a replay checks it. A mismatch is an error, and the running game is left untouched.
+    Beyond these checks the log is trusted until a replay checks it. A refusal is an error, and the running game is left untouched. DATA_FORMAT says how each check reads the file.
   - **Replaying** (`pax_data::save::load_by_replay`, `pax_cli replay`) is the full check. It makes the same checks, then re-applies every logged command on its day through `step_day`, verifies every checkpoint, and must end exactly at the snapshot. The session replay test (M3-9) runs it in CI.
   - A successful load pauses the game and sends every session a new `Welcome`. Commands queued for the next tick are discarded, because they never applied.
   - The scenario's scripted commands for days already played are in the log; later ones still come from the scenario, so nothing applies twice.
-- **Load time:** replay runs at tick speed, about 35 ms per day at the D13 long-term scale, so roughly 4 minutes for a 20-year game. That is over the 30-second limit, so each save also writes a binary snapshot of the saved day (D10, M3-6b).
-  - Loading reads the snapshot. Measured at 990k POP rows / 3,000 markets: 40 MB, written in 74 ms, loaded and verified (hash and table rules) in 67 ms, at any game length.
-  - The snapshot is always `<name>.world` next to `<name>.toml`, derived from the save's own name and never read from the file, so a save can't point the loader at another file. The TOML records only its `snapshot_hash`.
-  - The snapshot's scenario tables (geography, nation keys, seed) must equal the scenario's, and the restored world must pass the engine's table rules (`World::check_tables`: lengths, ids, signs, rates; BACKEND_SCHEMA). The state hash is no defence against a crafted file, because its author can recompute it, so the rules are what refuse one.
+  - **The snapshot can't be redirected or forged into an impossible state.** Its path is always `<name>.world`, derived from the save's own name and never read from the file. Its scenario tables (geography, nation keys, seed) must equal the scenario's, and the restored world must pass `World::check_tables`. The state hash is no defence against a crafted file, because its author can recompute it, so the table rules are what refuse one.
   - Saving over an existing save writes both new files to temporary names first. A failed save (a full disk, say) leaves the old one loadable.
   - A missing or damaged snapshot is an error, never a silent fallback to replay.
 

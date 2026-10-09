@@ -51,6 +51,8 @@ Binding design decisions live in [docs/DECISIONS.md](docs/DECISIONS.md) (cited a
 
 ## 8. Documentation Maintenance
 - **Keep docs in sync:** `docs/` is the source of truth for the engine's design. When you alter core logic, add components, or change system behaviour, update `DECISIONS.md` and the relevant system document (`BACKEND_SCHEMA.md`, `ECONOMY_SYSTEM.md`, …) in the same change.
+- **One home per fact:** [docs/README.md](docs/README.md) says where each kind of fact lives (rules in `DECISIONS.md`, mechanism in the system documents, numbers in `PERFORMANCE.md`). Link to a fact's home instead of restating it. `scripts/check_docs.py` (CI) checks links, decision citations, and the lists of crates, systems and CLI commands.
+- **Label what isn't built:** text about unbuilt work says *planned* and names the decision or proposal it waits on; vision documents carry a status banner, and are never implemented from directly.
 - **Inline documentation:** keep accurate rustdocs (`///`, `//!`) on structs, components and public functions. Explain the *why* and the *mathematics*, not just the *what*, and cite the decision (`D1`…) the code implements.
 
 ## 9. Critic Feedback

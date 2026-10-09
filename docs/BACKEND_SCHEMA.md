@@ -17,11 +17,14 @@ crates/
 │       ├── hash.rs        FNV-1a state hashing (stable across Rust versions)
 │       ├── groups.rs      counting-sort row grouping (replaces HashMap lookups)
 │       ├── defs.rs        static definitions: goods, professions, producer types, rules
-│       ├── world.rs       SoA tables: Geography, Pops, Producers, Markets; World
+│       ├── world.rs       SoA tables: Geography, Pops, Producers, Markets, Nations; World
+│       ├── layout.rs      the self-validating POP layout cache (D7)
+│       ├── command.rs     player commands and their validation (D21)
+│       ├── views.rs       read-only aggregates the server's views are built from (D22)
 │       ├── tick.rs        step(): fixed system order + money conservation assert
-│       └── systems/       labor, production, market, firms, demographics
-├── pax_data/              TOML schema (schema.rs), validation, World builder, golden files
-├── pax_cli/               run | record | verify | bench
+│       └── systems/       labor, production, market, firms, government, mobility, politics, demographics
+├── pax_data/              TOML schema (schema.rs), validation, World builder, saves and snapshots, golden files
+├── pax_cli/               run | report | record | verify | bench | replay
 ├── pax_server/            authoritative game server: sim thread owns the World, tokio for the network (D10, D22, D23)
 ├── pax_protocol/          generated FlatBuffers code (scripts/gen-protocol.sh) + framing, no engine dependency (D22)
 ├── pax_godot/             Godot GDExtension bridge: the client's side of the protocol (D12)
@@ -58,9 +61,9 @@ Rows are stored grouped by market: the loader sorts them stably. The market's pa
 | `profession` | `u16` | Index into `Defs::professions` |
 | `province` | `u32` | |
 | `life_needs` | `Fixed` | `[0, 1]`, subsistence satisfaction from the last market day (D2) |
-| *`culture`, `religion`* | *`u16`* | *M2* |
+| *`culture`, `religion`* | *`u16`* | *Planned: needs a decision, none drafted* |
 | `militancy` | `Fixed` | `[0, 1]`, updated monthly (D19); no effects yet |
-| *`literacy`, `consciousness`* | *`Fixed`* | *M2. Fixed-point, never `f32` (D3)* |
+| *`literacy`, `consciousness`* | *`Fixed`* | *Planned: needs a decision, none drafted. Fixed-point, never `f32` (D3)* |
 
 ### `Producers` (RGOs and factories; they differ only by recipe)
 | Column | Type | Notes |
@@ -95,10 +98,11 @@ Rows are stored grouped by market: the loader sorts them stably. The market's pa
 
 Orders and offers are **not** stored in state: they exist only during the market phase. The old `MarketNode { buy_orders: HashMap, … }` design is retired, because HashMap iteration order is non-deterministic (D3).
 
-### *M2 tables (planned)*
-- Laws, and tariffs on `Nations`.
-- `Accounts` for inside money: deposits, loans and bonds as asset/liability pairs (D5).
-- `Shares` (owner POP/nation → producer).
+### *Planned tables*
+- Tariffs on `Nations` (trade proposal, [#18](https://github.com/thomasclarkpersonal-sketch/Iron-and-Blood/pull/18)).
+- Laws on `Nations` (needs a decision, none drafted).
+- `Accounts` for inside money: deposits, loans and bonds as asset/liability pairs (D5; needs a decision, none drafted).
+- `Shares` (owner POP/nation → producer; raised by the investment proposal, [#21](https://github.com/thomasclarkpersonal-sketch/Iron-and-Blood/pull/21), question 1).
 
 ## ⚙️ Core Systems
 
