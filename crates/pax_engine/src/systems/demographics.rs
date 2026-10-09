@@ -20,7 +20,7 @@
 //! the province, the empty row keeps the cash until someone does.
 
 use crate::fixed::Fixed;
-use crate::systems::mobility::Pools;
+use crate::systems::labor::Pools;
 use crate::world::World;
 
 /// True on the last day of each month, when the month-end systems and POP
@@ -45,24 +45,20 @@ fn births_scale(world: &World) -> Option<Vec<Fixed>> {
     if !world.defs.rules.demographics.births_need_employment {
         return None;
     }
-    let profs = world.defs.professions.len();
     let is_worker = world.defs.worker_professions();
-    let Pools { workforce, jobs } = Pools::count(world);
-    let share: Vec<Fixed> = workforce
-        .iter()
-        .zip(&jobs)
-        .enumerate()
-        .map(|(k, (&w, &j))| {
-            if !is_worker.contains(k % profs) || w <= j {
-                Fixed::ONE
-            } else {
-                // j < w, so the share is below 1; `div` rounds down (fewer births).
-                Fixed::from_int(j as i64).div(Fixed::from_int(w as i64))
-            }
-        })
-        .collect();
+    let pools = Pools::count(world);
     let pops = &world.pops;
-    Some((0..pops.len()).map(|i| share[pops.province[i] as usize * profs + pops.profession[i] as usize]).collect())
+    let share = |i: usize| {
+        let profession = pops.profession[i] as usize;
+        let (w, j) = pools.of(world, pops.province[i], profession);
+        if !is_worker.contains(profession) || w <= j {
+            Fixed::ONE
+        } else {
+            // j < w, so the share is below 1; `div` rounds down (fewer births).
+            Fixed::from_int(j as i64).div(Fixed::from_int(w as i64))
+        }
+    };
+    Some((0..pops.len()).map(share).collect())
 }
 
 pub fn update_population(world: &mut World) {
