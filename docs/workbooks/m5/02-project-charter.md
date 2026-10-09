@@ -16,20 +16,61 @@ The m5 run plans and builds Milestone 5 overnight, unattended. It connects today
 
 ## Objectives
 
-"DoD n" is item n of the milestone's [definition of done](../../MILESTONE_5.md#-definition-of-done).
+"DoD n" is item n of the milestone's [definition of done](../../MILESTONE_5.md#-definition-of-done). A measure that compares two runs compares like with like: the same build and scenario, the same statistic, the same days.
 
 | # | Objective | Acceptance measure |
 |---|---|---|
-| O1 | An approved plan on `main` | The four planning stages and the three-lens panel approve it; the plan PR merges with every required check green and the critic passing; the [deliverable register](README.md#deliverable-register) marks every planning deliverable approved |
+| O1 | An approved plan on `main` | The four planning stages and the three-lens panel approve it; the plan PR, whose description quotes run decisions 1-5 (A11), merges with every required check green and the critic passing; the [deliverable register](README.md#deliverable-register) marks every planning deliverable approved |
 | O2 | The maintainer's decisions recorded exactly | On `main`, D17, D27 and D28 read "Accepted (2026-10-10, by the maintainer for M5)", their Open lines are replaced by run decisions 2-4, and nothing else in them has changed (`bd08ee6`); `python3 scripts/check_docs.py` passes |
-| O3 | Trade works and arbitrages prices | DoD 1, each bullet a named test from the Analysis stage: in `two_states`, each traded good's gap ends smaller than its autarky gap measured in the [SSR](01-system-service-request.md#what-happens-today), and within a tolerance set in the Analysis stage of its route's friction and margin, `p_B(1 − τ) ≈ p_A(1 + margin)` ([TRADE.md](../../TRADE.md#what-it-should-do-acceptance-tests), test 1); a higher tariff reduces the volume, and the importing treasury receives exactly the tariffs paid; merchants enter and exit with money conserved; the daily money assert holds with random routes and high volumes (`crates/pax_engine/tests/conservation.rs`, through the shared `random_world` of `crates/pax_engine/tests/common/mod.rs:75`) |
-| O4 | Investment grows the economy | DoD 2: over 20 years of `two_states`, the M5-10 baselines are beaten: total capacity ends above the 253,500 worker slots it loads with (fixed today), and mean real GDP over years 16-20 is above today's 4,202.52 a day in day-1 prices ([SSR](01-system-service-request.md#what-happens-today)); unemployment stays within the band `crates/pax_data/tests/economic_bands.rs:47-55` sets (0.3% to 2%), or the band moves for a stated reason; demand for tools, timber and steel rises while projects run |
-| O5 | Unrest has economic consequences | DoD 3: tests show output falling above `strike_threshold`, and above `riot_threshold` stock destroyed and a security transfer paid that is exactly what the treasury pays ([REBELLIONS.md](../../REBELLIONS.md#acceptance-tests), tests 1-3, with run decisions 3 and 4) |
-| O6 | Players control trade and construction | DoD 4: the client shows routes, sets tariffs, shows construction and founds producers, and the headless client smoke test exercises them; `crates/pax_server/tests/session_replay.rs` replays a session that uses the new commands to the server's final state hash |
+| O3 | Trade works and arbitrages prices | DoD 1 and M5-5: measures O3a to O3g, [below](#o3-trade-works-and-arbitrages-prices) |
+| O4 | Investment grows the economy | DoD 2 and M5-10: measures O4a to O4e, [below](#o4-investment-grows-the-economy) |
+| O5 | Unrest has economic consequences | DoD 3: tests show output falling above `strike_threshold`, and above `riot_threshold` stock destroyed and a security transfer paid that is exactly what the treasury pays ([REBELLIONS.md](../../REBELLIONS.md#acceptance-tests), tests 1-3, with run decisions 3 and 4); any change to `two_states`' results meets [the bands clause](#the-bands-clause) |
+| O6 | Players control trade and construction | DoD 4: the client shows routes, sets tariffs, shows construction and founds producers, and the headless client smoke test exercises them; `crates/pax_server/tests/session_replay.rs` replays a session that uses the new commands to the server's final state hash. No command charters merchants ([out of scope](#out-of-scope)) |
 | O7 | Budgets and determinism hold | DoD 5: identical hashes at 1, 2, 3 and 8 threads on a world that trades, invests and riots (today that comparison runs only on `mini_valley`, `crates/pax_data/tests/determinism.rs:12-14` and `:31-36`, and CI checks `two_states` at 1 and 4 threads, `.github/workflows/ci.yml:112-117`); `pax_cli verify` passes for both scenarios on Linux, Windows and macOS; `pax_cli bench` at about 1M POP rows on 8 threads, with the M5 mechanisms running, at most 100 ms/day and recorded in [PERFORMANCE.md](../../PERFORMANCE.md#tick-d13), with the month-end systems measured too, since `bench --scale` stops before the first month end (that page's first note); the Benchmark regression check green on every PR |
 | O8 | Every merge is clean and explained | Every merged PR had every required check green and the critic passing or skipped; no CRITICAL finding is left; every DEBT finding is fixed, or left with a stated reason and a drafted waiver in `out/m5-run/REPORT.md`; every commit passes the commit audit; every golden-hash change says why ([D11](../../DECISIONS.md#d11-determinism-harness-and-golden-files)) |
 | O9 | The documents stay true | After each merge, `check_docs.py` passes on `main`, the task's row in MILESTONE_5 is ticked, and the system documents describe the merged code ([AGENTS.md §8](../../../AGENTS.md#8-documentation-maintenance)) |
 | O10 | The run ends with an honest record | At the stop time, or when the queue empties, `out/m5-run/REPORT.md` gives every task's outcome (merged, ready, stacked, blocked or not started) and the choices to check; if anything merged and time remains, the close-out PR brings MILESTONE_5's status up to date against its definition of done |
+
+### O3: trade works and arbitrages prices
+
+DoD 1 and M5-5. Each measure becomes a named test in the Analysis stage. The *autarky run* is the same build and scenario without the route and its merchants. `G` and `W` are the [SSR's gap statistic](01-system-service-request.md#the-gap-statistic): the ratio of the two markets' mean prices over the 20th year.
+- **O3a, gaps narrow.** In `two_states` with M5-5's route, every good whose autarky `G` exceeds the route's friction band `(1 + margin) ÷ (1 − τ)` has a smaller `G` than in the autarky run.
+  - With TRADE.md's example values (`τ` and `margin` both 0.05, `TRADE.md:103-105`) the band is 1.105, and every good exceeds it except fish (1.089 at `aa2133a`).
+  - The SSR's table is the autarky run at `aa2133a`. The test computes its own autarky run, because tasks merged before M5-5 (strikes, investment) may move it.
+- **O3b, convergence to the band** (TRADE.md test 1). In a test world with one route, no tariff, and a capacity that doesn't bind on the measured days, each traded good's ratio of destination to origin mean price settles within a tolerance of `(1 + margin) ÷ (1 − τ)`.
+  - The Analysis stage sets the tolerance from the flow speed `k`. The flow grows with the gap (`TRADE.md:54`), so a flow below capacity is sustained by a ratio above the band, by an amount that `k` bounds.
+  - Where capacity binds, as it may in `two_states`, the ratio can stay further above the band (TRADE.md test 4), and only O3a applies.
+- **O3c, both markets gain** (M5-5's "mutual real GDP growth"; TRADE.md test 9). In O3a's run, each market's real GDP over `W` is above its real GDP in the autarky run. A market's real GDP is its own C+G deflated by its own Laspeyres index: its prices weighted by the autarky run's day-1 traded quantities in that market, the same weights in both runs. SR-12 adds this measure (planned); today's report has only the world's ([SSR](01-system-service-request.md#what-happens-today), problem 5).
+- **O3d, tariffs** (TRADE.md test 3): a higher tariff reduces the volume on its route, and the importing treasury receives exactly the tariffs paid.
+- **O3e, entry and exit** (TRADE.md test 6; M5-4 and M5-16): a persistent gap with too little merchant cash founds a merchant, a loss-making merchant winds up and returns its cash, and money is conserved through both.
+- **O3f, conservation:** the daily money assert holds with random routes and high volumes, in `crates/pax_engine/tests/conservation.rs` through the shared `random_world` (`crates/pax_engine/tests/common/mod.rs:75`).
+- **O3g, bands:** M5-5's change to `two_states` meets [the bands clause](#the-bands-clause).
+
+### O4: investment grows the economy
+
+DoD 2 and M5-10. The *baseline run* is the same build and scenario with investment switched off by its rules, as `mini_valley`'s frozen definitions will switch it off (A4). Comparing within one build keeps gains from trade (O3) from counting as growth.
+- **O4a, capacity:** total producer capacity on day 7200 of `two_states` is above 253,500 worker slots, the load value that nothing changes today ([SSR](01-system-service-request.md#what-happens-today), problem 2).
+- **O4b, real GDP:** real GDP over years 16-20 is at least 0.1% above the baseline run's (4,202.52 a day at `aa2133a`).
+  - The measure is `pax_cli report`'s, C+G in day-1 prices (`crates/pax_cli/src/report.rs:7-11`); for years 16-20 it is the last row of `pax_cli report scenarios/two_states --days 7200 --every 1800`.
+  - It leaves investment spending out, so construction alone can't raise it: growth has to reach consumption. SR-12's new figures (investment, trade, each market's GDP) are reported beside it, never folded into it.
+  - 0.1% is ten times the spread of the yearly values over years 16-20 today (4,202.51 to 4,202.92), so a change that small can't pass for growth.
+- **O4c, construction demand** (DoD 2's second bullet; INVESTMENT.md test 2): a running project places D1 buy orders, every day until they are delivered, for the construction goods its recipe still needs; and over the 20 years, the quantity traded of each of tools, timber and steel is above the baseline run's. The window is the whole run, not years 16-20, so that it holds however early the projects run.
+- **O4d, unemployment:** unemployment on day 7200 is at most 2%, the upper edge of the band that `crates/pax_data/tests/economic_bands.rs:51-55` asserts. The lower edge, 0.3%, may move down for a stated reason, since investment employs the unemployed, as the test's header expects (`economic_bands.rs:6-8`). Raising the upper edge doesn't meet DoD 2.
+- **O4e, bands:** every task that changes `two_states`' results meets [the bands clause](#the-bands-clause).
+
+### The bands clause
+
+`crates/pax_data/tests/economic_bands.rs` asserts `two_states`' aggregates at year 20. A pull request that changes `two_states`' results keeps every assertion, or moves it in the same pull request and says why, as the test's header asks (lines 6-8) and TRADE.md test 9 asks of trade. The values at `aa2133a` are from the [SSR's measurements](01-system-service-request.md#how-it-was-measured).
+
+| Assertion | Line | Band | At `aa2133a` | Note |
+|---|---|---|---|---|
+| Nominal GDP per day (C+G), mean over the final year | 45 | 4,500 to 5,500 | 5,023.82 | Nominal growth of more than 9.5% breaks the upper edge |
+| Unemployment among worker professions, last day | 53 | 0.3% to 2% | 0.8% | Only the lower edge may move under DoD 2 (O4d) |
+| Employment at year 20 against year 5 | 63 | at least 99.5% | passes; −0.1% when set (line 58) | One-sided: a fall, such as strikes or depreciation may cause, trips it; growth can't |
+| Tax take over the final year | 67 | 11.5% to 12.5% | 12.0% | |
+| Life-needs coverage, last day | 74 | at least 0.98 | 0.992 | |
+| Mean militancy, last day | 79 | 0.10 to 0.15 | 0.124 | |
+| Population, last day | 86 | 245k to 256k | 250,523 | |
 
 ## Scope summary
 
@@ -40,6 +81,7 @@ The m5 run plans and builds Milestone 5 overnight, unattended. It connects today
 
 ### Out of scope
 - The milestone's [Out of Scope](../../MILESTONE_5.md#out-of-scope-milestone-6-and-milestone-7): Milestone 6 (workforce, banking, politics, revolutions) and Milestone 7 (military, colonisation).
+- A command that charters merchants. D17 founds chartered merchants "by command only", but the milestone's wire additions, its DoD 4 and D17's Amends line include no such command ([SSR](01-system-service-request.md#initial-assessment), item 3). In this run chartered merchants come only from scenario seeding, and dynamic entry (M5-16) never founds one.
 - Follow-ups the designs name: merchants on multi-hop horizon pairs (`docs/TRADE.md:111`), per-route `transit_days` (`TRADE.md:24`), customs unions (`TRADE.md:114`), wear or maintenance of capacity in use (`docs/INVESTMENT.md:21`), and a repression command (`docs/REBELLIONS.md:16` and `:19`).
 - Anything that needs a decision that is neither accepted nor a run decision ([SSR](01-system-service-request.md#sponsorship), "Decisions it may need"): that task is reported blocked.
 - Changing `mini_valley`'s results (assumption A4).
@@ -99,33 +141,34 @@ These bind the work. They are cited here, not restated.
 | A1 | `origin/main` is at `aa2133a` as planning starts | Each task's brief is refreshed against `main` before it is built; a difference that changes a contract becomes a change request |
 | A2 | `TRADE.md`, `INVESTMENT.md`, `REBELLIONS.md` and `DATA_MODEL_M5_M6.md` hold mechanism, subordinate to D17, D27 and D28; the Design stage settles their disagreements ([SSR](01-system-service-request.md#initial-assessment)) as choices for the maintainer to check | A disagreement that needs a rule changed blocks its task |
 | A3 | PR #69 stays the maintainer's: the run neither merges nor edits it | If it merges during the run, the refresh step takes its corrections in as change requests |
-| A4 | `mini_valley` stays a frozen fixture whose golden hashes don't change, as D18, D20, D25 and D26 kept it; `two_states`' hashes are re-recorded by the tasks that change its results, each saying why | A task that must change `mini_valley` says why and re-records it ([AGENTS.md §7](../../../AGENTS.md#7-determinism-gate-d11)) |
+| A4 | `mini_valley` stays a frozen fixture whose golden hashes don't change, as D18, D20, D25 and D26 kept it; its frozen definitions switch each new mechanism off, and `two_states`' hashes are re-recorded by the tasks that change its results, each saying why | A task that must change `mini_valley` says why and re-records it ([AGENTS.md §7](../../../AGENTS.md#7-determinism-gate-d11)) |
 | A5 | The workflow, its configuration and `docs/SDLC_WORKFLOW.md` live on the unmerged `sdlc-workflow` branch; this workbook links them at `f911fa7` | — |
 | A6 | The maintainer can't be reached before the morning, and an open question would block approval, so the plan decides within the contract and lists its choices | — |
 | A7 | CI's Benchmark regression job times each side's own `two_states` (`.github/workflows/ci.yml:154-163`), so a task that adds trade to `two_states` gives the head more work than the base | The baseline plan's risk register (planned) gives the mitigation |
 | A8 | The merge authorisation covers this run's pull requests only: the plan PR, the task PRs and the close-out | — |
 | A9 | A required check that can't run (an outage, say) is not green | The PR waits, then is parked with the reason |
 | A10 | The workflow bounds its queue by `maxTasks` (12 unless the run was started with more), and M5 has 16 tasks | The baseline plan fits them into the run's bound, combining rows that belong in one PR (as M4-8 and M4-10 were one, #61) and keeping the milestone's ids |
+| A11 | The critic judges the plan PR against `main`'s DECISIONS.md, where D17, D27 and D28 are still Proposed with Open lines, and it can't see the run decisions ([AGENTS.md §9](../../../AGENTS.md#9-critic-feedback)). So the plan PR's description quotes run decisions 1-5 verbatim as the authority for `bd08ee6`'s change to DECISIONS.md, including D28's amendment of D6. It also says that D28's Amends line stays as written under run decision 5 ([SSR](01-system-service-request.md#initial-assessment), item 4) | If the critic still reports the change CRITICAL, the plan PR is parked as a disputed finding for the maintainer ([REPO_SETUP.md](../../REPO_SETUP.md#handling-a-disputed-critical-finding)), never worked around. The baseline plan's risk register (planned) gives the mitigation |
 
 ## Target dates
 
-Times are on 2026-10-10, +08:00. The planning targets assume one or two review rounds a stage (the workflow allows three). Each task's target is its bar in the baseline plan's Gantt chart (planned).
+Times are on 2026-10-10, +08:00. The planning targets assume two review rounds for Initiation, which is in its second, and one or two for each later stage (the workflow allows three). Each task's target is its bar in the baseline plan's Gantt chart (planned).
 
 | Milestone | Target |
 |---|---|
 | Run started by the maintainer | 00:55 |
-| Initiation approved | 01:50 |
-| Analysis approved | 02:40 |
-| Design approved | 03:30 |
-| Baseline plan approved | 04:15 |
-| Panel approved, plan sealed | 04:45 |
-| Plan PR merged | 05:15 |
+| Initiation approved | 02:10 |
+| Analysis approved | 03:00 |
+| Design approved | 03:50 |
+| Baseline plan approved | 04:35 |
+| Panel approved, plan sealed | 05:05 |
+| Plan PR merged | 05:35 |
 | Tasks M5-1 to M5-16 | From the plan PR's merge, in the task DAG's order |
 | **Stop time**: nothing new starts | **07:00** (2026-10-10T07:00:00+08:00) |
 | Close-out PR | After the queue empties, if a task merged and time remains |
 | Final run report | At the stop time, or when the queue empties |
 
-That leaves about an hour and three quarters for building. In the M4 run each PR took two to six critic rounds (its report, `out/m4-run/REPORT.md`, "Notes"), and M5's tasks are larger, so this run should expect to merge the first one to three tasks of the DAG. The rest stay in the approved plan, which a later run continues from (`fromPlan`, in SDLC_WORKFLOW.md's "Running it").
+That leaves about an hour and a half for building. In the M4 run each PR took two to six critic rounds (its report, `out/m4-run/REPORT.md`, "Notes"), and M5's tasks are larger, so this run should expect to merge the first one to three tasks of the DAG. The rest stay in the approved plan, which a later run continues from (`fromPlan`, in SDLC_WORKFLOW.md's "Running it").
 
 ## Authorisation
 
@@ -145,5 +188,6 @@ How the run reads that authorisation (choices for the maintainer to check):
 - **Contract changes.** Relaxing or contradicting a rule, the `contract-change` label, and any edit to `critic.yml`, `critic.md`, the ruleset, secrets or settings.
 - **Decisions that are neither accepted nor run decisions** ([SSR](01-system-service-request.md#sponsorship), "Decisions it may need"): the task that needs one is reported blocked on a decision.
 - **Disputed CRITICAL findings** ([REPO_SETUP.md](../../REPO_SETUP.md#handling-a-disputed-critical-finding)): the PR is parked with the `needs-human` label.
+- **D28's Amends line**, which run decision 5 keeps as written although it names an amendment of D19 that won't happen ([SSR](01-system-service-request.md#initial-assessment), item 4).
 - **Everything outside the run:** merging PR #69 or the `sdlc-workflow` branch, the locked worktrees, and the maintainer's checkout outside `out/m5-run/`.
 - **The playtest, and closing the milestone.**
