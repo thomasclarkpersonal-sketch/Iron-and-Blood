@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Renders the Mermaid diagrams in the docs with mermaid-cli in Docker, and fails on any
-# diagram that doesn't parse. GitHub shows a broken diagram as an error box, so render
-# before pushing a change to one.
+# diagram that doesn't parse, or that parses but draws "Unsupported markdown" in place of
+# a label. GitHub shows a broken diagram as an error box, so render before pushing a
+# change to one.
 #
 #   scripts/render-mermaid.sh                     # every tracked .md with a diagram
 #   scripts/render-mermaid.sh docs/ARCHITECTURE.md
@@ -38,21 +39,38 @@ if [[ ${#files[@]} -eq 0 ]]; then
 fi
 
 mkdir -p out/mermaid
-failed=()
-for file in "${files[@]}"; do
-  dir="out/mermaid/$(dirname "$file")"
+render() { # file, format
+  local dir="out/mermaid/$(dirname "$1")"
   mkdir -p "$dir"
   # The repository is mounted read-only; only out/mermaid is writable. The container runs
   # as the caller, so the output belongs to them.
-  if ! docker run --rm --user "$(id -u):$(id -g)" \
+  docker run --rm --user "$(id -u):$(id -g)" \
     -v "$root:/data:ro" -v "$root/out/mermaid:/data/out/mermaid" \
-    "$IMAGE" --quiet -e "$format" -i "$file" -o "$dir/$(basename "$file")"; then
+    "$IMAGE" --quiet -e "$2" -i "$1" -o "$dir/$(basename "$1")"
+}
+
+failed=()
+for file in "${files[@]}"; do
+  # Always render SVG first: a diagram can parse and still draw garbage. Mermaid 11 reads
+  # a label starting "1. " as a Markdown list and draws "Unsupported markdown: list"
+  # instead of the text, and only the SVG's text shows it.
+  stem="out/mermaid/${file%.md}"
+  rm -f "$stem"-*.svg "$stem"-*.png "$stem"-*.pdf # a stale image could fail the check below
+  if ! render "$file" svg; then
+    failed+=("$file (doesn't parse)")
+    continue
+  fi
+  if grep -l "Unsupported markdown" "$stem"-*.svg 2>/dev/null; then
+    failed+=("$file (a label renders as \"Unsupported markdown\": a label starting \"1. \" is read as a list)")
+    continue
+  fi
+  if [[ "$format" != svg ]] && ! render "$file" "$format"; then
     failed+=("$file")
   fi
 done
 
 if [[ ${#failed[@]} -gt 0 ]]; then
-  echo "::error::Mermaid diagrams failed to render in: ${failed[*]}" >&2
+  printf '::error::Mermaid diagrams failed in %s\n' "${failed[@]}" >&2
   exit 1
 fi
 echo "Rendered ${#files[@]} file(s) to out/mermaid/ as $format."
