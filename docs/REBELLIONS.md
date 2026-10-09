@@ -1,65 +1,75 @@
-# Unrest and Rebellions (M2) — Design Proposal
+# Unrest and Rebellions (M5, M6): Design
 
-**Status: proposal for review.** Nothing here is implemented yet. It gives [D19](DECISIONS.md#d19-militancy) militancy its consequences. On approval it becomes a numbered decision and is delivered in small PRs. Please answer the [open questions](#open-questions-for-review) first.
+**Status: design accepted by the owner (2026-10-09), not implemented yet.** It gives [D19](DECISIONS.md#d19-militancy) militancy its consequences, in two milestones: **strikes and riots in M5**, **rebellions in M6**. The rules that become binding go into DECISIONS.md as M5's unrest decision and M6's revolutions decision; this document holds the mechanism. The owner's answers to the review questions are under [Decisions](#decisions-owner-2026-10-09).
 
 ## Where we are
 
 Every POP has `militancy ∈ [0, 1]`, updated monthly (D19). It rises with unmet life needs and income tax, and decays geometrically. In `two_states` it settles around 0.12 under a 12% tax. **Today it changes nothing.**
 
-## Proposed mechanism
+## Decisions (owner, 2026-10-09)
 
-Unrest escalates in three stages, each driven by state the engine already has.
+| Question | Decision |
+|---|---|
+| Which stages | **All three, in two milestones:** strikes and riots in **M5**; rebellions in **M6**, with interest groups and reforms. |
+| Random or threshold | Strikes and riots are **deterministic**. Rebellions are **seeded-random** (`rng::Stream::REBELLION`), identical on replay. |
+| What rebels want | Rebels **demand reforms**, and a rebellion can end by **legislative compromise** once M6's reforms exist, or by timeout. |
+| Repression | **Automatic** in M5: the treasury pays a security transfer when a province riots. M5 adds no repression command. |
+| Military dependency | Rebellions arrive **before** the military: they end by compromise or timeout in M6. Putting them down by force comes with the military in **M7**. |
 
-### 1. Strikes and lost productivity (deterministic, continuous)
+The repression row is read from the owner's M5 draft (a security transfer, and no repression command among M5's commands); a `Repress` command can be added later if wanted.
+
+## Stage 1: strikes and lost productivity (M5; deterministic, continuous)
 
 A POP whose militancy exceeds `strike_threshold` works less:
-- its effective labour supply falls by `strike_rate × (militancy − threshold)`;
+- its effective labour supply is `size × (1 − strike_rate × (militancy − strike_threshold))`;
 - labour assignment (D4 step 1) sees fewer available workers, so output falls, wages per worker are unchanged, and prices rise.
 
 This is the gentle, always-on feedback: discontent costs the economy before it costs the state. No randomness, so no new determinism concerns.
 
-### 2. Riots (deterministic, monthly)
+## Stage 2: riots (M5; deterministic, monthly)
 
 When the population-weighted militancy of a province exceeds `riot_threshold`, at month end:
-- **destruction:** a share of the province's producers' *output stock* is destroyed. Goods are lost, never money (D5).
-- **repression cost:** the owning nation's treasury pays a security cost to the province's POPs (wages for militia), as an ordinary transfer. That reduces militancy by `repression_relief`.
+- **destruction:** a share `riot_destruction` of the province's producers' *output stock* is destroyed. Goods are lost, never money (D5).
+- **repression, automatic:** the owning nation's treasury pays a security cost to the province's POPs (wages for militia), as an ordinary transfer, split by size (largest remainder). That reduces their militancy by `repression_relief`. A stateless province has no treasury to pay, so it riots without relief.
 
-### 3. Rebellion (random, rare)
+## Stage 3: rebellion (M6; seeded-random, rare)
 
-Above `rebellion_threshold`, each month a province has probability `p = rebellion_base × (militancy − threshold)` of rising.
+Above `rebellion_threshold`, each month a province has probability `p = rebellion_base × (militancy − rebellion_threshold)` of rising.
 - **The one place randomness enters the economy:** the draw uses `rng::Stream::REBELLION` keyed by `(seed, day, province)` (D3). It's deterministic and independent of thread count and iteration order.
-- **A rebellion seizes the province's markets** (sets `market_nation` to `None`, i.e. stateless) until it is put down. The nation loses tax revenue there, and the rebels' militancy slowly falls with independence.
-- **Putting it down** needs military units (MILITARY_SYSTEM.md, a later milestone). Until then, rebellions end on their own after `rebellion_months`, and the market returns to its nation.
+- **A rebellion seizes the province's markets** (sets `market_nation` to `None`, i.e. stateless) until it ends. The nation loses tax revenue there, and the rebels' militancy slowly falls with independence.
+- **Demands:** a rebellion carries a demand, a reform it wants (from M6's reforms and interest groups), recorded with the revolt.
+- **It ends** in one of two ways, and the market returns to its nation:
+  - **compromise:** the nation passes the demanded reform;
+  - **timeout:** after `rebellion_months`.
 
-### Political feedback
+  Putting a rebellion down by force needs military units (MILITARY_SYSTEM.md), in M7.
 
-Each stage feeds back into policy pressure. With commands (D21), a player sees militancy rise in `pax_cli report`, and can respond:
+## Political feedback
+
+Each stage feeds back into policy pressure. With commands (D21), a player sees militancy rise in `pax_cli report` and the client, and can respond:
 - **lower taxes**, which removes the tax term;
 - **raise transfers**, which improves life needs and removes the hunger term;
+- in M6, **pass the reform** a rebellion demands;
 - or **accept the unrest**.
 
 ## New state
 
 - **POPs:** none (militancy exists).
-- **Province:** `in_revolt: bool` and `revolt_months: u16`.
+- **Province (M6):** `in_revolt: bool`, `revolt_months: u16`, and the revolt's demand.
 - **Nation:** none (repression is a transfer).
 
 New `[politics]` rules:
-- `strike_threshold`, `strike_rate`;
-- `riot_threshold`, `riot_destruction`, `repression_relief`;
-- `rebellion_threshold`, `rebellion_base`, `rebellion_months`.
+- M5: `strike_threshold`, `strike_rate`; `riot_threshold`, `riot_destruction`, `repression_relief`;
+- M6: `rebellion_threshold`, `rebellion_base`, `rebellion_months`.
 
 ## Acceptance tests
 
+**M5:**
 1. **Strikes:** raising militancy above the threshold lowers employment and output, and money is conserved.
-2. **Riots:** destroy stock (never money) and trigger repression transfers.
-3. **Rebellions:** deterministic for a given seed at any thread count, and they flip `market_nation` and restore it after `rebellion_months`.
-4. **Policy response:** in `two_states`, a command log raising the tax to 40% produces riots within a few years, and lowering it again calms them.
+2. **Riots:** destroy stock (never money) and trigger the automatic repression transfer, which is exactly what the treasury pays.
+3. **Policy response:** in `two_states`, a command log raising the tax to 40% produces riots within a few years, and lowering it again calms them.
 
-## Open questions for review
+**M6:**
 
-1. **Stages:** all three (proposed), or strikes only to start?
-2. **Randomness:** rebellions are the first random mechanic. Is a probabilistic rising acceptable for a deterministic-replay game (it's seeded, so replays are identical), or should rebellions trigger deterministically at a threshold?
-3. **What rebels want:** Victoria 2 had rebel types (nationalists, socialists, reactionaries) with demands. Should rebellions carry a *demand* (a policy that ends them, e.g. tax below X), which needs interest groups or ideology first?
-4. **Repression:** should repression be automatic (proposed) or a player command (`Repress { province }`) with a treasury cost?
-5. **Military dependency:** OK for rebellions to end by timeout until armies exist, or wait and build rebellions together with the military system?
+4. **Rebellions:** deterministic for a given seed at any thread count; they flip `market_nation` and restore it when the demanded reform passes or after `rebellion_months`.
+5. **Compromise:** passing the demanded reform ends the rebellion the next month end.
