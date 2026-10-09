@@ -24,9 +24,9 @@ Milestone 5 builds on the single-player and multiplayer foundation established i
 2. **Capital Investment and Capacity Growth (D27):**
    * Existing producers expanding capacity from retained earnings when profitable, liquid, and labour is available.
    * Construction recipes demanding physical intermediate goods (tools, steel, timber) through standard D1 market buy orders.
-   * Founding brand-new factory/RGO types in provinces funded by a Capitalist Investment Pool or the State Treasury.
+   * Founding brand-new factory/RGO types in provinces, by a one-time transfer from the market's capitalists or the state treasury (D27; no pool holds cash).
    * Depreciation of idle plant capacity after prolonged downturns.
-   * Growth in `two_states`: capacity and real GDP rise over 20 years, with unemployment within its band (about 0.8% since D25). Without investment, real GDP is flat at about 4,200 a day.
+   * Growth in `two_states`: capacity and real GDP rise over 20 years, with unemployment within its band (M5-10 has the baselines).
 3. **Economic Feedback on Unrest (D28):**
    * **Strikes:** Deterministic, continuous reduction in effective labour supply when POP militancy exceeds `strike_threshold`.
    * **Riots:** Monthly deterministic inventory destruction and treasury security transfers when province militancy exceeds `riot_threshold`.
@@ -68,15 +68,15 @@ This milestone's rules live in their decisions and designs; this section only sa
 | **M5-5** | **Trade balance & comparative advantage test** | M5-4 | Implement trade route in `two_states` between Lowland (cheap cloth, dear tools) and Highland (cheap tools, dear cloth); verify mutual real GDP growth and price convergence. |
 | **M5-6** | **Construction recipes & project state** | — | Add `expansion` recipes in `producer_types.toml`; add SoA columns `project_remaining`, `project_budget`, `idle_months` on `Producers`. |
 | **M5-7** | **Producer expansion & construction clearing** | M5-6 | Monthly evaluation gating on profit, labour, and liquidity; daily D1 buy orders for construction goods; capacity increase on completion. |
-| **M5-8** | **Founding new producers & investment pool** | M5-7 | Mechanism to found new factory types in provinces with unemployed workers, financed by capitalist investment funds or state treasury commands. |
+| **M5-8** | **Founding new producers** | M5-7 | Mechanism to found new factory types in provinces with unemployed workers, by a one-time transfer from the market's capitalists (largest remainder) or from the treasury by command, into the new producer's cash, with no pool in between (D27). |
 | **M5-9** | **Capacity depreciation & disinvestment** | M5-7 | Decommission capacity slots of chronically understaffed producers; verify inventory stability. |
-| **M5-10** | **Growth verification** | M5-7, M5-8 | 20-year run of `two_states`: prove capacity and real GDP grow (from a flat ≈4,200/day without investment) while unemployment stays within its band (≈0.8% since D25). |
+| **M5-10** | **Growth verification** | M5-7, M5-8 | 20-year run of `two_states`: prove capacity and real GDP grow (from a flat ≈4,200/day without investment, MILESTONE_2 "Measured state") while unemployment stays within its band (≈0.8% since D25). |
 | **M5-11** | **Deterministic strikes** | — | Continuous reduction of effective labour supply above `strike_threshold`; test output drops, wage floor consistency, and money conservation. |
 | **M5-12** | **Monthly riots and security transfers** | M5-11 | Output inventory destruction and security transfer from treasury to POP cash at month end above `riot_threshold`. |
 | **M5-13** | **Wire protocol additions (`pax_protocol`)** | M5-5, M5-8 | Update FlatBuffers schemas with `TradeRouteView`, `InvestmentLedgerView`, `SetTariffCommand`, and `FoundProducerCommand`; regenerate protocol crate. |
 | **M5-14** | **Godot client panels & map modes** | M5-13 | UI screens for trade routes, tariff sliders, construction queues, and trade flow map mode overlay in Godot. |
 | **M5-15** | **Replay gate, benchmarks, and docs** | all | Golden hashes re-recorded for `two_states`; `session_replay.rs` covers trade and construction commands; benchmark within D13 budget (1M POPs $\le 100\text{ ms/day}$). |
-| **M5-16** | **Dynamic merchant entry** | M5-4, M5-8 | Founding merchants on routes with a persistent gap and too little merchant cash, funded by the capitalist investment pool or merchant POPs (Chartered by command); lands after investment's funding rules (TRADE.md, "Entry and exit"). |
+| **M5-16** | **Dynamic merchant entry** | M5-4, M5-8 | Founding merchants on routes with a persistent gap and too little merchant cash, funded by a one-time transfer from the merchant's owner, as D17 says: the market's capitalists (Private) or merchant POPs (Commercial), with no pool in between (Chartered by command); lands after investment's funding rules (TRADE.md, "Entry and exit"). |
 
 ---
 
@@ -88,7 +88,7 @@ This milestone's rules live in their decisions and designs; this section only sa
    * Merchants enter routes with a persistent price gap and exit when loss-making, with money conserved through both.
    * Total money invariant asserts on every tick with random trade routes and high trade volumes.
 2. **Investment Grows the Economy:**
-   * In `two_states` over 20 years, producer capacity and real GDP rise (versus a flat ≈4,200/day without investment), while unemployment stays within its band (≈0.8% since D25).
+   * In `two_states` over 20 years, producer capacity and real GDP rise above the baselines in M5-10, while unemployment stays within its band.
    * Expanding producers generate sustained market demand for construction inputs (tools, timber, steel).
 3. **Economic Feedback on Discontent:**
    * High militancy above `strike_threshold` measurably reduces production output.

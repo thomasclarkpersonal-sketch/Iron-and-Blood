@@ -70,7 +70,7 @@ These steps slot into the existing tick (`tick.rs`):
 
 | Kind | Owner | Dividends go to | Founded from |
 |---|---|---|---|
-| **Private** | the origin market's capitalists | the origin market's capitalist owner pool, as producers' dividends | that pool's investment funds |
+| **Private** | the origin market's capitalists | the origin market's capitalist owner pool, as producers' dividends | a one-time transfer from those capitalists (as new producers, D27) |
 | **Commercial** | a **merchant** profession (new, in `professions.toml`) | the merchant POPs of the origin province | the merchant POPs' savings |
 | **Chartered** | the origin market's nation | its treasury (no income tax: it's the state) | the treasury, by a player command |
 
@@ -118,7 +118,7 @@ Merchants are not fixed at load. Each month end:
 
 | Flow | From | To |
 |---|---|---|
-| Founding (entry) | owner pool, merchant POPs or treasury | new merchant's cash |
+| Founding (entry) | the origin market's capitalists, merchant POPs or treasury, in one transfer | new merchant's cash |
 | Purchase in A | merchant cash | A's sellers (normal receipts split) |
 | Tariff | merchant cash | treasury of B's nation |
 | Sale in B | B's buyers | merchant cash |

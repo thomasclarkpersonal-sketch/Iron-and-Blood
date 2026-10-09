@@ -505,7 +505,7 @@ The state → national → sphere → global roll-up in the old ECONOMY_SYSTEM w
 - **Iceberg loss** destroys a fraction `τ` of goods in transit, never money (D5).
 - **Tariffs** are ad valorem on the **origin price** (yesterday's price in the exporting market), paid from merchant cash to the importing nation's treasury: a transfer, conserved (D5).
 - **Owners** (`MerchantKind`): the origin market's capitalists, a merchant profession, or the state (chartered). Dividends follow the owner.
-- **Entry and exit:** merchants are founded when a route's price gap persists and its merchants' cash can't use its capacity (funded like new producers, D27; chartered ones only by command), and wound up when loss-making, their cash returning to the owner. A scenario may seed starting merchants. Founding and winding up move money, never create it (D5).
+- **Entry and exit:** merchants are founded when a route's price gap persists and its merchants' cash can't use its capacity, by a one-time transfer from their owner, as new producers are (D27): the origin market's capitalists, the merchant POPs, or, by command only, the treasury. They are wound up when loss-making, their cash returning to the owner. A scenario may seed starting merchants. Founding and winding up move money, never create it (D5).
 - **Per-route tuning:** each route sets its own `margin` and flow speed; there is no global value.
 - **Routes** are precomputed at load and when infrastructure changes, as a sparse **trade horizon** (pairs whose retention `Π(1 − τ)` is at least `min_retention`), never pathfinding in the tick and never a dense all-pairs matrix.
 - **Invariants:** merchant cash is in `World::total_money` and the state hash; goods in transit and in merchant stock change exactly by purchases − sales − iceberg loss.
@@ -532,7 +532,8 @@ The state → national → sphere → global roll-up in the old ECONOMY_SYSTEM w
 - **Rule, riots (deterministic, monthly):** a province whose population-weighted militancy exceeds `riot_threshold` loses a share of its producers' output stock (goods, never money, D5), and its nation's treasury pays a security transfer to its POPs, **automatically**: M5 has no repression command.
 - **Order:** riots run at month end **after** politics, on this month's militancy.
 - Revolts are M6 (D32).
-- **Amends:** D6 (how striking workers are paid: the pool's wages split by its working members, or strikes cost the strikers nothing; to be fixed when accepted), D19 (whether the riot transfer relieves militancy directly; today it acts only through life needs), D4 (riots after politics).
+- **Open:** how striking workers are paid (the pool's wages split by its working members, or strikes cost the strikers nothing), and whether the riot transfer relieves militancy directly (today it acts only through life needs).
+- **Amends:** D6 (striking workers' pay, once settled), D19 (the riot transfer's militancy relief, once settled), D4 (riots after politics).
 
 ## D29. Workforce composition and strata mobility
 
