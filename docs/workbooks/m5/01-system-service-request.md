@@ -154,7 +154,7 @@ Outcomes, not mechanisms. The Analysis stage (`03-requirements-specification.md`
 
 ## Initial assessment
 
-**Within the existing decisions.** With D17, D27 and D28 accepted for this run, the milestone can be planned and built on accepted decisions alone, and no new decision is needed to start. The later stages must settle the points below as choices within D17, D27 and D28, each recorded for the maintainer to check.
+**Within the existing decisions.** With D17, D27 and D28 accepted for this run, the milestone can be planned and built on accepted decisions alone, and no new decision is needed to start. The later stages must settle the points below as choices within D17, D27 and D28, each recorded for the maintainer to check. The Analysis stage settled items 1 and 2 as the [requirements specification](03-requirements-specification.md#choices-this-page-makes-within-the-contract)'s choices C1 to C23.
 
 **1. Where the milestone and its designs disagree:**
 - **Merchant goods:** dense per-good merchant columns (M5-2, `MILESTONE_5.md:65`; `docs/TRADE.md:39-41`) against a sparse cargo table (`docs/DATA_MODEL_M5_M6.md:25`).
@@ -174,7 +174,7 @@ Outcomes, not mechanisms. The Analysis stage (`03-requirements-specification.md`
 | Importing nation and partner | `TRADE.md:49`, `tariff_rate(B, A)` | `{ nation, partner, rate }`: logs and saves gain a partner, which needs a value for "stateless" | As above | Nations × (nations + 1) rates. Per-partner rates are what customs unions need, which `TRADE.md:114` puts later |
 | Importing nation, partner and good | — | `{ nation, partner, good, rate }` | As above | Nations² × goods rates |
 
-Whichever the Design stage picks, D17's Amends line already covers `SetTariff` under D21 and D24 (`DECISIONS.md:512`), and the D24 amendment it brings says the command needs no conflict rule, for the reason in the table. The planner leans to the per-good rate, for the Design stage to confirm: it is the data model's choice, and per-partner rates belong with the customs unions that come later.
+Whichever the Design stage picks, D17's Amends line already covers `SetTariff` under D21 and D24 (`DECISIONS.md:512`). D24 asks for a conflict rule only for a command that can conflict with another player's (its "Order" bullet, `DECISIONS.md:465`), and a nation's tariffs touch only its own imports (`DATA_MODEL_M5_M6.md:166`), so `SetTariff` needs none, for the reason in the table. The planner leans to the per-good rate, for the Design stage to confirm: it is the data model's choice, and per-partner rates belong with the customs unions that come later.
 
 **2. What the decisions leave to mechanism:**
 - **Riot transfer size:** no rule names the size of the riot security transfer (`docs/REBELLIONS.md`, "New state").

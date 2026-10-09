@@ -9,10 +9,10 @@ The ongoing record of the run that plans and builds [Milestone 5](../../MILESTON
 
 | Deliverable | File | SDLC phase | Status | Last reviewed at |
 |---|---|---|---|---|
-| Project Workbook | `README.md` (this page) | 1. Initiation; kept up to date all run | draft | `67386ff` (Initiation round 1: revise); round 2 under review |
-| System Service Request | [01-system-service-request.md](01-system-service-request.md) | 1. Initiation | draft | `67386ff` (Initiation round 1: revise); round 2 under review |
-| Project Charter | [02-project-charter.md](02-project-charter.md) | 1. Initiation | draft | `67386ff` (Initiation round 1: revise); round 2 under review |
-| Requirements specification | `03-requirements-specification.md` | 2. Analysis | planned | — |
+| Project Workbook | `README.md` (this page) | 1. Initiation; kept up to date all run | approved for Initiation; kept up to date | `041d9e5` (Initiation round 2: approve) |
+| System Service Request | [01-system-service-request.md](01-system-service-request.md) | 1. Initiation | approved; corrected in Analysis round 1 (minor finding 6, [below](#initiation-round-2-minor-findings)) | `041d9e5` (Initiation round 2: approve) |
+| Project Charter | [02-project-charter.md](02-project-charter.md) | 1. Initiation | approved | `041d9e5` (Initiation round 2: approve) |
+| Requirements specification | [03-requirements-specification.md](03-requirements-specification.md) | 2. Analysis | draft | Analysis round 1 under review |
 | System specification | `04-system-specification.md` | 3. Design | planned | — |
 | Baseline project plan, with the project scope statement | `05-baseline-project-plan.md` | 4. Baseline plan | planned | — |
 | Task DAG: the task queue, one pull request per task | `tasks.json` | 4. Baseline plan | planned | — |
@@ -38,6 +38,12 @@ Append-only, oldest first. Times are +08:00.
 | 2026-10-10 01:57 | **Noted for the maintainer.** D28's Amends line still names amendments of D6 and D19 "once settled". Run decision 4 leaves D19 unchanged, and run decision 5 keeps the line as written. The plan PR's description says so ([SSR](01-system-service-request.md#initial-assessment), item 4; [charter](02-project-charter.md#assumptions), A11) |
 | 2026-10-10 01:57 | **Scope.** A command that charters merchants is out of scope: chartered merchants come only from scenario seeding in this run ([SSR](01-system-service-request.md#initial-assessment), item 3) |
 | 2026-10-10 02:00 | **Review round.** Initiation round 2 (this page, the SSR and the charter, with `ff14d1b`) submitted to the reviewer |
+| 2026-10-10 02:08 | **Review round.** Initiation round 2 at `041d9e5`: approve, with 0 blocking, 0 major and 7 minor findings. The minor findings are carried into the Analysis ([below](#initiation-round-2-minor-findings)) |
+| 2026-10-10 02:10 | **Planning.** Analysis round 1 started on `m5/plan` at `041d9e5` |
+| 2026-10-10 02:58 | **Documents.** [Requirements specification](03-requirements-specification.md): 102 requirements (62 functional, 24 non-functional, 16 data rules), 23 choices within the contract, 17 process-logic rules, and eight diagrams (context, level 0, three level 1, use case, activity, ER) |
+| 2026-10-10 02:58 | **Noted for the maintainer.** Merchant dividends are paid untaxed: D15 withholds income tax from producers' payments only, and taxing merchants (`TRADE.md:61`) would amend D15, which no decision does ([requirements](03-requirements-specification.md#choices-this-page-makes-within-the-contract), C7; R-F62) |
+| 2026-10-10 02:58 | **Noted for the maintainer.** `FoundProducer` records a request that the next month end's investment step funds or drops, so `World::apply` checks nothing and a logged command stays valid against the initial world ([requirements](03-requirements-specification.md#choices-this-page-makes-within-the-contract), C15) |
+| 2026-10-10 03:01 | **Review round.** Analysis round 1 (the requirements specification, this page, and one correction to the SSR) submitted to the reviewer |
 
 ## Change requests
 
@@ -52,7 +58,8 @@ A change to a task's contract after the plan is approved, and who decided it.
 | Stage or task | Round | Commit | Verdict | Findings, and how each was handled |
 |---|---|---|---|---|
 | Initiation | 1 | `bd08ee6` (decisions recorded) and `67386ff` (workbook) | revise | 3 major, 5 minor; each handled in round 2 ([below](#initiation-round-1-findings)) |
-| Initiation | 2 | `ff14d1b` (data model) and this round's workbook commit | pending | — |
+| Initiation | 2 | `ff14d1b` (data model) and `041d9e5` (workbook) | approve | 7 minor; each carried into Analysis round 1 ([below](#initiation-round-2-minor-findings)) |
+| Analysis | 1 | this round's workbook commit | pending | — |
 
 ### Initiation, round 1: findings
 
@@ -68,6 +75,20 @@ The reviewer's log line counts 6 minor findings; 5 were relayed to the planner, 
 | 6 | minor | The critic, judging against `main`'s DECISIONS.md, may read the plan PR's acceptance of D17, D27 and D28 as an agent's | Charter A11: the plan PR's description quotes run decisions 1-5 verbatim as the authority. If the critic still reports it CRITICAL, the PR is parked as a disputed finding for the maintainer, never worked around; the mitigation goes to the baseline plan's risk register. O1 refers to it |
 | 7 | minor | O3's formula holds only with no tariff and no binding capacity | O3b states its conditions (one route, no tariff, capacity not binding) and sets the tolerance from `k`; where capacity binds, only O3a applies. The SSR adds the related open point: what `gap` means in the flow rule, which sets where the flow reaches capacity (Initial assessment, item 2) |
 | 8 | minor | M5-5's "mutual real GDP growth" had no acceptance measure | O3c: each market's real GDP over the 20th year is above the autarky run's, on a per-market measure that SR-12 adds; SR-1 says the same |
+
+### Initiation, round 2: minor findings
+
+The stage was approved with these minor findings, from the reviewer's log line. Each is handled in Analysis round 1:
+
+| # | Finding | How it was handled |
+|---|---|---|
+| 1 | O3a's friction band ignores the route's direction and the tariff | R-F20 states the band of the route from the good's cheaper market, `(1 + margin + t·(1 − τ)) ÷ (1 − τ)`, with the importer's tariff `t` |
+| 2 | `mini_valley` out of scope, against A4's fallback and the new hashed columns | R-N8: new tables and columns are hashed and snapshotted so that a world without their content hashes as before, as nations are (`world.rs:633-641`); R-F59 switches every mechanism off in its frozen definitions |
+| 3 | O7 gives no method for measuring the month-end systems | R-N10 names the commands: `--days 30` with `--scale 55 --regions 1500` reaches the first month end on the full table; R-F56 makes `bench` print that day's time |
+| 4 | O4 and O5 lack `conservation.rs` cases (AGENTS.md §6), and §1 is uncited | R-N3 lists a case per new money flow through the shared `random_world`; R-N19 cites AGENTS.md §1 |
+| 5 | O5 has no measure for run decisions 3 and 4 | R-F35's test pays a wholly striking POP nothing; R-F39's test finds militancy unchanged by the riot step, and a month later unchanged against a run without the transfer |
+| 6 | The SSR attributes "no conflict rule" to D17 | Corrected in the SSR's Initial assessment, item 1: D24's "Order" bullet asks for a conflict rule only where a command can conflict with another player's, and a nation's tariffs touch only its own imports (`DATA_MODEL_M5_M6.md:166`) |
+| 7 | M5-16's row says "(Chartered by command)", against the charter's exclusion of a charter command | R-F16: entry never founds a Chartered merchant; R-F60: no charter command (won't); M5-16's pull request rewords its row when it ticks it |
 
 ## Run rules
 
