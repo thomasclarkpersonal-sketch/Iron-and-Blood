@@ -1,6 +1,6 @@
 # Inter-Market Trade (M5): Design
 
-**Status: design accepted by the owner (2026-10-09), not implemented yet.** It turns the binding principles of [DECISIONS.md D14](DECISIONS.md#d14-market-hierarchy-and-inter-market-trade) into a concrete mechanism, and is delivered in Milestone 5. The rules that become binding go into DECISIONS.md as M5's trade decision; this document holds the mechanism. The owner's answers to the review questions are under [Decisions](#decisions-owner-2026-10-09).
+**Status: design agreed with the owner (2026-10-09), not implemented yet; its decision is *Proposed* until accepted.** It turns the binding principles of [DECISIONS.md D14](DECISIONS.md#d14-market-hierarchy-and-inter-market-trade) into a concrete mechanism, and is delivered in Milestone 5. Its rules are [D17](DECISIONS.md#d17-inter-market-trade-routes-merchants-and-tariffs) (binding once accepted); this document holds the mechanism. The owner's answers to the review questions are under [Decisions](#decisions-owner-2026-10-09).
 
 ## Goals
 
@@ -70,7 +70,7 @@ These steps slot into the existing tick (`tick.rs`):
 
 | Kind | Owner | Dividends go to | Founded from |
 |---|---|---|---|
-| **Private** | the origin market's capitalists | the origin market's capitalist owner pool, as producers' dividends | that pool's investment funds |
+| **Private** | the origin market's capitalists | the origin market's capitalist owner pool, as producers' dividends | a one-time transfer from those capitalists (as new producers, D27) |
 | **Commercial** | a **merchant** profession (new, in `professions.toml`) | the merchant POPs of the origin province | the merchant POPs' savings |
 | **Chartered** | the origin market's nation | its treasury (no income tax: it's the state) | the treasury, by a player command |
 
@@ -79,7 +79,7 @@ Who receives trade profits shapes politics later (interest groups, M6), which is
 ## Entry and exit
 
 Merchants are not fixed at load. Each month end:
-- **Entry:** on a route in the trade horizon whose smoothed price gap for some good exceeds its `margin`, and whose merchants' combined cash can't buy the route's `capacity` at today's prices, an owner with funds founds a new merchant with starting capital. Private and Commercial merchants are founded by their owner pools with the same funding rule as new producers in M5's investment design ([INVESTMENT.md](INVESTMENT.md)); Chartered merchants only by command. At most one entry per route and month, so the response is gradual and deterministic (largest gap first, then lowest route).
+- **Entry:** on a route in the trade horizon whose smoothed price gap for some good exceeds its `margin`, and whose merchants' combined cash can't buy the route's `capacity` at today's prices, an owner with funds founds a new merchant with starting capital. Private and Commercial merchants are founded by their owner pools with the same funding rule as new producers (D27, [INVESTMENT.md](INVESTMENT.md)); Chartered merchants only by command. At most one entry per route and month, so the response is gradual and deterministic (largest gap first, then lowest route).
 - **Exit:** a merchant whose smoothed profit has been negative for `exit_months` winds up: it stops buying, sells off its stock, and its remaining cash returns to its owner (pool, POPs or treasury). Money is moved, never destroyed (D5).
 - **Seeding:** a scenario may list starting merchants per route (for example historical trading houses), with their kind and capital, so trade works from day 1 and before any route has proved itself:
 
@@ -118,7 +118,7 @@ Merchants are not fixed at load. Each month end:
 
 | Flow | From | To |
 |---|---|---|
-| Founding (entry) | owner pool, merchant POPs or treasury | new merchant's cash |
+| Founding (entry) | the origin market's capitalists, merchant POPs or treasury, in one transfer | new merchant's cash |
 | Purchase in A | merchant cash | A's sellers (normal receipts split) |
 | Tariff | merchant cash | treasury of B's nation |
 | Sale in B | B's buyers | merchant cash |

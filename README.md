@@ -62,6 +62,8 @@ New to the project? Start with **[Onboarding](docs/ONBOARDING.md)**: a codebase 
 * [Milestone 2](docs/MILESTONE_2.md): M2 status, decisions waiting on you, next tasks.
 * [Milestone 3](docs/MILESTONE_3.md): playable single player: `pax_server`, Godot client, saves (closed).
 * [Milestone 4](docs/MILESTONE_4.md): multiplayer: lobby, authority, lag rules, hosting.
+* [Milestone 5](docs/MILESTONE_5.md): trade, capital investment, construction, economic unrest.
+* [Milestone 6](docs/MILESTONE_6.md): workforce composition, strata mobility, banking, politics & reforms.
 * [Hosting a multiplayer game](docs/HOSTING.md): from the client, or a dedicated server with Docker.
 * [Network protocol](docs/NETWORK_PROTOCOL.md): the wire format between server and client.
 * [System Architecture Overview](docs/ARCHITECTURE.md): engine design and the tick schedule.

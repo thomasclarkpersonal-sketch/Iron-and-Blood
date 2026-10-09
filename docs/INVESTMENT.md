@@ -1,6 +1,6 @@
 # Investment and Capacity Growth (M5): Design
 
-**Status: design accepted by the owner (2026-10-09), not implemented yet.** It is delivered in Milestone 5. The rules that become binding go into DECISIONS.md as M5's investment decision; this document holds the mechanism. The owner's answers to the review questions are under [Decisions](#decisions-owner-2026-10-09).
+**Status: design agreed with the owner (2026-10-09), not implemented yet; its decision is *Proposed* until accepted.** It is delivered in Milestone 5. Its rules are [D27](DECISIONS.md#d27-capital-investment-and-capacity-expansion) (binding once accepted); this document holds the mechanism. The owner's answers to the review questions are under [Decisions](#decisions-owner-2026-10-09).
 
 ## The problem it solves
 
@@ -15,7 +15,7 @@ Labour mobility (D18), migration (D20) and occupational migration (D25) only mov
 
 | Question | Decision |
 |---|---|
-| Who invests | **Producers expand from retained earnings.** **New producers are founded** from a capitalist investment pool or by the state. See [Founding](#founding-new-producers). |
+| Who invests | **Producers expand from retained earnings.** **New producers are founded** by a one-time transfer from the market's capitalists, or by the state. See [Founding](#founding-new-producers). |
 | New producers | **Yes**, in provinces with unemployed workers. |
 | Profit test | **A margin over the wage bill** (`V̄ > wage bill × (1 + profit_margin)`), not a payback period. |
 | Depreciation and maintenance | **Idle capacity shrinks.** Capacity in use does **not** wear out or need maintenance goods in M5. |
@@ -66,12 +66,12 @@ Each month end, in a province with a labour pool whose unemployment is at least 
 
 | Funder | Where the money comes from | Owner (dividends) |
 |---|---|---|
-| **Capitalist investment pool** | the market's capitalist owner POPs: the share of their cash above `investor_reserve` days of their consumption, taken pro rata to their cash (largest remainder, D7) | the market's capitalist owner pool, as the producer type's data says |
+| **The market's capitalists** (no pool holds cash: one transfer) | the market's capitalist owner POPs: the share of their cash above `investor_reserve` days of their consumption, taken pro rata to their cash (largest remainder, D7) | the market's capitalist owner pool, as the producer type's data says |
 | **The state** | the nation's treasury, by a `FoundProducer { province, producer_type }` command | the nation's treasury |
 
 - At most one founding per province and month, largest unemployment first, then lowest province and producer type, so the response is gradual and deterministic.
 - The funding is a transfer to the new producer's cash: money moves, never appears (D5).
-- The capitalist pool is also what founds Private merchants in the trade design (TRADE.md, "Entry and exit"), with the same rule.
+- The same transfer from the market's capitalists founds Private merchants in the trade design (TRADE.md, "Entry and exit"), with the same rule.
 
 ## New state
 
@@ -100,6 +100,6 @@ New `rules.toml` section `[investment]`: `profit_margin`, `idle_months_before_sh
 |---|---|
 | 1 | Construction recipes in data; the project columns on `Producers`. No behaviour change. |
 | 2 | Producer expansion: the monthly decision, daily construction orders, completion. Acceptance tests 2, 3. |
-| 3 | Founding: the capitalist investment pool and the state's `FoundProducer` command. Acceptance test 4. |
+| 3 | Founding: the transfer from the market's capitalists, and the state's `FoundProducer` command. Acceptance test 4. |
 | 4 | Disinvestment of idle capacity. Acceptance test 5. |
 | 5 | `two_states` over 20 years: growth, bands re-measured, golden hashes re-recorded. Acceptance test 1. |

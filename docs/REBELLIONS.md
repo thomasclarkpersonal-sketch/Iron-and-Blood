@@ -1,6 +1,6 @@
 # Unrest and Rebellions (M5, M6): Design
 
-**Status: design accepted by the owner (2026-10-09), not implemented yet.** It gives [D19](DECISIONS.md#d19-militancy) militancy its consequences, in two milestones: **strikes and riots in M5**, **rebellions in M6**. The rules that become binding go into DECISIONS.md as M5's unrest decision and M6's revolutions decision; this document holds the mechanism. The owner's answers to the review questions are under [Decisions](#decisions-owner-2026-10-09).
+**Status: design agreed with the owner (2026-10-09), not implemented yet; its decision is *Proposed* until accepted.** It gives [D19](DECISIONS.md#d19-militancy) militancy its consequences, in two milestones: **strikes and riots in M5**, **rebellions in M6**. Its rules are [D28](DECISIONS.md#d28-economic-unrest-strikes-and-riots) (M5) and [D32](DECISIONS.md#d32-political-revolutions-and-breakaway-markets) (M6) (binding once accepted); this document holds the mechanism. The owner's answers to the review questions are under [Decisions](#decisions-owner-2026-10-09).
 
 ## Where we are
 
@@ -34,9 +34,9 @@ When the population-weighted militancy of a province exceeds `riot_threshold`, a
 
 ## Stage 3: rebellion (M6; seeded-random, rare)
 
-Above `rebellion_threshold`, each month a province has probability `p = rebellion_base × (militancy − rebellion_threshold)` of rising.
-- **The one place randomness enters the economy:** the draw uses `rng::Stream::REBELLION` keyed by `(seed, day, province)` (D3). It's deterministic and independent of thread count and iteration order.
-- **A rebellion seizes the province's markets** (sets `market_nation` to `None`, i.e. stateless) until it ends. The nation loses tax revenue there, and the rebels' militancy slowly falls with independence.
+Revolts take **markets**, not provinces, because nation ownership is per market (D15). Above `rebellion_threshold`, each month a market has probability `p = rebellion_base × (militancy − rebellion_threshold)` of rising, on its population-weighted militancy.
+- **The one place randomness enters the economy:** the draw uses `rng::Stream::REBELLION` keyed by `(seed, day, market)` (D3). It's deterministic and independent of thread count and iteration order.
+- **A rebellion takes the market** (it becomes stateless) until it ends. Market ownership is therefore game state, hashed and saved, not scenario geography, and a revolt record keeps the nation to restore (D32). The nation loses tax revenue there, and the rebels' militancy slowly falls with independence.
 - **Demands:** a rebellion carries a demand, a reform it wants (from M6's reforms and interest groups), recorded with the revolt.
 - **It ends** in one of two ways, and the market returns to its nation:
   - **compromise:** the nation passes the demanded reform;
@@ -55,7 +55,7 @@ Each stage feeds back into policy pressure. With commands (D21), a player sees m
 ## New state
 
 - **POPs:** none (militancy exists).
-- **Province (M6):** `in_revolt: bool`, `revolt_months: u16`, and the revolt's demand.
+- **Market (M6):** its owning nation becomes state; a revolt record per revolting market holds the nation to restore, `revolt_months`, and the demanded reform.
 - **Nation:** none (repression is a transfer).
 
 New `[politics]` rules:
@@ -71,5 +71,5 @@ New `[politics]` rules:
 
 **M6:**
 
-4. **Rebellions:** deterministic for a given seed at any thread count; they flip `market_nation` and restore it when the demanded reform passes or after `rebellion_months`.
+4. **Rebellions:** deterministic for a given seed at any thread count; the market turns stateless and returns to the recorded nation when the demanded reform passes or after `rebellion_months`.
 5. **Compromise:** passing the demanded reform ends the rebellion the next month end.
