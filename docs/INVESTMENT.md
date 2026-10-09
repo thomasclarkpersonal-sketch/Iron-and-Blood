@@ -1,6 +1,6 @@
 # Investment and Capacity Growth (M5): Design
 
-**Status: design accepted by the owner (2026-10-09), not implemented yet.** It is delivered in Milestone 5. Its binding rules are [D27](DECISIONS.md#d27-capital-investment-and-capacity-expansion); this document holds the mechanism. The owner's answers to the review questions are under [Decisions](#decisions-owner-2026-10-09).
+**Status: design agreed with the owner (2026-10-09), not implemented yet; its decision is *Proposed* until accepted.** It is delivered in Milestone 5. Its rules are [D27](DECISIONS.md#d27-capital-investment-and-capacity-expansion (binding once accepted); this document holds the mechanism. The owner's answers to the review questions are under [Decisions](#decisions-owner-2026-10-09).
 
 ## The problem it solves
 

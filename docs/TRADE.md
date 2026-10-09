@@ -1,6 +1,6 @@
 # Inter-Market Trade (M5): Design
 
-**Status: design accepted by the owner (2026-10-09), not implemented yet.** It turns the binding principles of [DECISIONS.md D14](DECISIONS.md#d14-market-hierarchy-and-inter-market-trade) into a concrete mechanism, and is delivered in Milestone 5. Its binding rules are [D17](DECISIONS.md#d17-inter-market-trade-routes-merchants-and-tariffs); this document holds the mechanism. The owner's answers to the review questions are under [Decisions](#decisions-owner-2026-10-09).
+**Status: design agreed with the owner (2026-10-09), not implemented yet; its decision is *Proposed* until accepted.** It turns the binding principles of [DECISIONS.md D14](DECISIONS.md#d14-market-hierarchy-and-inter-market-trade) into a concrete mechanism, and is delivered in Milestone 5. Its rules are [D17](DECISIONS.md#d17-inter-market-trade-routes-merchants-and-tariffs (binding once accepted); this document holds the mechanism. The owner's answers to the review questions are under [Decisions](#decisions-owner-2026-10-09).
 
 ## Goals
 

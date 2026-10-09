@@ -498,70 +498,79 @@ The state → national → sphere → global roll-up in the old ECONOMY_SYSTEM w
 
 ## D17. Inter-market trade: routes, merchants and tariffs
 
-**Proposed (M5).** Full design: [TRADE.md](TRADE.md) and [MILESTONE_5.md](MILESTONE_5.md).
+**Proposed (M5).** Mechanism: [TRADE.md](TRADE.md); data model: [DATA_MODEL_M5_M6.md](DATA_MODEL_M5_M6.md); tasks: [MILESTONE_5.md](MILESTONE_5.md). The owner's answers to the design review (2026-10-09) are recorded in TRADE.md.
 
-- **Principle (D14):** Trade is driven by price-gap netbacks between markets, not a single global clearinghouse.
-- **Iceberg Transport Costs:** Samuelson iceberg model where a fraction $\tau$ of shipped goods is destroyed in transit. Destroys goods, never money (D5).
-- **Trade Horizon:** To avoid storing a dense $O(N^2)$ all-pairs friction matrix, a per-source Dijkstra computes paths with retention $\prod(1 - \tau) \ge \text{min\_retention}$, stored in a sparse route list per market.
-- **Merchants:** A `Merchants` table (`route`, `cash`, `transit`, `stock`, `cost_basis`).
-  - Day $T$: Merchant places standard D1 `BuyOrder` in origin market $A$.
-  - Day $T+1$: Goods land in destination market $B$ with iceberg reduction and tariff deduction, and are offered for sale via D1 `SellOffer`.
-  - 1-day transit delay allows markets to clear completely independently in parallel with zero lock contention.
-- **Tariffs:** Ad-valorem tariff paid in cash from the merchant to the importing nation's treasury, charged on the **origin price** (yesterday's price in the exporting market), so it is known when the goods are bought.
-- **Institutional Variety (`MerchantKind`):** Private (owned by origin capitalists), Commercial (owned by dedicated merchant profession), or Chartered (dividends paid directly to state treasury).
-- **Per-route tuning:** each route sets its own profit `margin` and flow speed `k`; there is no global value.
-- **Entry and exit:** merchants are founded when a route's price gap persists and its merchants' cash can't use its capacity (funded like new producers, D27; Chartered only by command), and wound up when loss-making, returning their cash to their owner. A scenario may seed starting merchants per route. Founding and winding up move money, never create it (D5).
-- **Owner's answers to the review questions** (2026-10-09) are recorded in TRADE.md.
+- **Rule:** goods move between markets only through **merchants**, ordinary D1 buyers in the origin and sellers in the destination, so every market still clears by itself and scarce exports are rationed pro rata with local buyers (D14).
+- **One day of transit:** goods bought on day T land on day T+1. That keeps markets independent within a tick, so they clear in parallel with no cross-market locks.
+- **Iceberg loss** destroys a fraction `τ` of goods in transit, never money (D5).
+- **Tariffs** are ad valorem on the **origin price** (yesterday's price in the exporting market), paid from merchant cash to the importing nation's treasury: a transfer, conserved (D5).
+- **Owners** (`MerchantKind`): the origin market's capitalists, a merchant profession, or the state (chartered). Dividends follow the owner.
+- **Entry and exit:** merchants are founded when a route's price gap persists and its merchants' cash can't use its capacity (funded like new producers, D27; chartered ones only by command), and wound up when loss-making, their cash returning to the owner. A scenario may seed starting merchants. Founding and winding up move money, never create it (D5).
+- **Per-route tuning:** each route sets its own `margin` and flow speed; there is no global value.
+- **Routes** are precomputed at load and when infrastructure changes, as a sparse **trade horizon** (pairs whose retention `Π(1 − τ)` is at least `min_retention`), never pathfinding in the tick and never a dense all-pairs matrix.
+- **Invariants:** merchant cash is in `World::total_money` and the state hash; goods in transit and in merchant stock change exactly by purchases − sales − iceberg loss.
+- **Amends:** D4 (arrival step and merchant orders; the tick order in DATA_MODEL_M5_M6.md), D14 rule 5 (a sparse horizon instead of a dense matrix), D5 and D6 (merchant cash; merchant dividends), D21 and D24 (`SetTariff` and its validation).
+- **Open** (DATA_MODEL_M5_M6.md, "Open questions"): whether routes take their bottleneck link's capacity or share link capacity pro rata.
 
 ## D27. Capital investment and capacity expansion
 
-**Proposed (M5).** Full design: [INVESTMENT.md](INVESTMENT.md) and [MILESTONE_5.md](MILESTONE_5.md).
+**Proposed (M5).** Mechanism: [INVESTMENT.md](INVESTMENT.md); data model: [DATA_MODEL_M5_M6.md](DATA_MODEL_M5_M6.md); tasks: [MILESTONE_5.md](MILESTONE_5.md).
 
-- **Problem:** Producer capacity is fixed at load, so output can never grow beyond what a scenario starts with, and capital has no productive use. (The 20-year unemployment drift once blamed on this was a profession/province mismatch, fixed by D25; unemployment now holds at about 0.8%.)
-- **Decentralized Expansion:** Existing producers expand capacity from retained earnings when profitable ($\bar{V} > \text{wage bill} \times (1 + \text{margin})$), liquid, and when local labour pools have unemployment $\ge \text{step}$.
-- **Construction Goods Demand:** Project places daily D1 market buy orders for construction inputs (tools, timber, steel). Completed construction increases `capacity += step` and consumes delivered goods.
-- **Founding Producers:** Provinces with idle workforce can found new factory types using funds from a Capitalist Investment Pool or the State Treasury (state industry, by command). The founding is a transfer, never new money (D5).
-- **Depreciation:** Idle capacity unused for `idle_months_before_shrink` shrinks by `step` worker slots. Capacity in use does not wear out or need maintenance goods in M5.
+- **Problem:** producer capacity is fixed at load, so output can never grow beyond what a scenario starts with, and capital has no productive use. (The unemployment drift once blamed on this was a profession/province mismatch, fixed by D25; MILESTONE_2, "Measured state".)
+- **Rule, expansion:** a producer starts a project from **retained earnings** only when it is profitable (smoothed value added above the wage bill by a margin), its labour pool has unemployed workers for the new slots, and its cash covers the project above its reserves. The budget is reserved **before** dividends.
+- **Rule, construction:** projects buy **real construction goods** through ordinary D1 orders; capacity grows only when they are delivered, and they are consumed. Investment creates demand, never money.
+- **Rule, founding:** a province with unemployed workers may get a new producer, funded by the market's capitalists or, by command, by the state's treasury (state industry). The funding is a transfer (D5). A state-founded producer's dividends go to its treasury.
+- **Rule, depreciation:** capacity idle for `idle_months_before_shrink` shrinks; capacity in use does not wear out in M5.
+- **Invariants:** producer rows are never removed or reordered (a closed producer has capacity 0), since projects and later loans reference them; a project holds no cash of its own.
+- **Amends:** D6 (dividends only above the project reserve; state ownership; founding transfers), D4 (the month-end investment step), D21 and D24 (`FoundProducer`, only in the commanding nation's own markets).
 
 ## D28. Economic unrest: strikes and riots
 
-**Proposed (M5).** Full design: [REBELLIONS.md](REBELLIONS.md) and [MILESTONE_5.md](MILESTONE_5.md).
+**Proposed (M5).** Mechanism: [REBELLIONS.md](REBELLIONS.md); tasks: [MILESTONE_5.md](MILESTONE_5.md).
 
-- **Strikes (Deterministic, continuous):** POPs with militancy $> \text{strike\_threshold}$ reduce effective labour supply: $\text{effective} = \text{size} \times (1 - \text{strike\_rate} \times (\text{militancy} - \text{threshold}))$. Reduces output and raises prices without military units.
-- **Riots (Deterministic, monthly):** Above $\text{riot\_threshold}$, a percentage of local output stock is destroyed, and the treasury pays an emergency repression/security transfer to local POPs. Repression is **automatic** in M5: there is no repression command.
-- Political revolutions and armed revolts are deferred to M6 (D32).
+- **Rule, strikes (deterministic, continuous):** a POP whose militancy exceeds `strike_threshold` supplies less labour, `size × (1 − strike_rate × (militancy − threshold))`, so output falls and prices rise.
+- **Rule, riots (deterministic, monthly):** a province whose population-weighted militancy exceeds `riot_threshold` loses a share of its producers' output stock (goods, never money, D5), and its nation's treasury pays a security transfer to its POPs, **automatically**: M5 has no repression command.
+- **Order:** riots run at month end **after** politics, on this month's militancy.
+- Revolts are M6 (D32).
+- **Amends:** D6 (how striking workers are paid: the pool's wages split by its working members, or strikes cost the strikers nothing; to be fixed when accepted), D19 (whether the riot transfer relieves militancy directly; today it acts only through life needs), D4 (riots after politics).
 
 ## D29. Workforce composition and strata mobility
 
-**Proposed (M6).** Full design: [POP_SYSTEM.md](POP_SYSTEM.md) and [MILESTONE_6.md](MILESTONE_6.md).
+**Proposed (M6).** Mechanism: [POP_SYSTEM.md](POP_SYSTEM.md) ("Workforce Composition", "Future: dependents and births"); data model: [DATA_MODEL_M5_M6.md](DATA_MODEL_M5_M6.md); tasks: [MILESTONE_6.md](MILESTONE_6.md).
 
-- **Tripartite Split:** Each POP row tracks `workforce_male`, `workforce_female`, and `dependents`.
-- **Labor Laws:** National laws determine the fraction of `dependents` (child labor) and `workforce_female` entering effective workforce pools. Replaces D26's temporary band-aid.
-- **Promotion & Demotion:** Deterministic fractional mobility between strata (Labourers $\to$ Craftsmen/Clerks $\to$ Capitalists) governed by literacy and wage premiums. Movers take pro-rata cash via largest-remainder allocation (D7).
+- **Rule:** a POP's people are split into working men, working women and dependents. These three are state; the POP's **size is derived** as their sum, never stored beside them (D7).
+- **Rule:** national labour laws set what share of women and dependents (child labour) enters the effective workforce; the effective workforce is derived, never stored.
+- **Rule:** births add dependents out of a household's surplus income, and starvation kills dependents before workers, which **supersedes D26's band-aid**.
+- **Rule:** promotion and demotion between strata are deterministic fractional flows driven by literacy and wage premiums; movers take their cash share by largest remainder (D7).
+- **Amends:** D7 (splits and merges across the three columns), D2, D18, D20 and D25 (which column each reads: DATA_MODEL_M5_M6.md has the reader table), D26 (superseded).
 
 ## D30. Endogenous inside money and sovereign debt
 
-**Proposed (M6).** Full design: [MACROECONOMICS.md](MACROECONOMICS.md) and [MILESTONE_6.md](MILESTONE_6.md).
+**Proposed (M6).** Mechanism: [MACROECONOMICS.md](MACROECONOMICS.md); data model: [DATA_MODEL_M5_M6.md](DATA_MODEL_M5_M6.md); tasks: [MILESTONE_6.md](MILESTONE_6.md).
 
-- **Double-Entry Banking:** Commercial loans (bank assets) and deposits (bank liabilities) created simultaneously.
-- **Extended SFC Invariant:** $\sum \text{financial assets} - \sum \text{financial liabilities} = \sum \text{outside money}$ holds on every tick.
-- **Sovereign Debt:** Treasuries issue bonds with coupon interest to finance deficits.
-- **Default:** Balance sheet write-offs destroy net wealth, never outside cash.
+- **Rule:** banks create a loan (their asset) and a deposit (their liability) together; D5's invariant, financial assets minus liabilities equals outside money, holds on every tick, and a default writes off balance-sheet wealth, never outside cash (D5).
+- **Rule:** bank reserves are outside money, in `World::total_money` and the state hash.
+- **Rule:** a POP's deposits are a POP column that follows D7's split, merge and heir rules; no claim references a POP row.
+- **Rule:** treasuries may issue bonds with coupon interest to finance deficits; coupons are transfers.
+- **Open** (DATA_MODEL_M5_M6.md, "Open questions"): one bank per market or per nation; whether deposits are spendable in the market or only cash; whether bonds are held by banks only or by POPs too.
+- **Amends:** D5 (means of payment, reserves, the per-bank invariant), D7 (deposits), D6 (firm failure: loans first, then owners), D15 and D21 (coupons, deficit financing, `IssueBonds`).
 
 ## D31. Interest groups, consciousness and legislative reforms
 
-**Proposed (M6).** Full design: [POLITICS_SYSTEM.md](POLITICS_SYSTEM.md) and [MILESTONE_6.md](MILESTONE_6.md).
+**Proposed (M6).** Mechanism: [POLITICS_SYSTEM.md](POLITICS_SYSTEM.md); data model: [DATA_MODEL_M5_M6.md](DATA_MODEL_M5_M6.md); tasks: [MILESTONE_6.md](MILESTONE_6.md).
 
-- **Consciousness:** Separate from militancy; tracks political awareness driven by literacy and discretionary spending ($Y - N \cdot C$).
-- **Interest Groups:** Political clout calculated dynamically from POP attributes across six groups: Industrialists, Trade Unions, Landowners, Devout, Intelligentsia, and Armed Forces.
-- **Reforms:** Parliamentary system passing voting laws, social welfare, work hour limits, and compulsory schooling.
+- **Rule:** consciousness is a POP attribute separate from militancy, driven by literacy and discretionary income.
+- **Rule:** interest-group clout is **derived** each month from POPs' professions, wealth and literacy, through profession weights in data, never stored. Which groups exist, and each profession's weights, are data (POLITICS_SYSTEM.md), not this decision.
+- **Rule:** laws change only by parliamentary vote weighted by clout, checked in `World::validate`.
+- **Open** (DATA_MODEL_M5_M6.md, "Open questions"): the new professions M6 needs (clergy, clerks, perhaps merchants) and the groups they lean to.
+- **Amends:** D6, D15 and D19 (wage-floor and tax-bracket laws; consciousness beside militancy; group approval's effect on militancy), D21 (`SetLaw`).
 
 ## D32. Political revolutions and breakaway markets
 
-**Proposed (M6).** Full design: [REBELLIONS.md](REBELLIONS.md) and [MILESTONE_6.md](MILESTONE_6.md).
+**Proposed (M6).** Mechanism: [REBELLIONS.md](REBELLIONS.md); data model: [DATA_MODEL_M5_M6.md](DATA_MODEL_M5_M6.md); tasks: [MILESTONE_6.md](MILESTONE_6.md).
 
-- **Stochastic Uprisings:** Extreme militancy triggers revolts via `rng::Stream::REBELLION` keyed by `(seed, day, province)`.
-- **Breakaway Markets:** Revolting provinces set `market_nation = None` (stateless), denying tax revenue to the central treasury.
-- **Resolution:** Reconciled via legislative reform compromise or expiration timeout. Full military suppression arrives in M7.
-
+- **Rule:** revolts take **markets**, not provinces, because market ownership is per market (D15). Above `rebellion_threshold`, a market rises with a probability drawn from `rng::Stream::REBELLION` keyed by `(seed, day, market)` (D3): seeded, identical on replay at any thread count.
+- **Rule:** a revolting market becomes stateless, so its nation collects no taxes there. **Market ownership is state**, hashed and saved, not scenario geography; a revolt record keeps the nation to restore and the reform the rebels demand.
+- **Rule:** a revolt ends when the demanded reform passes (D31) or after `rebellion_months`, and the market returns to the recorded nation. Suppression by force comes with the military (M7).
+- **Amends:** D15 and D23 (ownership becomes state; the snapshot's geography check no longer covers it), D3 (the rebellion stream keyed by market).
 

@@ -1,5 +1,8 @@
 # Milestone 6: Politics, Society and Banking
 
+> [!NOTE]
+> **Status: planned, not started.** Its decisions D29–D32 are *Proposed* in [DECISIONS.md](DECISIONS.md), and [DATA_MODEL_M5_M6.md](DATA_MODEL_M5_M6.md) holds the corrected data model and the questions still open for the owner.
+
 **Goal:** Transform the simulation into a dynamic historical society: model workforce composition and strata mobility, introduce endogenous inside money (banking, commercial credit, and sovereign debt), simulate interest groups with competing political clouts, establish a legislative reform system, and model ideological revolutions.
 
 Milestone 6 builds directly on the global trade and industrial expansion delivered in [Milestone 5](MILESTONE_5.md). Binding architectural rules follow [DECISIONS.md](DECISIONS.md) (in particular D3, D5, D7, D13, and proposed decisions D29, D30, D31, D32).
@@ -10,23 +13,23 @@ Milestone 6 builds directly on the global trade and industrial expansion deliver
 
 ### In Scope
 1. **Workforce Demographics & Strata Mobility (D29):**
-   * Splitting POP size into `workforce_male`, `workforce_female`, and `dependents`.
+   * Splitting POP size into `workforce_male`, `workforce_female`, and `dependents` (state); `size` becomes their derived sum (D7, D29).
    * **Literacy & Education:** Literacy tracking driven by education access, funding, and child labor laws.
    * **Social Strata Mobility:** Deterministic fractional promotion and demotion (e.g. Labourers/Farmers $\to$ Craftsmen/Clerks $\to$ Capitalists/Officers) driven by literacy, wage differentials, and job vacancies.
    * **Labor Laws:** Child labor restrictions, female workforce participation, and compulsory schooling altering the effective workforce versus dependent ratios.
 2. **Endogenous Inside Money & Sovereign Debt (D30):**
    * Double-entry banking system (`Banks` table) creating deposits (bank liability, depositor asset) and loans (bank asset, borrower liability) simultaneously.
    * Extended stock-flow consistency invariant: $\sum \text{financial assets} - \sum \text{financial liabilities} = \sum \text{outside money}$ asserted daily.
-   * Sovereign debt: Treasuries issuing bonds to banks and capitalist POPs to finance budget deficits without immediate currency minting.
+   * Sovereign debt: Treasuries issuing bonds to finance budget deficits without immediate currency minting. Who may hold bonds (banks only, or POPs too) is open (D30).
    * Commercial credit: Capitalists and producers borrowing to finance expansion projects.
    * Default mechanics: Insolvency write-offs destroy net wealth/claims, never outside cash.
 3. **Interest Groups, Ideology & Political Reforms (D31):**
    * **Consciousness:** Separate from militancy; tracks political awareness and demand for reforms, driven by literacy and discretionary spending.
-   * **Interest Groups:** Clout calculated dynamically from POP profession, wealth, and literacy (Industrialists, Trade Unions, Landowners/Aristocrats, Devout, Intelligentsia, Armed Forces).
+   * **Interest Groups:** Clout derived each month from POP profession, wealth, and literacy through profession weights in data (D31). The starting groups (Industrialists, Trade Unions, Landowners/Aristocrats, Devout, Intelligentsia; Armed Forces with the military in M7) are data.
    * **Legislative Reforms:** Player and parliament passing institutional reforms (voting franchise, minimum wage, pensions, compulsory schooling, progressive taxation brackets).
 4. **Political Revolutions & Secessions (D32):**
    * Escalation of unrest beyond strikes and riots into armed revolutions.
-   * Seeded stochastic revolts (`rng::Stream::REBELLION`) where provinces seize markets, declare stateless independence, and demand institutional reforms.
+   * Seeded stochastic revolts (`rng::Stream::REBELLION`) where markets break away, become stateless, and demand institutional reforms; market ownership becomes saved state (D32).
    * Resolution via legislative compromise or expiration timeout (ahead of full military suppression in Milestone 7).
 5. **Wire Protocol & Godot Client UI:**
    * Wire protocol additions: `PoliticsSummary`, `InterestGroupTable`, `BankSummary`, `PassReformCommand`, `IssueBondsCommand`.
@@ -67,11 +70,11 @@ flowchart TD
 ### 2. Endogenous Inside Money (D30, Proposed)
 * **Double-Entry Balance Sheets:** Banks maintain deposit liabilities and loan assets.
 * **Commercial Credit:** Expanding producers with positive net worth can borrow up to a credit limit to finance project construction.
-* **Sovereign Debt:** When government spending exceeds revenue, the treasury issues bonds bearing a coupon interest rate. Banks and wealthy Capitalist POPs purchase bonds with idle cash.
+* **Sovereign Debt:** When government spending exceeds revenue, the treasury issues bonds bearing a coupon interest rate. Who buys them, banks only or capitalist POPs too, is open (D30; DATA_MODEL_M5_M6.md, "Open questions").
 * **Default:** If a nation or borrower defaults, the debt is written off: borrower liabilities drop and creditor assets drop by the exact same amount. Net worth is destroyed, but zero cash is deleted from the outside money supply (preserving D5).
 
 ### 3. Interest Groups & Reforms (D31, Proposed)
-* **Clout Weighting:** POPs align with interest groups based on material status:
+* **Clout Weighting:** POPs align with interest groups based on material status, through profession weights in data (D31). A starting mapping, which needs new professions (clergy, clerks, merchants; open in DATA_MODEL_M5_M6.md):
   * Capitalists & Merchants $\to$ **Industrialists**
   * Craftsmen & Labourers $\to$ **Trade Unions**
   * Aristocrats & Farmers $\to$ **Landowners / Agrarians**
@@ -81,8 +84,8 @@ flowchart TD
 * **Enacting Reforms:** Enacting reforms placates target interest groups and reduces consciousness/militancy, but angers opposing entrenched elites.
 
 ### 4. Revolutions & Secessions (D32, Proposed)
-* **Rebellion Threshold:** When an interest group or radicalized province exceeds critical militancy thresholds, a rebellion triggers probabilistically using `rng::Stream::REBELLION` keyed by `(seed, day, province)`.
-* **Breakaway Markets:** Revolting provinces flip their markets to stateless (`market_nation = None`), withholding all tax revenues from the central government.
+* **Rebellion Threshold:** When a market's militancy exceeds critical thresholds, a rebellion triggers probabilistically using `rng::Stream::REBELLION` keyed by `(seed, day, market)`. Revolts take whole markets, because nation ownership is per market (D15).
+* **Breakaway Markets:** A revolting market becomes stateless, withholding all tax revenues from the central government. Market ownership becomes saved state, and a revolt record keeps the nation to restore and the demanded reform (D32).
 * **Resolution:** Revolts stand down if the government enacts the demanded legislative reform, or expire after a protracted period of attrition (until direct military suppression in Milestone 7).
 
 ---
@@ -99,7 +102,7 @@ flowchart TD
 | **M6-6** | **Financial distress & default write-offs** | M6-5 | Debt default mechanics; symmetrical balance sheet write-downs; wealth destruction without cash destruction. |
 | **M6-7** | **POP consciousness & interest group clout** | M6-1 | Add `consciousness` to `Pops`; calculate political clout across the 6 major interest groups from POP attributes. |
 | **M6-8** | **Legislative reform system** | M6-7 | Voting franchise, labor laws, social welfare, and education laws; command `PassReform`; interest group approval and anger. |
-| **M6-9** | **Stochastic rebellions & breakaway markets** | M6-8 | Probabilistic rebellion triggering via `rng::Stream::REBELLION`; breakaway stateless markets; tax revenue cutoff and reconciliation. |
+| **M6-9** | **Stochastic rebellions & breakaway markets** | M6-8 | Probabilistic rebellion triggering via `rng::Stream::REBELLION`, keyed by market; market ownership as hashed, saved state with a revolt record (nation to restore, demanded reform); breakaway stateless markets; tax revenue cutoff and reconciliation. |
 | **M6-10** | **Wire protocol additions (`pax_protocol`)** | M6-5, M6-8 | Add `PoliticsSummary`, `InterestGroupTable`, `BankSummary`, `PassReformCommand`, and `IssueBondsCommand` to FlatBuffers schemas. |
 | **M6-11** | **Godot politics & parliament panels** | M6-10 | Parliament seating, interest group clout breakdown, reform enactment UI, and voting franchise controls. |
 | **M6-12** | **Godot banking & sovereign debt panels** | M6-10 | Treasury balance sheet, bond issuance interface, banking reserves, and commercial debt summary. |

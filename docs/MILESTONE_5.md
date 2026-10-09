@@ -1,5 +1,8 @@
 # Milestone 5: Trade, Investment and Economic Unrest
 
+> [!NOTE]
+> **Status: planned, not started.** Its decisions D17, D27 and D28 are *Proposed* in [DECISIONS.md](DECISIONS.md); the designs are [TRADE.md](TRADE.md), [INVESTMENT.md](INVESTMENT.md) and [REBELLIONS.md](REBELLIONS.md), and [DATA_MODEL_M5_M6.md](DATA_MODEL_M5_M6.md) holds the data model.
+
 **Goal:** Turn isolated local economies into an interconnected world trading system, unleash industrial growth through capital investment so output can grow beyond the capacity a scenario starts with, introduce economic consequences for worker militancy (strikes and riots), and equip the Godot client with full trade, tariff, and construction controls.
 
 Milestone 5 builds on the single-player and multiplayer foundation established in [Milestone 3](MILESTONE_3.md) and [Milestone 4](MILESTONE_4.md). Binding architectural rules follow [DECISIONS.md](DECISIONS.md) (in particular D1, D3, D5, D6, D13, D14, and proposed decisions D17, D27, D28).
@@ -44,18 +47,24 @@ Milestone 5 builds on the single-player and multiplayer foundation established i
 
 ## 🏛️ System Design & Decisions
 
+The tick order D4 must be amended to (from [DATA_MODEL_M5_M6.md](DATA_MODEL_M5_M6.md), "Tick order"):
+
 ```mermaid
 flowchart TD
-    subgraph Tick_Sequence [Daily Simulation Tick Order]
-        T1[1. Arrival: Goods land in B, iceberg loss, tariffs paid to treasury]
-        T2[2. Labour: Strikes reduce effective labour supply if militancy > threshold]
-        T3[3. Production: Leontief recipes + construction goods consumed]
-        T4[4. Market Orders: Merchants place export buy orders in A and import sell offers in B]
-        T5[5. Market Clearing: Independent parallel D1 clearing with pro-rata rationing]
-        T6[6. Settlement: Purchases enter transit, receipts credit merchant cash]
-        T7[7. Firms & Dividends: Producers reserve construction budgets; merchants pay dividends]
-        T8[8. Month End: Riots destroy stock; investment decisions start/depreciate capacity]
-    end
+    C[0. Commands, D21] --> A[1. Arrival: cargo lands, iceberg loss, tariff paid]
+    A --> L[2. Labour: effective workforce, strikes]
+    L --> P[3. Production, and construction goods delivered to projects]
+    P --> M[4. Market: orders from households, producers, projects, governments and merchants, then discovery, then settlement: purchases become cargo in transit]
+    M --> F[5. Firms: wages, then dividends above wage, restart and project reserves]
+    F --> G[5b. Government transfers]
+    G --> E{Month end?}
+    E -- no --> Done[Conservation assert]
+    E -- yes --> Mob[6. Mobility: D18, D20, D25]
+    Mob --> Pol[7. Politics: militancy]
+    Pol --> R[8. Riots, on this month's militancy]
+    R --> I[9. Investment: start, complete and depreciate projects]
+    I --> Dem[10. Demographics, then compaction]
+    Dem --> Done
 ```
 
 ### 1. Inter-Market Trade (D17, Proposed)
