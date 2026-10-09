@@ -64,7 +64,7 @@ cargo run --release -p pax_cli -- replay saves/<name>.toml   # replay a save; pr
 
 ## 3. One tick, in order
 
-The order is binding (D4), and [ARCHITECTURE.md](ARCHITECTURE.md#-the-game-loop) lists it with the module for each step. In short: commands first (D21), then labour, production, the market (orders, then bounded tâtonnement per market in parallel, then pro-rata settlement), wages and taxes, and government transfers, every day; mobility, politics, demographics and POP compaction at month end.
+The order is binding (D4), and [ARCHITECTURE.md](ARCHITECTURE.md#-the-game-loop) lists it with the module for each step. Two facts to keep in mind: player commands apply before any system runs (D21), and some systems run only at month end.
 
 After every tick, `step` **asserts that total money is unchanged**. If you break conservation, the very next test that runs a tick fails.
 
