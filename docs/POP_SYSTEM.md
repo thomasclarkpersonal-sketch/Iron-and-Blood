@@ -9,15 +9,18 @@ POPs are rows in the `Pops` table ([BACKEND_SCHEMA.md](BACKEND_SCHEMA.md#pops)).
 **Identity (key):**
 *   **Province.** The market, state and nation are *derived* from the province, never stored on the POP.
 *   **Profession:** e.g. farmer, labourer, craftsman, clerk, capitalist, aristocrat, soldier.
-*   **Culture** and **Religion** *(M2)*.
+*   **Culture** and **Religion** *(planned)*.
 
 **State:**
 *   **Size:** number of people.
 *   **Cash:** the POP's **total** holdings, not per capita. Money stays with the survivors when size changes.
 *   **Life needs:** subsistence satisfaction `[0, 1]` from the last market day.
-*   *M2:* **Literacy** (promotion chance, research), **Militancy** (likelihood of rebelling) and **Consciousness** (demand for reforms). All are `Fixed`, never floats (D3).
+*   **Militancy:** `[0, 1]`, updated monthly from hunger and taxes (D19); no effects yet.
+*   *Planned:* **Literacy** (promotion chance, research) and **Consciousness** (demand for reforms).
 
-### 💼 Planned (M2+): Workforce Composition and Labor Laws
+Every one of these is `Fixed`, never a float (D3).
+
+### 💼 Planned: Workforce Composition and Labor Laws
 
 > [!NOTE]
 > **Status: planned, not implemented.** Today a POP has one `size` (above), and D2, D7, D18 and D20 are defined on it. Before this is built it needs a decision (a new `D#`): how `size` relates to the columns below (for example `size = workforce_male + workforce_female + dependents`), which column D2's demand, D7's splits and merges, demographics and the D18/D20 labour pools each read, and how a law change moves people between columns under D7's largest-remainder rule. It must also say whether mobilization ([MILITARY_SYSTEM.md](MILITARY_SYSTEM.md)) draws conscripts only from `workforce_male`, and how the split POP's cash is shared when conscripts leave (D7).
@@ -68,7 +71,7 @@ flowchart TD
     Check -->|No: deprived| Deprived["Spend all of Y on a scaled<br/>subsistence basket: x = γY/C"]
     Deprived --> Starve["life_needs < 1: population decline,<br/>later militancy"]
     Check -->|Yes: comfortable| Comfortable["Buy N·γ, then split Y − N·C<br/>across goods by β"]
-    Comfortable --> Thrive["life_needs = 1: growth;<br/>discretionary spending feeds promotion (M2)"]
+    Comfortable --> Thrive["life_needs = 1: growth;<br/>discretionary spending feeds promotion (planned)"]
 ```
 
 If a market is short, every buyer receives the same fraction of what it asked for (D1), so `life_needs` reflects market scarcity as well as poverty.
@@ -89,4 +92,4 @@ Merging and splitting keep the number of POP rows bounded:
 *   **Splitting:** when `⌊N × rate⌋` people promote, migrate or are conscripted, they move to the POP with the target identity. A new row is created only if none exists; lookup goes through a sorted identity index, never a `HashMap` (D3). They take cash in proportion to their share of the POP, split by largest remainder.
 *   **Merging:** below a size threshold (e.g. 50 people) a POP merges into the most similar POP in the province. Cash adds up. Literacy and militancy become size-weighted averages in `Fixed`.
 *   **Implemented:** rows are compacted at month end (`World::compact_pops`). Rows sharing `(province, profession)` merge and empty, cashless rows are dropped, so row indices stay dense.
-*   **Still M2:** merging *small* POPs into the most similar identity (needs culture and religion columns).
+*   **Planned:** merging *small* POPs into the most similar identity (needs culture and religion columns).

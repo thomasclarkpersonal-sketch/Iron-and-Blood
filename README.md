@@ -41,15 +41,22 @@ cargo run --release -p pax_cli -- bench scenarios/mini_valley --scale 170000 --t
 
 ```text
 crates/pax_engine/   Pure simulation: Fixed, world tables, tick systems (no IO)
-crates/pax_data/     TOML loading + validation, golden-hash files
-crates/pax_cli/      Headless runner
+crates/pax_data/     TOML loading + validation, saves and snapshots, golden-hash files
+crates/pax_cli/      Headless runner: run, report, record, verify, bench, replay
+crates/pax_server/   The authoritative game server (single player and multiplayer)
+crates/pax_protocol/ Generated FlatBuffers code and framing for the wire protocol
+crates/pax_godot/    The Godot client's Rust bridge (GDExtension)
+crates/pax_content/  The content-hash scheme both sides share
+crates/pax_map/      The province-map reader both sides share
+client/              The Godot 4 project (GDScript UI)
+schemas/             FlatBuffers wire schemas
 data/                Base definitions: goods, professions, production, rules
 scenarios/           mini_valley (frozen regression fixture) and two_states (12 goods, 2 markets), each with pinned golden hashes
-docs/                Design documentation (source of truth)
+docs/                Design documentation (source of truth; docs/README.md says what lives where)
 ```
 
 ## 📚 Documentation
-New to the project? Start with **[Onboarding](docs/ONBOARDING.md)**: a codebase tour and recipes for common changes. **[Design Decisions](docs/DECISIONS.md)** is binding and wins over any other document.
+New to the project? Start with **[Onboarding](docs/ONBOARDING.md)**: a codebase tour and recipes for common changes. **[Design Decisions](docs/DECISIONS.md)** is binding and wins over any other document. [How the docs are organised](docs/README.md) says where each kind of fact lives.
 
 * [Milestone 1](docs/MILESTONE_1.md): scope, acceptance criteria, team task list, M2 preview.
 * [Milestone 2](docs/MILESTONE_2.md): M2 status, decisions waiting on you, next tasks.
@@ -59,6 +66,7 @@ New to the project? Start with **[Onboarding](docs/ONBOARDING.md)**: a codebase 
 * [Network protocol](docs/NETWORK_PROTOCOL.md): the wire format between server and client.
 * [System Architecture Overview](docs/ARCHITECTURE.md): engine design and the tick schedule.
 * [Backend Schema](docs/BACKEND_SCHEMA.md): workspace, SoA tables, systems.
+* [Performance](docs/PERFORMANCE.md): what the tick, views and saves measure at against their budgets.
 * [Data Format](docs/DATA_FORMAT.md): TOML definition and scenario files.
 * [The POP System](docs/POP_SYSTEM.md): demographics, needs, and state transitions.
 * [The Economy Simulator](docs/ECONOMY_SYSTEM.md): market clearing, production, wages.
@@ -66,7 +74,7 @@ New to the project? Start with **[Onboarding](docs/ONBOARDING.md)**: a codebase 
 * [Politics & State](docs/POLITICS_SYSTEM.md): fiscal policy, taxation, interest groups, and reforms.
 * [Map & Logistics](docs/MAP_AND_LOGISTICS.md): geography, iceberg transport costs, and migration.
 * [Military & Supply](docs/MILITARY_SYSTEM.md): mobilization shocks and war debt.
-* [Colonization & Imperialism](docs/COLONIZATION_SYSTEM.md): colonial logistics and extractive vs inclusive institutions (M2+ design).
+* [Colonization & Imperialism](docs/COLONIZATION_SYSTEM.md): colonial logistics and extractive vs inclusive institutions (vision).
 * Research notes: [Victoria 2 economy redesign](docs/research/victoria_2_economy_redesign.md), [reference textbook summaries](docs/research/economic_textbooks_summary.md).
 * [Contributing](CONTRIBUTING.md) and [AGENTS.md](AGENTS.md): rules for humans and AI agents.
 * [Repository setup](docs/REPO_SETUP.md): one-time admin steps for GitHub, CI and the blocking critic.

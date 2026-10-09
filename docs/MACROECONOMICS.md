@@ -23,7 +23,7 @@ As industrialisation multiplies real output `Q`, a static `M` with falling `V` f
 - **Outside money** (`Σ cash` of all agents) is constant except for explicit, logged mint/burn events. `tick::step` asserts this every day. `tests/conservation.rs` runs 200 randomised economies through it.
 - Every transfer debits and credits the same amount. Every split of a total uses largest-remainder allocation, so no rounding residue leaks.
 - When people die, their money stays with the survivors of their POP. An extinct POP's cash goes to an heir (D7).
-- **One world currency** until at least M3; per-nation currencies would require a foreign-exchange market.
+- **One world currency** (D5); per-nation currencies would require a foreign-exchange market and a decision of their own.
 
 For every agent `i` (Godley & Lavoie):
 
@@ -34,9 +34,9 @@ $$\Delta A_i = Y_i - C_i - T_i, \qquad \sum_i \Delta A_i = 0 \text{ (closed syst
 - **POPs spend a fixed fraction of cash each day** (`spend_rate`). A larger hoard therefore means larger spending: velocity cannot fall to zero.
 - **Firms pay out cash above a reserve** as dividends (D6), so profits return to households instead of piling up in firms.
 
-### C. The financial sector (M2): inside money
+### C. The financial sector (planned): inside money
 
-Banks are planned for M2 and must follow D5:
+Banks are planned, not yet designed in detail, and must follow D5:
 
 - Deposits, loans and treasury bonds are **asset/liability pairs**. Lending creates a loan (bank asset, borrower liability) and a deposit (borrower asset, bank liability) at the same time. This is endogenous money, consistent with the Post-Keynesian SFC literature.
 - The invariant extends to `Σ financial assets − Σ financial liabilities = Σ outside money`.
@@ -65,5 +65,5 @@ A realistic economy needs realistic wages. If a factory has a bad day it should 
 - **Unprofitable producers stop buying inputs** (shutdown rule) and **stop overproducing** (inventory targeting), instead of burning cash.
 - **Liquidity rule:** a producer pays wages only from cash above a restart reserve (the inputs still missing for one day of output), which it keeps even while shut down. It can therefore always resume producing; workers absorb a shortfall pro rata, and there is no debt in M1.
 - **Wage floor:** target wages never fall below `firms.subsistence_wage_multiple` × a worker's subsistence cost, which anchors prices to the cost of labour.
-- *M2:* bank loans let a producer bridge losses before it cuts wages, and bankruptcy hands its remaining cash to creditors, then owners.
-- *M2:* search-and-matching style labour flows (promotion/demotion, migration toward higher wages) as deterministic fractional flows (D7).
+- *Planned:* bank loans let a producer bridge losses before it cuts wages, and bankruptcy hands its remaining cash to creditors, then owners.
+- *Partly built:* labour flows toward jobs exist (D18, D20); promotion/demotion and migration toward higher wages are planned, also as deterministic fractional flows (D7).

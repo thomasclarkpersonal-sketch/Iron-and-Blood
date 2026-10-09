@@ -8,7 +8,7 @@ The economic actors are:
 
 1. **RGOs** (farms, mines, camps): producer types with no inputs. They employ lower-strata professions, and their output is limited by labour and capacity.
 2. **Factories**: producer types with inputs. They turn input goods into output with a fixed-coefficient (Leontief) recipe.
-3. **Artisans** *(M2)*: POP-run production. They will be modelled as small producers owned and staffed by the same POP.
+3. **Artisans** *(planned)*: POP-run production. They will be modelled as small producers owned and staffed by the same POP.
 
 ```mermaid
 flowchart LR
@@ -52,7 +52,8 @@ Prices are not hard-coded and are not anchored to a base price. Every day, each 
 2. **Iterates** `pᵢ ← pᵢ(1 + λₖ zᵢ)`.
    - `zᵢ = (Dᵢ − Sᵢ)/(Dᵢ + Sᵢ)` is always in `[−1, 1]` and is defined as 0 when both are 0.
    - `λₖ = λ·d/(d + k)` decays to damp oscillation.
-   - It stops when every `|zᵢ| ≤ tolerance` or after `max_iterations`.
+   - Iterates stay inside today's band (step 3).
+   - It stops when every good is settled, or after `max_iterations`. A good is settled when `|zᵢ| ≤ tolerance`, or when it is pinned at a band edge with excess demand pushing outward: such a good can't move further today, and without this rule it kept every market iterating to the cap.
 3. **Limits** the executed price to `±max_daily_change` of yesterday's. With no stock in the market, counting stocks below `min_stock` as none, the price is held.
 4. **Settles** at the executed price.
    - If demand exceeds supply, *every* buyer gets the same fraction `S/D` (pro-rata rationing).
