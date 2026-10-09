@@ -1,0 +1,91 @@
+{
+  "project": "Iron and Blood, a deterministic socioeconomic simulation in Rust with a Godot client",
+  "base": "main",
+  "runDir": "out/<slug>-run",
+  "contract": {
+    "files": ["AGENTS.md"],
+    "decisions": "docs/DECISIONS.md",
+    "decisionCitation": "its D# entry in docs/DECISIONS.md"
+  },
+  "docs": {
+    "index": "docs/README.md",
+    "homes": "docs/README.md's table: rules in DECISIONS.md; mechanism in the system documents (ECONOMY_SYSTEM, POP_SYSTEM, POLITICS_SYSTEM, MACROECONOMICS, MAP_AND_LOGISTICS); Rust structure in BACKEND_SCHEMA.md; file formats in DATA_FORMAT.md; the wire protocol in NETWORK_PROTOCOL.md; measurements in PERFORMANCE.md; users in ONBOARDING.md and HOSTING.md",
+    "workbookDir": "docs/workbooks",
+    "workflowDoc": "docs/SDLC_WORKFLOW.md",
+    "milestones": "docs/MILESTONE_<n>.md",
+    "milestoneSlugPrefix": "m",
+    "milestoneRow": "tick the task's row in the milestone document with a sentence or two on what was done (docs/README.md, \"Milestone lifecycle\")"
+  },
+  "gate": {
+    "env": ["export CARGO_TARGET_DIR=\"$ROOT/target/sdlc\"   # one build cache for every agent of the run"],
+    "full": [
+      "cargo fmt --all --check",
+      "python3 scripts/check_lints.py",
+      "python3 scripts/check_docs.py",
+      "cargo clippy --all-targets --release -- -D warnings",
+      "cargo clippy -p pax_server --features fuzzing --all-targets --release -- -D warnings",
+      "RUSTDOCFLAGS=\"-D warnings\" cargo doc --no-deps",
+      "cargo test --all",
+      "cargo test --all --release",
+      "for s in scenarios/mini_valley scenarios/two_states; do for t in 1 4; do cargo run --release -p pax_cli -- verify \"$s\" --threads \"$t\" || exit 1; done; done",
+      "cargo build --release -p pax_cli && PAX_CLI=\"$CARGO_TARGET_DIR/release/pax_cli\" PAX_CLI_REQUIRED=1 cargo test --release -p pax_server --test session_replay"
+    ],
+    "docs": [
+      "python3 scripts/check_docs.py",
+      "scripts/render-mermaid.sh <each changed Markdown file with a mermaid block> (needs Docker; without it the step is skipped, not passed)"
+    ],
+    "conditional": [
+      "If schemas/ changed since origin/main: scripts/gen-protocol.sh && git diff --exit-code crates/pax_protocol/src/generated (then restore that directory).",
+      "If crates/pax_godot or client/ changed: cargo build -p pax_godot -p pax_server && PAX_SERVER=\"$CARGO_TARGET_DIR/debug/pax_server\" cargo test -p pax_godot",
+      "Mermaid: scripts/render-mermaid.sh on every Markdown file changed since origin/main that contains a mermaid block (needs Docker; without it the step is skipped, not passed)."
+    ]
+  },
+  "engineering": [
+    "Fixed only in simulation state and anything that feeds it; no floats (D3).",
+    "No std HashMap or HashSet where iteration order matters; randomness only through pax_engine::rng (D3).",
+    "Every split of a total uses alloc::allocate; every new money flow gets a case in crates/pax_engine/tests/conservation.rs, extending tests/common/mod.rs (D5).",
+    "No IO, rendering or networking in pax_engine; crate boundaries as AGENTS.md §2 sets them.",
+    "Every new column is pushed in its table's push_* method and added to World::state_hash; derived data is never stored (D7, D8).",
+    "Rustdoc explains the why and the mathematics and cites its D#.",
+    "A change to a hot loop is benchmarked against the D13 budget (pax_cli bench --scale 170000 --threads 8)."
+  ],
+  "design": {
+    "analysis": "Arithmetic is in Fixed terms, with the rounding direction of each operation (mul/div round down; mul_ceil where rounding down would let an agent use more than it has) and how any total is split (alloc::allocate). Data stores are World tables and columns, or data files.",
+    "erd": "Follow docs/DATA_MODEL_M5_M6.md: every entity is a struct-of-arrays table (D8), a relationship is a column holding another table's row index, and each table's kind (definition, topology, load-time derived, state) is stated. New money holders appear in World::total_money (D5).",
+    "classDiagram": "Adapt it to D8: each table is a class whose attributes are its Vec columns, each tick system is a class with the stereotype <<system>> whose operation is the system function's signature, crates are namespaces, associations are row-index references. No inheritance between simulation entities (D8, AGENTS.md §1); say so in the text.",
+    "architecture": "Say where any new system runs in the tick order (D4) and how parallel work reduces (AGENTS.md §3: integer sums only).",
+    "feasibility": "Recurring cost includes the per-tick cost against the D13 budget.",
+    "tests": "A conservation case per new money flow, determinism at 1/2/3/8 threads, and a bench run (D13) if a hot loop changes."
+  },
+  "risks": [
+    "hot loops under the D13 budget (docs/PERFORMANCE.md)",
+    "money flows needing conservation tests (D5)",
+    "determinism hazards (D3)",
+    "golden-hash impact (D11)",
+    "save and protocol compatibility (D22, D23)"
+  ],
+  "regression": {
+    "name": "Golden hashes",
+    "verify": "cargo run --release -p pax_cli -- verify scenarios/mini_valley",
+    "rerecord": "cargo run --release -p pax_cli -- record <scenario>"
+  },
+  "critic": {
+    "command": ".claude/commands/critic.md",
+    "followup": ".claude/commands/critic-followup.md",
+    "ci": {
+      "check": "Critic",
+      "marker": "<!-- iron-and-blood-critic -->",
+      "author": "github-actions",
+      "label": "critic",
+      "waiverPrefix": "critic-waive"
+    }
+  },
+  "rules": {
+    "never": ["editing .github/workflows/critic.yml"],
+    "protectedLabels": ["contract-change"]
+  },
+  "sharedFiles": ["Cargo.lock"],
+  "merge": { "method": "squash" },
+  "labels": { "needsHuman": "needs-human", "needsWaiver": "needs-waiver" },
+  "pastRuns": ["out/m3-run/REPORT.md", "out/m4-run/REPORT.md"]
+}

@@ -1,0 +1,66 @@
+{
+  "_about": "Configuration of the sdlc-overnight workflow for one repository. Copy to .claude/sdlc-overnight.json and edit. Every field is explained in config-reference.md; fields you leave out take the defaults listed there.",
+  "project": "Acme API, a TypeScript service with a PostgreSQL database",
+  "base": "main",
+  "runDir": ".sdlc-runs/<slug>",
+  "contract": {
+    "files": ["AGENTS.md"],
+    "decisions": "docs/adr/README.md",
+    "decisionCitation": "its ADR number (ADR-0007)"
+  },
+  "docs": {
+    "index": null,
+    "homes": "README.md for users; docs/architecture.md for structure; docs/api.md for endpoints; docs/adr/ for decisions",
+    "workbookDir": "docs/workbooks",
+    "workflowDoc": "docs/SDLC_WORKFLOW.md",
+    "milestones": "docs/milestones/M<n>.md",
+    "milestoneSlugPrefix": "m",
+    "milestoneRow": "tick the task's checkbox in the milestone document and add a sentence on what was done"
+  },
+  "gate": {
+    "env": [],
+    "full": [
+      "npm ci",
+      "npm run lint",
+      "npm run typecheck",
+      "npm test -- --ci",
+      "npm run build"
+    ],
+    "docs": ["npx --yes markdown-link-check --quiet <each changed Markdown file>"],
+    "conditional": [
+      "If src/db/migrations/ changed: npm run db:migrate:check"
+    ]
+  },
+  "engineering": [
+    "Every endpoint validates its input with the shared zod schemas in src/schemas/.",
+    "No raw SQL outside src/db/; queries go through the repository layer.",
+    "Every bug fix comes with a test that failed before the fix."
+  ],
+  "design": {
+    "analysis": "",
+    "erd": "Entities are the PostgreSQL tables; show primary and foreign keys.",
+    "classDiagram": "",
+    "architecture": "Respect the layering in docs/architecture.md: routes, services, repositories.",
+    "feasibility": "",
+    "tests": "Integration tests run against the docker-compose database."
+  },
+  "risks": [
+    "database migrations on large tables",
+    "breaking changes to public endpoints",
+    "authentication and authorisation paths"
+  ],
+  "regression": null,
+  "critic": {
+    "command": ".claude/commands/critic.md",
+    "followup": ".claude/commands/critic-followup.md",
+    "ci": null
+  },
+  "rules": {
+    "never": ["editing .github/workflows/"],
+    "protectedLabels": []
+  },
+  "sharedFiles": ["package-lock.json", "CHANGELOG.md"],
+  "merge": { "method": "squash" },
+  "labels": { "needsHuman": "needs-human", "needsWaiver": "needs-waiver" },
+  "pastRuns": []
+}

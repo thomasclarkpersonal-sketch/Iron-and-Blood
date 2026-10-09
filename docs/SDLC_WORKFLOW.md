@@ -16,6 +16,18 @@ Most of the weight is on **planning**:
 
 It is the local, multi-agent counterpart of the [Claude Feature Pipeline](CLAUDE_FEATURE_PIPELINE.md), and it follows the same [critic rules](../AGENTS.md#9-critic-feedback).
 
+**Template and configuration.** The workflow script is project-independent. Its source, guide and tests are the [sdlc-overnight template](../templates/sdlc-overnight/README.md), which other repositories can install too. Everything specific to Iron and Blood is in [`.claude/sdlc-overnight.json`](../.claude/sdlc-overnight.json), whose keys the template's [configuration reference](../templates/sdlc-overnight/config-reference.md) explains:
+- the CI gate;
+- the contract (AGENTS.md and DECISIONS.md);
+- where each kind of document lives;
+- the engineering rules (D3, D5, D7, D8, D13);
+- the struct-of-arrays guidance for ERDs and class diagrams;
+- golden hashes as the regression baseline;
+- the critic and its waiver prefix;
+- the run directory, `out/<slug>-run/`.
+
+After changing the template, run `templates/sdlc-overnight/install.sh .` to update `.claude/workflows/sdlc-overnight.js`; `install.sh --check .` reports a stale copy. This page describes how the workflow behaves here.
+
 ```mermaid
 flowchart TD
     R[Milestone, request or issue] --> S[Discover: 3 read-only scouts]

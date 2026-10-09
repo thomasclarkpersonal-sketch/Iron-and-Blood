@@ -19,6 +19,7 @@ Every fact has **one home**. Other documents link to it rather than restating it
 | Options surveyed | [research/](research/) | |
 | A feature's planning record (SSR, charter, specifications, baseline plan, diagrams) | its Project Workbook, `docs/workbooks/<slug>/`, under a status banner ([SDLC_WORKFLOW.md](SDLC_WORKFLOW.md#planning)) | Rules and mechanism: they move to DECISIONS.md and the system documents as the feature lands |
 | How to use it | [ONBOARDING.md](ONBOARDING.md), [HOSTING.md](HOSTING.md), [REPO_SETUP.md](REPO_SETUP.md), [CLAUDE_FEATURE_PIPELINE.md](CLAUDE_FEATURE_PIPELINE.md), [SDLC_WORKFLOW.md](SDLC_WORKFLOW.md) | |
+| The reusable SDLC workflow, for this and other repositories | [templates/sdlc-overnight/](../templates/sdlc-overnight/README.md): the script, guide, configuration reference, starter files and tests | This repository's settings: `.claude/sdlc-overnight.json` |
 
 ## Status of what a document describes
 
