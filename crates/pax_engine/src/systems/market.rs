@@ -614,6 +614,10 @@ fn discover_prices(
         }
     }
     let decay = Fixed::from_int(rules.step_decay_iterations.max(1) as i64);
+    // Adaptive mode: per-good step and the sign of its last excess demand.
+    let (grow, shrink) = (Fixed::ratio(5, 4), Fixed::ratio(1, 2));
+    let mut good_step = vec![rules.step; prices.len()];
+    let mut last_sign = vec![0i8; prices.len()];
     let mut used = 0;
     for k in 0..rules.max_iterations {
         // Buffers are reused across iterations: discovery runs up to
@@ -638,6 +642,20 @@ fn discover_prices(
         // λₖ = λ · decay / (decay + k); iterates stay inside today's band.
         let step = rules.step.mul_div(decay, decay + Fixed::from_int(k as i64));
         for (g, p) in prices.iter_mut().enumerate() {
+            let step = if rules.adaptive_step {
+                let sign = z[g].raw().signum() as i8;
+                if sign != 0 && last_sign[g] != 0 {
+                    good_step[g] = if sign == last_sign[g] {
+                        good_step[g].mul(grow).min(Fixed::ONE)
+                    } else {
+                        good_step[g].mul(shrink).max(Fixed::EPSILON)
+                    };
+                }
+                last_sign[g] = sign;
+                good_step[g]
+            } else {
+                step
+            };
             *p = (*p + p.mul(step.mul(z[g]))).clamp(lo[g], hi[g]);
         }
     }

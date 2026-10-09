@@ -79,7 +79,7 @@ Who receives trade profits shapes politics later (interest groups, M6), which is
 ## Entry and exit
 
 Merchants are not fixed at load. Each month end:
-- **Entry:** on a route in the trade horizon whose smoothed price gap for some good exceeds its `margin`, and whose merchants' combined cash can't buy the route's `capacity` at today's prices, an owner with funds founds a new merchant with starting capital. Private and Commercial merchants are founded by their owner pools with the same funding rule as new producers in M5's investment design (INVESTMENT.md); Chartered merchants only by command. At most one entry per route and month, so the response is gradual and deterministic (largest gap first, then lowest route).
+- **Entry:** on a route in the trade horizon whose smoothed price gap for some good exceeds its `margin`, and whose merchants' combined cash can't buy the route's `capacity` at today's prices, an owner with funds founds a new merchant with starting capital. Private and Commercial merchants are founded by their owner pools with the same funding rule as new producers in M5's investment design ([INVESTMENT.md](INVESTMENT.md)); Chartered merchants only by command. At most one entry per route and month, so the response is gradual and deterministic (largest gap first, then lowest route).
 - **Exit:** a merchant whose smoothed profit has been negative for `exit_months` winds up: it stops buying, sells off its stock, and its remaining cash returns to its owner (pool, POPs or treasury). Money is moved, never destroyed (D5).
 - **Seeding:** a scenario may list starting merchants per route (for example historical trading houses), with their kind and capital, so trade works from day 1 and before any route has proved itself:
 
