@@ -58,7 +58,7 @@ input_spend_rate = 0.5      # fraction of cash spendable on inputs per day, in [
 | `market.step` | Initial step λ | (0, 1] |
 | `market.step_decay_iterations` | Step decay `d` in `λ·d/(d+k)` | ≥ 1 |
 | `market.tolerance` | Stop when all \|z\| ≤ this | ≥ 0 |
-| `market.adaptive_step` | Optional, default `false`. Per-good adaptive tâtonnement step (D1, under review) | bool |
+| `market.adaptive_step` | Optional, default `false`. Per-good adaptive tâtonnement step (D1, opt-in; ECONOMY_SYSTEM.md) | bool |
 | `market.max_daily_change` | Max executed price move per day | (0, 1) |
 | `market.min_stock` | Stocks below this are dust: not offered, and the price is held | ≥ 0 |
 | `market.price_floor`, `price_ceiling` | Technical bounds; every `base_price` must lie inside | 0 < floor < ceiling |

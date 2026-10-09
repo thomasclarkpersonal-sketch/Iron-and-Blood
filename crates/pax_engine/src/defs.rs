@@ -91,7 +91,7 @@ pub struct MarketRules {
     pub step_decay_iterations: u32,
     /// Stop early once every |z| is at most this.
     pub tolerance: Fixed,
-    /// Opt-in per-good adaptive step (D1 refinement under review). Each good's
+    /// Opt-in per-good adaptive step (D1, accepted as opt-in, off by default). Each good's
     /// step grows ×1.25 (capped at 1) while its excess demand keeps its sign,
     /// and halves when the sign flips. `step` is the starting value, and
     /// `step_decay_iterations` is ignored. Off by default: existing results

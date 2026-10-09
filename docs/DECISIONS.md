@@ -74,15 +74,7 @@ Mechanism (module layouts, file formats, flag names, step-by-step algorithms) be
 
 **Why it scales.** LES demand (D2) is linear in POP size and budget, so a market needs only `(Σ size, Σ budget)` per profession and regime to evaluate demand at any trial price. Discovery never touches the POP table.
 
-**Opt-in adaptive step (under review):** `market.adaptive_step = true` in `rules.toml` replaces the decaying step with a per-good adaptive one: ×1.25 while a good's excess demand keeps its sign, ×½ when it flips, starting at `step`, capped at 1. Measured:
-
-| Case | Iterations (current → adaptive) | Tick time |
-|---|---|---|
-| Steady state, `mini_valley` | 2.6 → 1.3 | — |
-| Steady state, `two_states` | 9.1 → 2.8 | — |
-| Cold start, 3,000 markets | 42.7 → 8.2 | −34% |
-
-5-year GDP is unchanged and prices end within 2.5%. It is off by default, so results stay unchanged, until the maintainer decides to adopt it.
+**Opt-in adaptive step (accepted as opt-in, owner, 2026-10-09):** discovery may use a per-good adaptive step instead of the decaying one, switched by a rule that is **off by default**, so no scenario's results change unless its data turns it on. Either way, the rules above hold: the same price band, `traded ≤ min(demand, supply)`, pro-rata rationing, and determinism at any thread count. **Revisit** (make it the default, re-recording the golden files) when the tick budget (D13) needs the cold-start saving, e.g. as M5's merchants add markets. Mechanism: [ECONOMY_SYSTEM.md](ECONOMY_SYSTEM.md); measurements: [PERFORMANCE.md](PERFORMANCE.md).
 
 **Code:** `crates/pax_engine/src/systems/market.rs`. **Docs:** [ECONOMY_SYSTEM.md](ECONOMY_SYSTEM.md).
 
