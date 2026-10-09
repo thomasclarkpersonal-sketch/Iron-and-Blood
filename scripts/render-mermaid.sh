@@ -54,11 +54,12 @@ for file in "${files[@]}"; do
   # Always render SVG first: a diagram can parse and still draw garbage. Mermaid 11 reads
   # a label starting "1. " as a Markdown list and draws "Unsupported markdown: list"
   # instead of the text, and only the SVG's text shows it.
+  stem="out/mermaid/${file%.md}"
+  rm -f "$stem"-*.svg "$stem"-*.png "$stem"-*.pdf # a stale image could fail the check below
   if ! render "$file" svg; then
     failed+=("$file (doesn't parse)")
     continue
   fi
-  stem="out/mermaid/${file%.md}"
   if grep -l "Unsupported markdown" "$stem"-*.svg 2>/dev/null; then
     failed+=("$file (a label renders as \"Unsupported markdown\": a label starting \"1. \" is read as a list)")
     continue
