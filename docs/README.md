@@ -23,7 +23,7 @@ Every fact has **one home**. Other documents link to it rather than restating it
 
 A system document can describe what exists, what is decided but not built, and what is only an idea. Readers, and agents especially, must be able to tell which is which:
 - **Implemented** text describes the code and cites its decision.
-- **Planned** text is labelled *planned* and names the decision or proposal it waits on (`D17`, a PR), not a milestone number. Milestones get renumbered and re-scoped; a decision number doesn't move.
+- **Planned** text is labelled *planned* and names the decision or proposal it waits on (a *Proposed* entry in DECISIONS.md, or a proposal PR), not a milestone number. Milestones get renumbered and re-scoped; a decision number doesn't move.
 - **Vision** documents, or vision sections, describe intended play before any design. They open with a status banner saying so and listing the decisions they need, like [COLONIZATION_SYSTEM.md](COLONIZATION_SYSTEM.md). Nothing in one is binding, and an agent never implements from one directly.
 
 ## Milestone lifecycle
