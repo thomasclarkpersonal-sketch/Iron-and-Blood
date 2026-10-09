@@ -1,5 +1,7 @@
 //! Loader validation: bad data must be rejected with every problem reported.
 
+mod common;
+
 use std::sync::Arc;
 
 use pax_data::{DefSources, parse_defs, parse_scenario};
@@ -99,4 +101,75 @@ cash = -1
     assert!(all.contains("unknown market 'nowhere'"), "{all}");
     assert!(all.contains("unknown profession 'priest'"), "{all}");
     assert!(all.contains("cash must be >= 0"), "{all}");
+}
+
+#[test]
+fn command_logs_are_validated() {
+    let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two_states");
+    let world = pax_data::load_scenario(&dir).expect("two_states loads").world;
+    let text = r#"
+[[command]]
+day = 1
+type = "set_income_tax"
+nation = "atlantis"
+rate = 0.1
+
+[[command]]
+day = 2
+type = "declare_war"
+nation = "lowland_kingdom"
+rate = 0.1
+
+[[command]]
+day = 3
+type = "set_transfer_rate"
+nation = "lowland_kingdom"
+rate = 2
+"#;
+    let all = pax_data::parse_commands(&world, text).expect_err("must fail").messages.join("\n");
+    assert!(all.contains("unknown nation 'atlantis'"), "{all}");
+    assert!(all.contains("unknown type 'declare_war'"), "{all}");
+    assert!(all.contains("outside [0, 1]"), "{all}");
+}
+
+#[test]
+fn consumption_commands_need_a_basket_at_load() {
+    let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../scenarios/two_states");
+    let mut world = pax_data::load_scenario(&dir).expect("two_states loads").world;
+    world.nations.basket.fill(pax_engine::Fixed::ZERO);
+    let text = "[[command]]\nday = 1\ntype = \"set_consumption_rate\"\nnation = \"lowland_kingdom\"\nrate = 0.1\n";
+    let err = pax_data::parse_commands(&world, text).expect_err("must fail");
+    assert!(err.messages[0].contains("has no consumption basket"), "{err}");
+}
+
+/// `Welcome.content_hash` (D22) must identify content: stable across loads and
+/// paths, and different whenever any one loaded file changes.
+#[test]
+fn content_hash_is_stable_and_sensitive_to_every_file() {
+    let original = pax_data::load_scenario(&common::repo().join("scenarios/two_states")).unwrap().content_hash;
+    let copy = common::TempScenario::copy("two_states", "content-hash");
+    let hash = || pax_data::load_scenario(&copy.dir).unwrap().content_hash;
+    assert_eq!(hash(), original, "the hash must not depend on where the files are");
+
+    // Every file the loader reads for two_states (golden.hashes isn't one of them).
+    for f in [
+        "scenarios/two_states/scenario.toml",
+        "scenarios/two_states/commands.toml",
+        "scenarios/two_states/map/provinces.toml",
+        "scenarios/two_states/map/provinces.png",
+        "data/goods.toml",
+        "data/professions.toml",
+        "data/production.toml",
+        "data/rules.toml",
+    ] {
+        let path = copy.path(f);
+        let bytes = std::fs::read(&path).unwrap();
+        // A TOML comment, or bytes after a PNG's end chunk: valid files, new content.
+        let mut changed = bytes.clone();
+        changed.extend_from_slice(b"\n# a comment changes the content\n");
+        std::fs::write(&path, changed).unwrap();
+        assert_ne!(hash(), original, "changing {f} must change the hash");
+        std::fs::write(&path, bytes).unwrap();
+    }
+    assert_eq!(hash(), original);
 }

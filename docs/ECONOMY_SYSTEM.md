@@ -8,7 +8,7 @@ The economic actors are:
 
 1. **RGOs** (farms, mines, camps): producer types with no inputs. They employ lower-strata professions, and their output is limited by labour and capacity.
 2. **Factories**: producer types with inputs. They turn input goods into output with a fixed-coefficient (Leontief) recipe.
-3. **Artisans** *(M2)*: POP-run production. They will be modelled as small producers owned and staffed by the same POP.
+3. **Artisans** *(planned; needs a decision, none drafted)*: POP-run production. They will be modelled as small producers owned and staffed by the same POP.
 
 ```mermaid
 flowchart LR
@@ -38,8 +38,8 @@ flowchart LR
 
 - Value added: `V = revenue − input purchases`, smoothed into `V̄`.
 - Target wage: `w* = max(labor_share × max(V̄, 0) / E, m × C)`, where `C` is a worker's daily subsistence cost and `m` is `firms.subsistence_wage_multiple` in `rules.toml`: the wage floor that anchors prices to the cost of labour. The wage moves `1/wage_stickiness_days` of the way there each day (wage stickiness; see [MACROECONOMICS.md §4](MACROECONOMICS.md#4-labor-market--wage-stickiness)).
-- The wage bill is paid only from cash above a **restart reserve**: the cost of the inputs still missing for one day of output (`production::input_requirements`). The reserve is kept even while the producer is shut down, so it can always restart. Wages go into the labour pool `(province, profession)` and are split among its POPs by size.
-- Cash above `reserve_days × wage bill` is paid as dividends, at `dividend_payout_rate` per day, to the owner profession in the same market.
+- The wage bill is paid only from cash above a **restart reserve**: the cost of the inputs still missing for one day of output (`production::input_requirements`). The reserve is kept even while the producer is shut down, so it can always restart. Income tax is withheld at source in nations' markets (D15), and the net wage goes into the labour pool `(province, profession)`, split among its POPs by size.
+- Cash above `reserve_days × wage bill` is paid as dividends, at `dividend_payout_rate` per day, to the owner profession in the same market, net of income tax (D15).
 
 ## ⚖️ Price Discovery (D1)
 
@@ -52,7 +52,8 @@ Prices are not hard-coded and are not anchored to a base price. Every day, each 
 2. **Iterates** `pᵢ ← pᵢ(1 + λₖ zᵢ)`.
    - `zᵢ = (Dᵢ − Sᵢ)/(Dᵢ + Sᵢ)` is always in `[−1, 1]` and is defined as 0 when both are 0.
    - `λₖ = λ·d/(d + k)` decays to damp oscillation.
-   - It stops when every `|zᵢ| ≤ tolerance` or after `max_iterations`.
+   - Iterates stay inside today's band (step 3).
+   - It stops when every good is settled, or after `max_iterations`. A good is settled when `|zᵢ| ≤ tolerance`, or when it is pinned at a band edge with excess demand pushing outward: such a good can't move further today, and without this rule it kept every market iterating to the cap.
 3. **Limits** the executed price to `±max_daily_change` of yesterday's. With no stock in the market, counting stocks below `min_stock` as none, the price is held.
 4. **Settles** at the executed price.
    - If demand exceeds supply, *every* buyer gets the same fraction `S/D` (pro-rata rationing).

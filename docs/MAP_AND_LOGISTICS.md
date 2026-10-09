@@ -1,6 +1,6 @@
 # Geography & Logistics
 
-The simulation needs a geographical hierarchy to route goods and people. Transport is not instant: geography is a natural source of economic friction. Binding rules: D14 (inter-market trade) and D7 (derived location data) in [DECISIONS.md](DECISIONS.md). M1 implements provinces and markets; links between markets arrive in M2.
+The simulation needs a geographical hierarchy to route goods and people. Transport is not instant: geography is a natural source of economic friction. Binding rules: D14 (inter-market trade) and D7 (derived location data) in [DECISIONS.md](DECISIONS.md). Provinces and markets are implemented; links between markets are planned (D14's principles; proposal in [#18](https://github.com/thomasclarkpersonal-sketch/Iron-and-Blood/pull/18)).
 
 ## 🗺️ The Geographical Hierarchy
 
@@ -28,7 +28,7 @@ Following Samuelson (1954), shipping is modelled as an "iceberg": a fraction `τ
 *   Trade flows from A to B only when `p_B·(1 − τ_AB) − tariff_AB > p_A` (D14).
 
 > [!TIP]
-> **Pathfinding performance:** never run Dijkstra or A* during the tick. Pre-compute the friction matrix `τ` between all market nodes when the game loads, and rebuild only the affected rows when infrastructure changes. Route lookups during the tick are then O(1) (AGENTS.md §5).
+> **Pathfinding performance:** never run Dijkstra or A* during the tick. Pre-compute the friction matrix `τ` between all market nodes when the game loads, and rebuild only the affected rows when infrastructure changes. Route lookups during the tick are then O(1) (AGENTS.md §5). Military supply lines (vision, [MILITARY_SYSTEM.md](MILITARY_SYSTEM.md)) follow the same rule: their connectivity is rebuilt on discrete events (control changes, blockades, infrastructure), never per tick.
 
 ### Infrastructure types
 Infrastructure lowers `τ` on the links it serves and raises their capacity (the maximum flow per day).
@@ -39,10 +39,11 @@ Infrastructure lowers `τ` on the links it serves and raises their capacity (the
 
 **Upkeep is separate from `τ`, so nothing is counted twice.** The iceberg loss is the per-shipment cost of moving goods. Railways and ports also have a *maintenance* demand (coal and machine parts; clipper or steamer convoys). Their owner, usually the state, buys that maintenance on the market like any other buyer. A network whose upkeep is not met degrades and its `τ` rises. That changes the friction matrix, so the matrix is recomputed only at that moment.
 
-## 🚶‍♂️ Migration (M2)
+## 🚶‍♂️ Migration
 
 POPs move according to push factors (low `life_needs`, unemployment) and pull factors (wages, jobs, free land). Migration is a deterministic flow `⌊N × rate⌋` that carries its share of cash (D7).
 
 *   **Intra-state migration:** easy. Farmers moving from a rural province to an urban one in the same state.
-*   **Inter-state migration:** moderate, within the same nation. Rate scaled down by `τ` between the states.
+*   **Within a state market:** implemented (D20, D25). Surplus workers move to provinces of the same market with vacancies in their profession (D20), or, failing that, with vacancies in another profession (D25).
+*   **Inter-state migration:** moderate, within the same nation. Rate scaled down by `τ` between the states (after trade, D14).
 *   **International migration:** hard (e.g. Europe to the Americas). Influenced by laws, available land, and same-culture POPs at the destination.

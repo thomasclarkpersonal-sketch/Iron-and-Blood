@@ -16,10 +16,13 @@
 //!   `dividend_payout_rate` per day to owner POPs in the same market, split by
 //!   size. With no owners present the profit is retained.
 //!
+//! * **Income tax (D15):** a flat share of every wage and dividend payment is
+//!   withheld at source and credited to the treasury of the producer's nation;
+//!   the pool receives the net. Stateless markets are untaxed.
+//!
 //! Every transfer is a debit from one column and a credit to another of
 //! exactly the same amount, so total money is unchanged.
 
-use crate::alloc::allocate_raw;
 use crate::fixed::Fixed;
 use crate::groups::Groups;
 use crate::layout::{PopLayout, owner_key, pool_key};
@@ -29,8 +32,12 @@ use crate::world::World;
 /// Totals paid out by [`pay_wages_and_dividends`] (diagnostics only).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Payouts {
+    /// Gross wages paid by producers (before income tax).
     pub wages: Fixed,
+    /// Gross dividends paid by producers (before income tax).
     pub dividends: Fixed,
+    /// Income tax withheld from wages and dividends and paid to treasuries (D15).
+    pub taxes: Fixed,
 }
 
 pub fn pay_wages_and_dividends(
@@ -48,6 +55,8 @@ pub fn pay_wages_and_dividends(
     let subsistence_cost: Vec<Fixed> =
         (0..markets * profs).map(|k| defs.professions[k % profs].subsistence_cost(world.prices(k / profs))).collect();
 
+    let mut tax_income = vec![Fixed::ZERO; world.nations.len()];
+    let (mut gross_wages, mut gross_dividends) = (Fixed::ZERO, Fixed::ZERO);
     let mut wage_income = vec![Fixed::ZERO; pools.key_count()];
     let mut dividend_income = vec![Fixed::ZERO; owners.key_count()];
 
@@ -64,6 +73,9 @@ pub fn pay_wages_and_dividends(
             input_requirements(world, i).iter().map(|&(g, need)| need.mul_ceil(world.price(market, g))).sum();
         let has_owners = owners.members(owner_pool).iter().any(|&r| world.pops.size[r as usize] > 0);
 
+        // Income tax of the market's nation (D15); stateless markets are untaxed.
+        let nation = world.geography.nation_of_market(market);
+        let tax_rate = nation.map_or(Fixed::ZERO, |n| world.nations.income_tax_rate[n]);
         let p = &mut world.producers;
         let employed = p.employed[i] as i64;
         let avg = p.value_added_avg[i];
@@ -83,7 +95,13 @@ pub fn pay_wages_and_dividends(
         // no output, no revenue, a permanent trap.
         let paid = bill.min((p.cash[i] - input_reserve).max(Fixed::ZERO));
         p.cash[i] -= paid;
-        wage_income[wage_pool] += paid;
+        // Withheld at source: the pool receives the net, the treasury the tax.
+        let wage_tax = paid.mul(tax_rate);
+        wage_income[wage_pool] += paid - wage_tax;
+        gross_wages += paid;
+        if let Some(n) = nation {
+            tax_income[n] += wage_tax;
+        }
 
         if has_owners {
             let reserve = bill.mul_int(rules.reserve_days as i64);
@@ -91,14 +109,22 @@ pub fn pay_wages_and_dividends(
             if surplus.is_positive() {
                 let dividend = surplus.mul(rules.dividend_payout_rate);
                 p.cash[i] -= dividend;
-                dividend_income[owner_pool] += dividend;
+                let dividend_tax = dividend.mul(tax_rate);
+                dividend_income[owner_pool] += dividend - dividend_tax;
+                gross_dividends += dividend;
+                if let Some(n) = nation {
+                    tax_income[n] += dividend_tax;
+                }
             }
         }
     }
 
     distribute(world, pools, &wage_income);
     distribute(world, owners, &dividend_income);
-    Payouts { wages: wage_income.iter().copied().sum(), dividends: dividend_income.iter().copied().sum() }
+    for (treasury, &tax) in world.nations.treasury.iter_mut().zip(&tax_income) {
+        *treasury += tax;
+    }
+    Payouts { wages: gross_wages, dividends: gross_dividends, taxes: tax_income.iter().copied().sum() }
 }
 
 /// Credits each group's income to its member POPs pro rata to size.
@@ -107,11 +133,7 @@ fn distribute(world: &mut World, groups: &Groups, income: &[Fixed]) {
         if amount.is_zero() {
             continue;
         }
-        let rows = groups.members(k);
-        let sizes: Vec<i64> = rows.iter().map(|&r| world.pops.size[r as usize] as i64).collect();
-        let shares = allocate_raw(amount.raw(), &sizes).expect("income is only routed to groups with living members");
-        for (&r, s) in rows.iter().zip(shares) {
-            world.pops.cash[r as usize] += Fixed::from_raw(s);
-        }
+        let credited = world.credit_pops_by_size(groups.members(k), amount);
+        assert!(credited, "income is only routed to groups with living members");
     }
 }

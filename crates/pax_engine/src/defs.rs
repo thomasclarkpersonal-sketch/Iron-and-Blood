@@ -134,6 +134,32 @@ pub struct DemographicRules {
     pub growth_rate: Fixed,
     /// Monthly decline at zero life-needs satisfaction (scaled linearly).
     pub starvation_rate: Fixed,
+    /// Share of a province's unemployed workers of one profession who move each
+    /// month to a profession with vacancies in the same province (D18).
+    pub mobility_rate: Fixed,
+    /// Share of a province's surplus workers of one profession who migrate each
+    /// month to provinces of the same market with vacancies (D20).
+    pub migration_rate: Fixed,
+    /// Share of a pool's surplus workers who move each month to vacancies of another
+    /// profession in another province of the same market (D25).
+    pub occupational_migration_rate: Fixed,
+    /// **Band-aid** (D26): a worker POP's births scale with its pool's employed
+    /// share, a stand-in for "people can't raise children without an income" until
+    /// POPs model dependents (POP_SYSTEM.md, "Future: dependents").
+    pub births_need_employment: bool,
+}
+
+/// Monthly militancy dynamics (D19).
+///
+/// `m ← clamp(m + rise × (1 − life_needs) + tax_weight × tax_rate − decay × m, 0, 1)`
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PoliticsRules {
+    /// Monthly rise at zero life-needs satisfaction.
+    pub militancy_rise: Fixed,
+    /// Monthly rise per unit of income tax rate.
+    pub militancy_tax_weight: Fixed,
+    /// Share of militancy that fades each month.
+    pub militancy_decay: Fixed,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -143,6 +169,7 @@ pub struct Rules {
     pub market: MarketRules,
     pub firms: FirmRules,
     pub demographics: DemographicRules,
+    pub politics: PoliticsRules,
 }
 
 /// Everything static about a game. Shared immutably by all systems.
@@ -157,5 +184,26 @@ pub struct Defs {
 impl Defs {
     pub fn good_count(&self) -> usize {
         self.goods.len()
+    }
+
+    /// The *worker professions*: those some producer type employs. Owner-only
+    /// professions never take jobs (D18). This is the single definition, used by
+    /// mobility and by reports.
+    pub fn worker_professions(&self) -> WorkerProfessions {
+        WorkerProfessions(
+            (0..self.professions.len()).map(|c| self.producer_types.iter().any(|t| t.worker == c)).collect(),
+        )
+    }
+}
+
+/// Which professions are worker professions ([`Defs::worker_professions`]), by
+/// profession id. A type of its own, so a rule that needs this set (such as
+/// `labor::pool_unemployment`) can't be handed some other per-profession mask.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WorkerProfessions(Vec<bool>);
+
+impl WorkerProfessions {
+    pub fn contains(&self, profession: usize) -> bool {
+        self.0[profession]
     }
 }

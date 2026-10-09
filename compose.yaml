@@ -1,0 +1,27 @@
+# The dedicated multiplayer server (M4-8): `docker compose up`, then share the
+# host's address, port 7777 and the fingerprint the server prints with the players.
+services:
+  pax-server:
+    build: .
+    image: iron-and-blood/pax-server
+    ports:
+      - "7777:7777"
+    # Every setting has a default in docker/entrypoint.sh (the list); set only what
+    # you change, e.g. PAX_PLAYERS: "6".
+    environment:
+      PAX_SCENARIO: scenarios/two_states
+      # A server password (D24): uncomment, and the `password` secret below.
+      # PAX_PASSWORD_FILE: /run/secrets/pax_password
+    # secrets: [pax_password]
+    volumes:
+      - saves:/app/saves
+      - tls:/app/tls
+    restart: unless-stopped
+
+volumes:
+  saves:
+  tls:
+
+# secrets:
+#   pax_password:
+#     file: ./pax_password.txt

@@ -1,0 +1,42 @@
+[package]
+name = "pax_server"
+description = "Authoritative game server: wraps the engine behind the FlatBuffers TCP protocol (D10, D22, D23)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[features]
+# Exposes the request decoder to the cargo-fuzz target (fuzz/, M3-10), so it fuzzes
+# the code the server runs rather than a copy. Never enabled in a server build.
+fuzzing = []
+
+[dependencies]
+pax_engine.workspace = true
+pax_data.workspace = true
+pax_protocol.workspace = true
+flatbuffers.workspace = true
+# Networking only. The simulation runs on its own thread, never on the async runtime (D23).
+tokio = { version = "1.37", features = ["rt-multi-thread", "net", "io-util", "sync", "time", "macros"] }
+# The inbound queue from connections to the sim thread: async sends from tokio
+# tasks (FIFO, no polling), blocking receives with a timeout on the sim thread (D23).
+flume = { version = "0.12", default-features = false, features = ["async"] }
+tracing = "0.1"
+# Resume tokens (D24): unguessable, so from the OS's secure random source.
+getrandom = "0.3"
+# TLS for multiplayer off localhost (D24, M4-6), on the workspace's rustls.
+rustls.workspace = true
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12", "logging"] }
+rcgen = { version = "0.13", default-features = false, features = ["ring", "pem", "crypto"] }
+ring.workspace = true
+tracing-subscriber = "0.3"
+
+[dev-dependencies]
+# The view benchmark (`view_building_budget`) builds D13-scale worlds.
+pax_data = { workspace = true, features = ["bench"] }
+# The session replay test (M3-9) replays at several thread counts.
+rayon.workspace = true
+
+[lints]
+workspace = true

@@ -7,12 +7,24 @@ rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
 
+[features]
+# Benchmark worlds (D13): `pax_data::bench`, for `pax_cli bench` and the server's view
+# benchmark. Off by default: it is not part of loading data.
+bench = []
+
 [dependencies]
+# Dependency-free: the content-hash scheme the client shares (D22). Never pax_protocol:
+# pax_server is the only crate that sees both engine and wire types (AGENTS.md section 2).
+pax_content.workspace = true
+# Province maps (M3-7): the reader shared with the client.
+pax_map.workspace = true
 pax_engine.workspace = true
 serde.workspace = true
 toml.workspace = true
 
 [dev-dependencies]
+# The map tests paint their own images.
+png = "0.18"
 rayon.workspace = true
 
 [lints]

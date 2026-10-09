@@ -86,12 +86,21 @@ impl Fixed {
     /// multiplication rounds, and call sites should show it.
     #[allow(clippy::should_implement_trait)]
     pub fn mul(self, rhs: Fixed) -> Fixed {
-        narrow((self.0 as i128 * rhs.0 as i128).div_euclid(SCALE_I128))
+        // Fast path (M4-11): when the product fits i64, 64-bit division by the
+        // constant scale gives the same floor as the i128 path, without i128
+        // division's library call. `mul_div`, `mul_ceil` and `div` do the same.
+        match self.0.checked_mul(rhs.0) {
+            Some(p) => Fixed(p.div_euclid(SCALE)),
+            None => narrow((self.0 as i128 * rhs.0 as i128).div_euclid(SCALE_I128)),
+        }
     }
 
     /// `self × rhs`, rounded up. Used where under-counting would let an agent
     /// consume more than it holds (e.g. input goods consumed by production).
     pub fn mul_ceil(self, rhs: Fixed) -> Fixed {
+        if let Some(neg) = self.0.checked_mul(rhs.0).and_then(i64::checked_neg) {
+            return Fixed(-neg.div_euclid(SCALE));
+        }
         let p = self.0 as i128 * rhs.0 as i128;
         narrow(-((-p).div_euclid(SCALE_I128)))
     }
@@ -105,6 +114,11 @@ impl Fixed {
     #[allow(clippy::should_implement_trait)]
     pub fn div(self, rhs: Fixed) -> Fixed {
         assert!(rhs.0 != 0, "Fixed::div by zero");
+        if let Some(n) = self.0.checked_mul(SCALE)
+            && let Some(q) = n.checked_div_euclid(rhs.0)
+        {
+            return Fixed(if rhs.0 < 0 && n.rem_euclid(rhs.0) != 0 { q - 1 } else { q });
+        }
         let n = self.0 as i128 * SCALE_I128;
         let d = rhs.0 as i128;
         // Floor division for either sign of the divisor.
@@ -123,7 +137,10 @@ impl Fixed {
     /// intermediate, so it cannot overflow unless the result itself does.
     pub fn mul_div(self, num: Fixed, den: Fixed) -> Fixed {
         assert!(den.0 > 0, "Fixed::mul_div denominator must be positive");
-        narrow((self.0 as i128 * num.0 as i128).div_euclid(den.0 as i128))
+        match self.0.checked_mul(num.0) {
+            Some(p) => Fixed(p.div_euclid(den.0)),
+            None => narrow((self.0 as i128 * num.0 as i128).div_euclid(den.0 as i128)),
+        }
     }
 
     pub fn min(self, other: Fixed) -> Fixed {
@@ -175,7 +192,7 @@ impl Fixed {
         for _ in frac_part.len()..DECIMALS {
             frac_val *= 10;
         }
-        let raw = int_val * SCALE_I128 + frac_val;
+        let raw = int_val.checked_mul(SCALE_I128).ok_or_else(|| format!("'{s}' is out of range"))? + frac_val;
         let raw = if neg { -raw } else { raw };
         i64::try_from(raw).map(Fixed).map_err(|_| format!("'{s}' is out of range"))
     }
@@ -247,6 +264,64 @@ mod tests {
         Fixed::parse_decimal(s).unwrap()
     }
 
+    /// M4-11: the i64 fast paths give exactly the i128 results, so they change no
+    /// simulation result (D3, D11). The references are the original i128 formulas.
+    #[test]
+    fn the_fast_paths_match_the_i128_formulas() {
+        fn reference_mul(a: i64, b: i64) -> Option<i64> {
+            i64::try_from((a as i128 * b as i128).div_euclid(SCALE_I128)).ok()
+        }
+        fn reference_mul_ceil(a: i64, b: i64) -> Option<i64> {
+            i64::try_from(-((-(a as i128 * b as i128)).div_euclid(SCALE_I128))).ok()
+        }
+        fn reference_div(a: i64, b: i64) -> Option<i64> {
+            let (n, d) = (a as i128 * SCALE_I128, b as i128);
+            let q = n.div_euclid(d);
+            i64::try_from(if d < 0 && n.rem_euclid(d) != 0 { q - 1 } else { q }).ok()
+        }
+        fn reference_mul_div(a: i64, b: i64, c: i64) -> Option<i64> {
+            i64::try_from((a as i128 * b as i128).div_euclid(c as i128)).ok()
+        }
+        // Magnitudes from tiny to i64's edge, both signs, so products land on both
+        // sides of the i64 boundary.
+        let mut state = 0x9E37_79B9_7F4A_7C15u64;
+        let mut next = move || {
+            state = state.wrapping_add(0x9E37_79B9_7F4A_7C15);
+            let mut z = state;
+            z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+            z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+            let z = z ^ (z >> 31);
+            let bits = z % 64;
+            let v = (z >> 1) as i64 >> (63 - bits.max(1));
+            if z & 1 == 0 { v } else { v.wrapping_neg() }
+        };
+        let edges = [0, 1, -1, 7, -7, SCALE, -SCALE, SCALE - 1, i64::MAX, i64::MIN, i64::MIN + 1, 3_037_000_499];
+        let mut values: Vec<i64> = edges.to_vec();
+        values.extend((0..2_000).map(|_| next()));
+        // Where the reference overflows, both paths panic: the fast path falls back to
+        // the same i128 formula. Only results that exist are compared.
+        let same = |fast: &dyn Fn() -> Fixed, reference: Option<i64>, what: &str| {
+            if let Some(expected) = reference {
+                assert_eq!(fast().raw(), expected, "{what}");
+            }
+        };
+        let mut checked = 0;
+        for (k, &a) in values.iter().enumerate() {
+            for &b in values.iter().skip(k % 7).step_by(7) {
+                let (x, y) = (Fixed::from_raw(a), Fixed::from_raw(b));
+                same(&|| x.mul(y), reference_mul(a, b), &format!("mul {a} {b}"));
+                same(&|| x.mul_ceil(y), reference_mul_ceil(a, b), &format!("mul_ceil {a} {b}"));
+                if b != 0 {
+                    same(&|| x.div(y), reference_div(a, b), &format!("div {a} {b}"));
+                }
+                let c = b.unsigned_abs().clamp(1, i64::MAX as u64) as i64;
+                same(&|| x.mul_div(y, Fixed::from_raw(c)), reference_mul_div(a, b, c), &format!("mul_div {a} {b} {c}"));
+                checked += 1;
+            }
+        }
+        assert!(checked > 500_000, "{checked}");
+    }
+
     #[test]
     fn parse_and_display_round_trip() {
         for s in ["0.000000", "1.000000", "-0.015000", "123456.789012", "-7.000001"] {
@@ -264,6 +339,9 @@ mod tests {
         assert!(Fixed::parse_decimal("1e5").is_err());
         assert!(Fixed::parse_decimal("").is_err());
         assert!(Fixed::parse_decimal("99999999999999999").is_err());
+        // 34 integer digits fit i128 but overflow once scaled by 10^6 (audit 2026-10-08).
+        assert!(Fixed::parse_decimal("1000000000000000000000000000000000").is_err());
+        assert!(Fixed::parse_decimal("-99999999999999999999999999999999999999").is_err());
     }
 
     #[test]

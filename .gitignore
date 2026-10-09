@@ -40,3 +40,9 @@ flamegraph.svg
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# cargo fuzz (M3-10)
+/fuzz/target
+/fuzz/corpus
+/fuzz/artifacts
+/fuzz/coverage

@@ -31,8 +31,66 @@ jobs:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+      - name: Generated protocol code is up to date (D22)
+        run: |
+          scripts/gen-protocol.sh
+          if [ -n "$(git status --porcelain -- crates/pax_protocol/src/generated)" ]; then
+            git status --short -- crates/pax_protocol/src/generated
+            echo "::error::crates/pax_protocol/src/generated is out of date with schemas/. Run scripts/gen-protocol.sh and commit the result."
+            exit 1
+          fi
+      - name: Every crate applies the workspace lints
+        run: python3 scripts/check_lints.py
+      - name: Docs match the repository (docs/README.md)
+        run: python3 scripts/check_docs.py
+      - name: Crate boundaries (D10, D12, AGENTS.md section 2)
+        run: |
+          deps() { cargo tree -p "$1" -e normal --prefix none | tail -n +2; }
+          # Clients must not be able to simulate, not even in their tests (D12): dev
+          # edges count too.
+          for crate in pax_protocol pax_godot; do
+            if cargo tree -p "$crate" -e normal,dev --prefix none | tail -n +2 | grep -q '^pax_engine '; then
+              echo "::error::$crate depends on pax_engine. Clients must not be able to simulate (D10, D12)."
+              exit 1
+            fi
+          done
+          # pax_server is the only crate that sees both engine and wire types. The list
+          # of engine-side crates is derived, so a new member is checked automatically.
+          members=$(cargo metadata --no-deps --format-version 1 |
+            python3 -c 'import json, sys; print(*(p["name"] for p in json.load(sys.stdin)["packages"]))')
+          for crate in $members; do
+            [ "$crate" = pax_server ] && continue
+            if [ "$crate" != pax_engine ] && ! deps "$crate" | grep -q '^pax_engine '; then
+              continue
+            fi
+            if deps "$crate" | grep -qE '^(pax_protocol|flatbuffers) '; then
+              echo "::error::$crate links wire types; only pax_server may see both engine and wire (AGENTS.md section 2)."
+              exit 1
+            fi
+            echo "$crate: engine-side, no wire types"
+          done
+          # The shared content hash carries nobody's types.
+          if [ -n "$(deps pax_content)" ]; then
+            echo "::error::pax_content must have no dependencies."
+            exit 1
+          fi
+          # The bridge links pax_protocol and D12's side-neutral crates, and no other
+          # workspace crate: an allowlist, so the exception can't grow unnoticed.
+          extra=$(cargo tree -p pax_godot -e normal --depth 1 --prefix none | tail -n +2 \
+            | grep '^pax_' | grep -vE '^(pax_protocol|pax_map|pax_content) ' || true)
+          if [ -n "$extra" ]; then
+            echo "::error::pax_godot links $extra; D12 allows pax_protocol, pax_map and pax_content only."
+            exit 1
+          fi
+          # The shared map reader is linked by both sides, so it carries neither side's types.
+          if deps pax_map | grep -qE '^(pax_engine|pax_protocol|flatbuffers) '; then
+            echo "::error::pax_map must not depend on the engine or the wire types."
+            exit 1
+          fi
       - run: cargo fmt --all --check
       - run: cargo clippy --all-targets --release -- -D warnings
+      - name: Clippy the server's fuzzing surface (the nightly fuzz job isn't required)
+        run: cargo clippy -p pax_server --features fuzzing --all-targets --release -- -D warnings
       - name: Rustdoc (no broken links)
         run: cargo doc --no-deps
         env:
@@ -57,6 +115,10 @@ jobs:
             cargo run --release -p pax_cli -- verify "$s" --threads 1
             cargo run --release -p pax_cli -- verify "$s" --threads 4
           done
+      - name: Session replay through pax_cli (M3-9, the server's determinism gate)
+        run: |
+          cargo build --release -p pax_cli
+          PAX_CLI=target/release/pax_cli PAX_CLI_REQUIRED=1 cargo test --release -p pax_server --test session_replay
 
   bench:
     # D13 / MILESTONE_1 T1: fail a PR that makes the daily tick > 20% slower.
@@ -84,11 +146,21 @@ jobs:
           # Shared target dir: dependencies built for head are reused.
           cargo build --release -p pax_cli --manifest-path "$RUNNER_TEMP/base/Cargo.toml" --target-dir target
           cp target/release/pax_cli "$RUNNER_TEMP/pax_cli_base"
-      - name: Compare base vs head
+      - name: Compare base vs head (mini_valley, 1 market)
         run: |
           scripts/bench-compare.sh \
             "$RUNNER_TEMP/pax_cli_base" "$RUNNER_TEMP/base/scenarios/mini_valley" \
             "$RUNNER_TEMP/pax_cli_head" scenarios/mini_valley
+      - name: Compare base vs head (two_states, nations and inputs)
+        # Exercises the paths mini_valley doesn't: taxes, transfers, input chains,
+        # and month-end systems (35 days covers the first month end).
+        env:
+          SCALE: "2000"
+          DAYS: "35"
+        run: |
+          scripts/bench-compare.sh \
+            "$RUNNER_TEMP/pax_cli_base" "$RUNNER_TEMP/base/scenarios/two_states" \
+            "$RUNNER_TEMP/pax_cli_head" scenarios/two_states
 
   determinism-cross-platform:
     # Fixed-point state must hash identically on every OS/CPU we ship to (D3).
@@ -106,3 +178,160 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo run --release -p pax_cli -- verify scenarios/mini_valley
       - run: cargo run --release -p pax_cli -- verify scenarios/two_states
+      - name: Session replay through pax_cli (M3-9)
+        shell: bash
+        run: |
+          cargo build --release -p pax_cli
+          cli=target/release/pax_cli
+          if [ -f "$cli.exe" ]; then cli="$cli.exe"; fi
+          PAX_CLI="$cli" PAX_CLI_REQUIRED=1 cargo test --release -p pax_server --test session_replay
+
+  client-smoke:
+    # M3-8: the real client, headless. It launches pax_server through the bridge,
+    # plays a policy and a save/list/load round trip at full speed and quits; any script
+    # error, protocol error or lost connection fails it (client/smoke.gd, --smoke).
+    name: Client smoke test (headless Godot)
+    runs-on: ubuntu-latest
+    env:
+      GODOT_VERSION: 4.7.2
+      GODOT_SHA256: cadd3204e728a35d3f13adb7fd0d7902636b79f6b95c40c265eb73b6c35329e4
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - uses: Swatinem/rust-cache@v2
+      - name: Build the bridge and the server
+        run: cargo build -p pax_godot -p pax_server
+      - name: Bridge tests against the real server binary (launcher included)
+        run: PAX_SERVER=target/debug/pax_server cargo test -p pax_godot
+      - name: Install Godot ${{ env.GODOT_VERSION }}
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/godot.zip" \
+            "https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable/Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip"
+          echo "${GODOT_SHA256}  $RUNNER_TEMP/godot.zip" | sha256sum -c -
+          unzip -q "$RUNNER_TEMP/godot.zip" -d "$RUNNER_TEMP"
+          mv "$RUNNER_TEMP/Godot_v${GODOT_VERSION}-stable_linux.x86_64" "$RUNNER_TEMP/godot"
+      - name: Import the project
+        # The extension is listed before the first import, so Godot loads it at
+        # startup. Registered mid-scan instead (a fresh project), unloading it at the
+        # import's exit aborts (Godot 4.7.2 + godot-rust 0.5.5; client/README.md).
+        run: |
+          mkdir -p client/.godot
+          echo "res://pax_godot.gdextension" > client/.godot/extension_list.cfg
+          timeout 300 "$RUNNER_TEMP/godot" --headless --path client --import
+      - name: Smoke test
+        run: timeout 180 "$RUNNER_TEMP/godot" --headless --path client -- --smoke | tee smoke.log && grep -q "SMOKE OK" smoke.log
+      - name: Smoke test, hosting a multiplayer game
+        # M4-9: hosts a game over TLS the way a player would, through the lobby
+        # (client/smoke_host.gd, --smoke-host).
+        run: timeout 180 "$RUNNER_TEMP/godot" --headless --path client -- --smoke-host | tee smoke-host.log && grep -q "SMOKE OK (host)" smoke-host.log
+
+  docker:
+    # M4-8: the dedicated server's image builds, starts, prints its TLS fingerprint and
+    # reports healthy (its TCP probe). Not a required check.
+    name: Docker image (dedicated server)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: The image's toolchain is the pinned one
+        run: |
+          pinned=$(sed -n 's/^channel = "\(.*\)"/\1/p' rust-toolchain.toml)
+          grep -qx "ARG RUST_VERSION=$pinned" Dockerfile \
+            || { echo "Dockerfile's RUST_VERSION is not rust-toolchain.toml's $pinned"; exit 1; }
+      - name: Build the image
+        run: docker build -t pax-server .
+      - name: Start it and wait until it is healthy
+        run: |
+          docker run -d --name pax -p 7777:7777 pax-server
+          status=starting
+          for _ in $(seq 60); do
+            status=$(docker inspect -f '{{.State.Health.Status}}' pax)
+            [ "$status" = healthy ] && break
+            sleep 3
+          done
+          docker logs pax
+          [ "$status" = healthy ]
+          docker logs pax 2>&1 | grep -q "TLS certificate SHA-256"
+      - name: Every PAX_* setting reaches pax_server
+        # A renamed pax_server flag fails here, not in a deployment: the image starts
+        # with every variable the entrypoint reads, and the list below must be that
+        # list.
+        run: |
+          set -- PAX_ADMIN PAX_ADMIN_PASSWORD_FILE PAX_COMMANDS_PER_SECOND PAX_DROP_AFTER \
+            PAX_MAP_EVERY PAX_PASSWORD_FILE PAX_PAUSE_AFTER PAX_PLAYERS PAX_PORT \
+            PAX_SCENARIO PAX_UPDATES_PER_SECOND
+          diff <(printf '%s\n' "$@") <(grep -o 'PAX_[A-Z_]*' docker/entrypoint.sh | sort -u)
+          secrets="$RUNNER_TEMP/secrets"
+          mkdir -p "$secrets" && echo pw > "$secrets/pw" && echo admin-pw > "$secrets/admin-pw"
+          chmod 644 "$secrets"/*
+          docker run -d --name pax-all -v "$secrets:/run/secrets:ro" \
+            -e PAX_ADMIN=ada -e PAX_ADMIN_PASSWORD_FILE=/run/secrets/admin-pw \
+            -e PAX_COMMANDS_PER_SECOND=10 -e PAX_DROP_AFTER=20 -e PAX_MAP_EVERY=3 \
+            -e PAX_PASSWORD_FILE=/run/secrets/pw -e PAX_PAUSE_AFTER=4 -e PAX_PLAYERS=3 \
+            -e PAX_PORT=7778 -e PAX_SCENARIO=scenarios/two_states -e PAX_UPDATES_PER_SECOND=2 \
+            pax-server
+          status=starting
+          for _ in $(seq 60); do
+            status=$(docker inspect -f '{{.State.Health.Status}}' pax-all)
+            [ "$status" = healthy ] && break
+            sleep 3
+          done
+          docker logs pax-all
+          [ "$status" = healthy ]
+
+  fuzz:
+    # M3-10: coverage-guided fuzzing of the client frame reader, for a fixed budget.
+    # Needs nightly, so it lives outside the workspace (fuzz/). Not a required check:
+    # a crash uploads its input as an artifact, to reproduce and fix.
+    name: Fuzz client frames (60 s)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: fuzz
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-fuzz
+      # The prebuilt cargo-fuzz is a musl binary and would default to its own target,
+      # which the address sanitizer can't build for: name the runner's target.
+      - run: cargo +nightly fuzz run --target x86_64-unknown-linux-gnu client_frames -- -max_total_time=60
+        working-directory: fuzz
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-artifacts
+          path: fuzz/artifacts
+
+  diagrams:
+    # GitHub shows a Mermaid diagram that doesn't parse as an error box, and no other
+    # check reads them. Renders the diagrams in the Markdown files a PR changes, with the
+    # pinned mermaid-cli image (scripts/render-mermaid.sh). Not a required check.
+    name: Mermaid diagrams render
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    env:
+      BASE_SHA: ${{ github.event.pull_request.base.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Render changed diagrams
+        run: |
+          mapfile -t files < <(git diff --name-only --diff-filter=AM "$BASE_SHA" HEAD -- '*.md' \
+            | xargs -r grep -l '^```mermaid' || true)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "No changed Markdown file has a Mermaid diagram."
+            exit 0
+          fi
+          scripts/render-mermaid.sh "${files[@]}"
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rendered-diagrams
+          path: out/mermaid
+          if-no-files-found: ignore

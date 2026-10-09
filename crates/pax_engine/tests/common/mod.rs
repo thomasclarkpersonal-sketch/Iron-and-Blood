@@ -6,7 +6,7 @@
 use std::sync::Arc;
 
 use pax_engine::defs::*;
-use pax_engine::world::{Geography, NewProducer};
+use pax_engine::world::{Geography, NewNation, NewProducer};
 use pax_engine::{Fixed, World};
 
 /// Xorshift64: a tiny deterministic generator for test inputs only.
@@ -55,7 +55,19 @@ pub fn rules() -> Rules {
             target_stock_days: 2,
             subsistence_wage_multiple: d("1.5"),
         },
-        demographics: DemographicRules { growth_rate: d("0.01"), starvation_rate: d("0.3") },
+        politics: PoliticsRules {
+            militancy_rise: d("0.05"),
+            militancy_tax_weight: d("0.1"),
+            militancy_decay: d("0.1"),
+        },
+        demographics: DemographicRules {
+            growth_rate: d("0.01"),
+            starvation_rate: d("0.3"),
+            mobility_rate: d("0.2"),
+            migration_rate: d("0.1"),
+            occupational_migration_rate: Fixed::ZERO,
+            births_need_employment: false,
+        },
     }
 }
 
@@ -90,7 +102,14 @@ pub fn random_world(seed: u64) -> World {
                 input_spend_rate: r.fixed(1_000_000),
             })
             .collect(),
-        rules: rules(),
+        // Every month-end flow and the births band-aid on, so the conservation and
+        // determinism properties cover them (D25, D26).
+        rules: {
+            let mut r = rules();
+            r.demographics.occupational_migration_rate = d("0.1");
+            r.demographics.births_need_employment = true;
+            r
+        },
     };
     let markets = 1 + r.below(3) as usize;
     let provinces = markets + r.below(3) as usize;
@@ -98,8 +117,25 @@ pub fn random_world(seed: u64) -> World {
         province_keys: (0..provinces).map(|p| format!("p{p}")).collect(),
         province_market: (0..provinces).map(|p| (p % markets) as u32).collect(),
         market_keys: (0..markets).map(|m| format!("m{m}")).collect(),
+        market_nation: Vec::new(),
     };
+    // 0–2 nations; each market belongs to a random nation or to none (stateless).
+    let nations = r.below(3) as u32;
+    let mut geography = geography;
+    geography.market_nation = (0..markets)
+        .map(|_| if nations == 0 || r.below(4) == 0 { None } else { Some(r.below(nations as u64) as u32) })
+        .collect();
     let mut world = World::new(Arc::new(defs), geography, seed);
+    for n in 0..nations {
+        world.push_nation(NewNation {
+            key: format!("n{n}"),
+            treasury: r.fixed(1_000_000_000),
+            income_tax_rate: r.fixed(500_000),
+            transfer_rate: r.fixed(200_000),
+            consumption_rate: r.fixed(200_000),
+            basket: (0..world.defs.good_count()).map(|_| r.fixed(1_000_000) + Fixed::EPSILON).collect(),
+        });
+    }
     for _ in 0..(1 + r.below(30)) {
         let size = if r.below(10) == 0 { 0 } else { 1 + r.below(50_000) as u32 };
         world.push_pop(r.below(provinces as u64) as u32, r.below(profs as u64) as usize, size, r.fixed(10_000_000_000));

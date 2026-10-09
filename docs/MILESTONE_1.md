@@ -2,6 +2,8 @@
 
 **Goal:** a headless, deterministic, money-conserving economy loop that a team can build on. This milestone proves the decisions in [DECISIONS.md](DECISIONS.md) in running code before any map, politics or UI work starts.
 
+**Status: closed on 2026-10-08:** its last task (#15) merged before M2's first (#17). Every acceptance criterion below is met. This document is now a record: its open notes and M2 preview were current when it closed, and the live plan is [MILESTONE_2.md](MILESTONE_2.md).
+
 ## Scope
 
 **In scope:**
@@ -31,7 +33,7 @@
 | A6 | One-year golden replay pinned and verified in CI | ✅ | `scenarios/mini_valley/golden.hashes`, `.github/workflows/ci.yml` |
 | A7 | Loader rejects bad data and reports every error at once | ✅ | `pax_data/tests/validation.rs` |
 | A8 | Reference scenario runs 5 years without collapse, with all goods traded | ✅ | `pax_cli run scenarios/mini_valley --days 1800` |
-| A9 | 1M POP rows ≤ 100 ms/day on 8 threads | ✅ 45 ms | `pax_cli bench scenarios/mini_valley --scale 170000 --threads 8` |
+| A9 | 1M POP rows ≤ 100 ms/day on 8 threads | ✅ 45 ms (≈36 ms after T4) | `pax_cli bench scenarios/mini_valley --scale 170000 --threads 8` |
 | A10 | CI fails on > 20% benchmark regression | ✅ | `Benchmark regression` job in `ci.yml` (`scripts/bench-compare.sh`) |
 | A11 | Larger reference content (≥ 10 goods, ≥ 6 professions, ≥ 2 markets) runs 20 years stably | ✅ | `scenarios/two_states` (12 goods, 6 professions, 2 markets); `pax_data/tests/content_stability.rs` |
 | A12 | Economy health report (GDP, unemployment, price index, wage share) in `pax_cli` | ✅ | `pax_cli report scenarios/mini_valley --days 1800` |
@@ -61,10 +63,12 @@ Each task is sized for one developer. All must keep `cargo test`, `clippy -D war
 
 ## Milestone 2 preview (for planning)
 
+> M2 is under way. Its live plan, status and the decisions waiting on the maintainer are in **[MILESTONE_2.md](MILESTONE_2.md)**.
+
 1. Inter-market trade per D14: friction matrix, iceberg costs, tariffs.
-2. Nations and treasuries: income tax on wages, tariffs, government consumption, a treasury in the money invariant.
+2. Nations and treasuries. **M2-1 done (D15):** flat income tax on wages and dividends, a treasury in the money invariant, and per-capita transfers. **M2-2 done (D16):** government consumption of a basket of goods through the market. Still to do: tariffs (with D14).
 3. Banking with inside money (D5): deposits, loans, bonds, defaults.
-4. Promotion/demotion and migration as deterministic flows (D7); culture and religion columns; POP split/merge.
+4. Promotion/demotion and migration as deterministic flows (D7). **Labour mobility within a province (D18) and migration within a market (D20) done.** Still to do: migration across markets, promotion, culture and religion columns, POP merge.
 5. Share registry, investment, and firm bankruptcy (D6).
 6. Save files: initial state + command log (D10).
-7. Politics: militancy and consciousness in `Fixed`, driven by `life_needs`.
+7. Politics: militancy and consciousness in `Fixed`, driven by `life_needs`. **Militancy done (D19)**, without effects yet. Still to do: consciousness, rebellions, reforms.

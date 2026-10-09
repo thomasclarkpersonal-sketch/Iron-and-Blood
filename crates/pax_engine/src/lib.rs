@@ -11,6 +11,7 @@
 //! `docs/DECISIONS.md`.
 
 pub mod alloc;
+pub mod command;
 pub mod defs;
 pub mod fixed;
 pub mod groups;
@@ -19,8 +20,10 @@ pub mod layout;
 pub mod rng;
 pub mod systems;
 pub mod tick;
+pub mod views;
 pub mod world;
 
+pub use command::{Command, CommandError};
 pub use fixed::Fixed;
 pub use tick::{DayReport, step};
 pub use world::World;

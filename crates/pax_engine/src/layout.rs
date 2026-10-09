@@ -5,8 +5,9 @@
 //! depend only on:
 //!
 //! * `pops.province` and `pops.profession` (and the number of rows),
-//! * `geography.province_market` (and so the number of provinces), and
-//! * the number of professions and markets, which size the key spaces.
+//! * `geography.province_market` (and so the number of provinces),
+//! * `geography.market_nation`, and
+//! * the number of professions, markets and nations, which size the key spaces.
 //!
 //! In M1 none of these change after loading, so rebuilding the groupings every
 //! tick (three O(N) passes, ~8 ms at 1M POPs) was pure overhead (MILESTONE_1 T4).
@@ -65,6 +66,12 @@ pub fn owner_count(world: &World) -> usize {
     world.geography.market_count() * world.defs.professions.len()
 }
 
+/// Dense key of a market's nation group: the nation's row, or `nations.len()`
+/// for stateless markets.
+pub fn nation_key(world: &World, market: usize) -> usize {
+    world.geography.nation_of_market(market).unwrap_or(world.nations.len())
+}
+
 /// Groupings derived from the POP table layout. Obtain through
 /// [`World::pop_layout`], which caches it; [`PopLayout::build`] is O(N).
 #[derive(Debug, PartialEq, Eq)]
@@ -75,6 +82,8 @@ pub struct PopLayout {
     pub owners: Groups,
     /// Market row of each POP.
     pub market: Vec<u32>,
+    /// POP rows by nation (see [`nation_key`]); the last key holds stateless POPs.
+    pub nation: Groups,
     /// Fingerprint of the inputs this layout was built from (see [`fingerprint`]).
     /// Private so nothing outside this module can make a stale layout look valid.
     fingerprint: u64,
@@ -89,15 +98,18 @@ impl PopLayout {
     /// Builds the groupings from scratch: O(N). Systems should use
     /// [`World::pop_layout`] instead, which reuses a valid cached layout.
     pub fn build(world: &World) -> PopLayout {
+        world.check_market_nations();
         let pops = &world.pops;
         let market: Vec<u32> = pops.province.iter().map(|&p| world.geography.province_market[p as usize]).collect();
         let labour_keys: Vec<usize> =
             (0..pops.len()).map(|i| pool_key(world, pops.province[i], pops.profession[i] as usize)).collect();
         let owner_keys: Vec<usize> =
             (0..pops.len()).map(|i| owner_key(world, market[i] as usize, pops.profession[i] as usize)).collect();
+        let nation_keys: Vec<usize> = market.iter().map(|&m| nation_key(world, m as usize)).collect();
         PopLayout {
             labour: Groups::build(pool_count(world), &labour_keys),
             owners: Groups::build(owner_count(world), &owner_keys),
+            nation: Groups::build(world.nations.len() + 1, &nation_keys),
             market,
             fingerprint: fingerprint(world),
         }
@@ -115,6 +127,11 @@ pub fn fingerprint(world: &World) -> u64 {
     let mut h = mix(K, world.pops.len() as u64);
     h = mix(h, world.defs.professions.len() as u64);
     h = mix(h, world.geography.market_count() as u64);
+    h = mix(h, world.nations.len() as u64);
+    h = mix(h, world.geography.market_nation.len() as u64);
+    for &n in &world.geography.market_nation {
+        h = mix(h, n.map_or(u64::MAX, |n| n as u64));
+    }
     for (&province, &profession) in world.pops.province.iter().zip(&world.pops.profession) {
         h = mix(h, ((province as u64) << 16) | profession as u64);
     }

@@ -1,0 +1,255 @@
+// Server -> client messages (D22). See docs/NETWORK_PROTOCOL.md.
+//
+// The server never sends the full simulation state. Every DayUpdate carries a
+// small summary for everyone, plus the views this session subscribed to.
+
+include "common.fbs";
+
+namespace pax.net;
+
+// ------------------------------------------------------------- session setup
+
+/// A nation and the markets it owns (D7, D15).
+table NationDef {
+  key: string;
+  /// Indices into StaticData.markets.
+  markets: [uint];
+}
+
+/// Index tables for the session. Every id elsewhere in the protocol (good,
+/// profession, province, market, nation) is an index into one of these vectors.
+/// The tables don't change during a session; a LoadGame sends a new Welcome.
+table StaticData {
+  goods: [string];          // keys, e.g. "grain"
+  professions: [string];
+  producer_types: [string];
+  provinces: [string];
+  province_market: [uint];  // market index per province
+  markets: [string];
+  /// A market that no nation lists is stateless.
+  nations: [NationDef];
+  /// `pax_content::map_hash` of the scenario's two map files (`map/provinces.toml`,
+  /// `map/provinces.png`); absent if it has no map (M3-7). The client hashes its
+  /// own copies with the same function and refuses to draw on a mismatch.
+  map_hash: ulong = null;
+  /// Where the map's files are, relative to the scenario's directory (its
+  /// `scenario.toml` `map` setting); present exactly when `map_hash` is. The client
+  /// finds its own copy there, so only the server reads `scenario.toml` (D9). A
+  /// relative path with `/` separators and no `.`/`..` (pax_map::check_map_dir); the
+  /// client refuses anything else. Added in protocol 1.1.
+  map_dir: string;
+}
+
+table Welcome {
+  protocol_major: ushort;
+  protocol_minor: ushort;
+  player: ushort;
+  /// Present this in Hello.resume_token to reclaim the session after a drop (M4).
+  resume_token: ulong;
+  /// The nation this session commands; absent for sandbox (M3 only).
+  nation: uint = null;
+  scenario: string;
+  /// FNV-1a hash of the scenario and content files. The client checks it against
+  /// its own copy, so its map assets and labels match the server's data.
+  content_hash: ulong;
+  day: ulong;
+  speed: Speed;
+  defs: StaticData;
+}
+
+/// The server refuses the connection, then closes it.
+table Rejected {
+  reason: string;
+}
+
+// ------------------------------------------------------------------- views
+
+/// World totals for the day that just ran (from `DayReport`).
+table WorldSummary {
+  population: ulong;
+  workforce: ulong;
+  unemployed: ulong;
+  household_spending: Fixed;
+  government_spending: Fixed;
+  input_spending: Fixed;
+  wages: Fixed;
+  dividends: Fixed;
+  taxes: Fixed;
+  transfers: Fixed;
+  /// People whose life needs were not fully met.
+  deprived: ulong;
+  /// Population-weighted means, in [0, 1].
+  life_needs: Fixed;
+  militancy: Fixed;
+}
+
+/// One entry per nation, in StaticData order. Small, so it is always sent.
+table NationTable {
+  treasury: [Fixed];
+  income_tax_rate: [Fixed];
+  transfer_rate: [Fixed];
+  consumption_rate: [Fixed];
+  population: [ulong];
+  /// Population-weighted mean militancy of the nation's POPs, in [0, 1] (D19). 0
+  /// for a nation nobody lives in. Added in protocol 1.2 (M3's definition of done:
+  /// the nation panel shows militancy respond to policy).
+  militancy: [Fixed];
+}
+
+/// One value per province, in StaticData order (see MapMode for units).
+table MapView {
+  mode: MapMode;
+  good: ushort;
+  values: [Fixed];
+}
+
+/// One entry per good, in StaticData order.
+table MarketDetail {
+  market: uint;
+  price: [Fixed];
+  supply: [Fixed];
+  demand: [Fixed];
+  traded: [Fixed];
+}
+
+/// A province's POPs. A POP is identified by (province, profession), never by
+/// row index, because month-end compaction reorders rows (D7).
+table PopRows {
+  profession: [ushort];
+  people: [uint];
+  cash: [Fixed];
+  life_needs: [Fixed];
+  militancy: [Fixed];
+}
+
+/// Labour pools of the province, one entry per profession that has workers or jobs.
+table LabourRows {
+  profession: [ushort];
+  workforce: [ulong];
+  jobs: [ulong];
+  employed: [ulong];
+}
+
+table ProducerRows {
+  producer_type: [ushort];
+  capacity: [uint];
+  employed: [uint];
+  wage: [Fixed];
+  cash: [Fixed];
+}
+
+table ProvinceDetail {
+  province: uint;
+  pops: PopRows;
+  labour: LabourRows;
+  producers: ProducerRows;
+}
+
+/// Sent after each day the session is shown (D23). The optional views are present
+/// exactly when the session subscribed to them.
+table DayUpdate {
+  day: ulong;
+  speed: Speed;
+  /// Days that ran since the previous update this session received but were not
+  /// sent, because the client was behind (flow control, D23).
+  skipped: uint;
+  /// `World::state_hash` after this day. A thin client can't verify it; it
+  /// identifies the exact state in logs and bug reports, so a session can be replayed.
+  state_hash: ulong;
+  world: WorldSummary;
+  nations: NationTable;
+  map: MapView;
+  market: MarketDetail;
+  province: ProvinceDetail;
+}
+
+// ----------------------------------------------------------- replies, events
+
+table CommandResult {
+  client_seq: uint;
+  error: CommandError;
+  /// For an accepted command, the day at whose start it is applied.
+  applies_on_day: ulong;
+}
+
+/// Sent when the speed changes, including to and from Paused, when no DayUpdate
+/// would announce it.
+table ServerState {
+  day: ulong;
+  speed: Speed;
+  /// The player who last set the speed (M4); the M3 player is 0. A fairness pause
+  /// and its resume, or the last player leaving, are the server's doing and keep
+  /// it: `waiting_for` says why the game paused (D24).
+  changed_by: ushort;
+  /// Players the game is waiting for: silent past the server's pause threshold,
+  /// which paused it for everyone (D24's fairness pause, protocol 1.5). Empty when
+  /// nobody is. The game resumes by itself when they are all back or dropped.
+  waiting_for: [ushort];
+}
+
+table Pong {
+  nonce: ulong;
+}
+
+table SaveResult {
+  name: string;
+  /// Empty on success.
+  error: string;
+}
+
+table SaveList {
+  names: [string];
+}
+
+/// The server is closing the connection (shutdown, kick, timeout, protocol error).
+table Goodbye {
+  reason: string;
+}
+
+/// One player in the lobby (D24, protocol 1.4).
+table LobbyPlayer {
+  player: ushort;
+  /// The name the client gave in Hello.
+  name: string;
+  /// The claimed nation; absent for none yet, or for a sandbox seat.
+  nation: uint = null;
+  /// A sandbox seat (only on a server run with --sandbox): may command every nation.
+  sandbox: bool;
+  ready: bool;
+  host: bool;
+  /// Left the started game: the seat (player id and nation) is kept for their
+  /// resume token (D24, protocol 1.5). Nobody plays the nation meanwhile.
+  away: bool;
+}
+
+/// The lobby of a multiplayer server (D24, protocol 1.4), sent to every player
+/// whenever it changes: a player joins, leaves, claims, readies, the host changes, or
+/// the game starts. A single-player server never sends it.
+table LobbyState {
+  players: [LobbyPlayer];
+  /// The host started the game: commands and the clock work from now on.
+  started: bool;
+  /// Why this client's last lobby request was refused; absent otherwise. A LobbyState
+  /// with a notice goes only to the client that asked.
+  notice: string;
+}
+
+union ServerPayload {
+  Welcome,
+  Rejected,
+  DayUpdate,
+  CommandResult,
+  ServerState,
+  Pong,
+  SaveResult,
+  SaveList,
+  Goodbye,
+  LobbyState,
+}
+
+table ServerMessage {
+  payload: ServerPayload;
+}
+
+root_type ServerMessage;
+file_identifier "PAXS";
