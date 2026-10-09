@@ -62,6 +62,8 @@ Prices are not hard-coded and are not anchored to a base price. Every day, each 
 
 Tunables live in `data/rules.toml` under `[market]`.
 
+**Opt-in adaptive step (D1).** With `market.adaptive_step = true` (default `false`), each good gets its own step instead of the decaying `λₖ`: it starts at `step`, grows ×1.25 while the good's excess demand keeps its sign, halves when the sign flips (Rprop-style), and is capped at 1. Everything else in the cycle above is unchanged. No scenario turns it on yet; the numbers are in [PERFORMANCE.md](PERFORMANCE.md), "Price discovery".
+
 ### Consumer demand (D2)
 
 A profession has subsistence needs `γ` per person per day (Victoria 2's *life needs*) and discretionary shares `β`. A POP with `N` people and daily budget `Y = cash × spend_rate`:
@@ -73,7 +75,7 @@ Everyday and luxury goods are goods with `β > 0`. Poor POPs barely buy them, ri
 
 ## 🌍 Market Hierarchy and Trade (D14, M2)
 
-M1 has independent market nodes (one per *state*). M2 links them, and these rules are binding:
+M1 has independent market nodes (one per *state*). M2 links them, and these rules are binding. The concrete mechanism, merchants that arbitrage price gaps along routes with one day of transit, is the M5 design in [TRADE.md](TRADE.md):
 
 1. Every node clears by itself using the method above.
 2. Goods flow from node A to node B when `p_B·(1 − τ_AB) − tariff_AB > p_A`. Here `τ` is the iceberg transport loss ([MAP_AND_LOGISTICS.md](MAP_AND_LOGISTICS.md)). Flow is throttled by infrastructure capacity.
