@@ -1,6 +1,6 @@
 # Unrest and Rebellions (M5, M6): Design
 
-**Status: design agreed with the owner (2026-10-09), not implemented yet; its decision is *Proposed* until accepted.** It gives [D19](DECISIONS.md#d19-militancy) militancy its consequences, in two milestones: **strikes and riots in M5**, **rebellions in M6**. Its rules are [D28](DECISIONS.md#d28-economic-unrest-strikes-and-riots) (M5) and [D32](DECISIONS.md#d32-political-revolutions-and-breakaway-markets) (M6) (binding once accepted); this document holds the mechanism. The owner's answers to the review questions are under [Decisions](#decisions-owner-2026-10-09).
+**Status: design agreed with the owner (2026-10-09), not implemented yet. Its M5 decision was accepted on 2026-10-10, by the maintainer for M5; its M6 decision is *Proposed* until accepted.** It gives [D19](DECISIONS.md#d19-militancy) militancy its consequences, in two milestones: **strikes and riots in M5**, **rebellions in M6**. Its rules are [D28](DECISIONS.md#d28-economic-unrest-strikes-and-riots) (M5, binding) and [D32](DECISIONS.md#d32-political-revolutions-and-breakaway-markets) (M6, binding once accepted); this document holds the mechanism. The owner's answers to the review questions are under [Decisions](#decisions-owner-2026-10-09).
 
 ## Where we are
 
@@ -22,7 +22,8 @@ The repression row is read from the owner's M5 draft (a security transfer, and n
 
 A POP whose militancy exceeds `strike_threshold` works less:
 - its effective labour supply is `size × (1 − strike_rate × (militancy − strike_threshold))`;
-- labour assignment (D4 step 1) sees fewer available workers, so output falls, wages per worker are unchanged, and prices rise.
+- labour assignment (D4 step 1) sees fewer available workers, so output falls and prices rise;
+- striking workers forgo their wages: the pool's wages are split among its working (non-striking) members only (D28).
 
 This is the gentle, always-on feedback: discontent costs the economy before it costs the state. No randomness, so no new determinism concerns.
 
@@ -30,7 +31,7 @@ This is the gentle, always-on feedback: discontent costs the economy before it c
 
 When the population-weighted militancy of a province exceeds `riot_threshold`, at month end:
 - **destruction:** a share `riot_destruction` of the province's producers' *output stock* is destroyed. Goods are lost, never money (D5).
-- **repression, automatic:** the owning nation's treasury pays a security cost to the province's POPs (wages for militia), as an ordinary transfer, split by size (largest remainder). That reduces their militancy by `repression_relief`. A stateless province has no treasury to pay, so it riots without relief.
+- **repression, automatic:** the owning nation's treasury pays a security cost to the province's POPs (wages for militia), as an ordinary transfer, split by size (largest remainder). It relieves their militancy only through their life needs, like any other income; there is no direct relief (D28). A stateless province has no treasury to pay, so it riots without a transfer.
 
 ## Stage 3: rebellion (M6; seeded-random, rare)
 
@@ -59,7 +60,7 @@ Each stage feeds back into policy pressure. With commands (D21), a player sees m
 - **Nation:** none (repression is a transfer).
 
 New `[politics]` rules:
-- M5: `strike_threshold`, `strike_rate`; `riot_threshold`, `riot_destruction`, `repression_relief`;
+- M5: `strike_threshold`, `strike_rate`; `riot_threshold`, `riot_destruction`; and one for the size of the security transfer (planned under D28, not named yet);
 - M6: `rebellion_threshold`, `rebellion_base`, `rebellion_months`.
 
 ## Acceptance tests

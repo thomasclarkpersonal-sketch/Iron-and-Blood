@@ -35,7 +35,7 @@ Both are `Fixed` columns on `Pops`, updated at month end (D4). **Militancy is im
 *   **Militancy:** willingness to use violence against the state. It rises with unmet life needs (`1 − life_needs`) and with the tax burden, and decays slowly toward a baseline. High militancy produces rebellions, the one place genuine randomness is used (`rng::Stream::REBELLION`, D3).
 *   **Consciousness:** political awareness. Driven by literacy, discretionary spending (`Y − N·C`) and technology. High consciousness creates demand for political reforms (voting rights, free press) and social reforms (minimum wage, pensions).
 
-Consciousness needs a decision of its own, with its update formula and its data fields in `professions.toml` and `rules.toml`. What militancy *does* is proposed in [#28](https://github.com/thomasclarkpersonal-sketch/Iron-and-Blood/pull/28).
+Consciousness needs a decision of its own, with its update formula and its data fields in `professions.toml` and `rules.toml`. What militancy *does* is decided in D28 (strikes and riots, planned; mechanism in [REBELLIONS.md](REBELLIONS.md)), and rebellions are proposed in D32.
 
 ### Laws & reforms
 Enacted laws constrain the government's tax brackets, tariff ranges and social spending. Reforms can appease high-consciousness POPs but anger entrenched elite interest groups.

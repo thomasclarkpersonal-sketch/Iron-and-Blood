@@ -169,4 +169,4 @@ To have Claude draft a feature, open an issue with the *Feature request* templat
 - **What is being built:** the milestone documents linked from the [README](../README.md#-documentation). [MILESTONE_2.md](MILESTONE_2.md) has the measured state of the economy and the design questions still open.
 - **Where things are written down:** [docs/README.md](README.md).
 
-Open design questions still on proposal PRs: trade ([#18](https://github.com/thomasclarkpersonal-sketch/Iron-and-Blood/pull/18)), investment ([#21](https://github.com/thomasclarkpersonal-sketch/Iron-and-Blood/pull/21)) and rebellions ([#28](https://github.com/thomasclarkpersonal-sketch/Iron-and-Blood/pull/28)). Read those before working on any of these areas.
+Trade, investment and economic unrest are decided (D17, D27 and D28, accepted on 2026-10-10) and designed in [TRADE.md](TRADE.md), [INVESTMENT.md](INVESTMENT.md) and [REBELLIONS.md](REBELLIONS.md); [Milestone 5](MILESTONE_5.md) builds them. Read those before working on any of these areas.

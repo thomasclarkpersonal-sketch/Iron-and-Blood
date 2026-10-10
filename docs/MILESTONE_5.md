@@ -1,11 +1,11 @@
 # Milestone 5: Trade, Investment and Economic Unrest
 
 > [!NOTE]
-> **Status: planned, not started.** Its decisions D17, D27 and D28 are *Proposed* in [DECISIONS.md](DECISIONS.md); the designs are [TRADE.md](TRADE.md), [INVESTMENT.md](INVESTMENT.md) and [REBELLIONS.md](REBELLIONS.md), and [DATA_MODEL_M5_M6.md](DATA_MODEL_M5_M6.md) holds the data model.
+> **Status: planned, not started.** Its decisions D17, D27 and D28 are accepted (2026-10-10, by the maintainer for M5) in [DECISIONS.md](DECISIONS.md); the designs are [TRADE.md](TRADE.md), [INVESTMENT.md](INVESTMENT.md) and [REBELLIONS.md](REBELLIONS.md), and [DATA_MODEL_M5_M6.md](DATA_MODEL_M5_M6.md) holds the data model.
 
 **Goal:** Turn isolated local economies into an interconnected world trading system, unleash industrial growth through capital investment so output can grow beyond the capacity a scenario starts with, introduce economic consequences for worker militancy (strikes and riots), and equip the Godot client with full trade, tariff, and construction controls.
 
-Milestone 5 builds on the single-player and multiplayer foundation established in [Milestone 3](MILESTONE_3.md) and [Milestone 4](MILESTONE_4.md). Binding architectural rules follow [DECISIONS.md](DECISIONS.md) (in particular D1, D3, D5, D6, D13, D14, and proposed decisions D17, D27, D28).
+Milestone 5 builds on the single-player and multiplayer foundation established in [Milestone 3](MILESTONE_3.md) and [Milestone 4](MILESTONE_4.md). Binding architectural rules follow [DECISIONS.md](DECISIONS.md) (in particular D1, D3, D5, D6, D13, D14, D17, D27 and D28).
 
 ---
 
@@ -47,12 +47,12 @@ Milestone 5 builds on the single-player and multiplayer foundation established i
 
 ## 🏛️ System Design & Decisions
 
-This milestone's rules live in their decisions and designs; this section only says where. Each is *Proposed* until accepted.
+This milestone's rules live in their decisions and designs; this section only says where. All three decisions were accepted on 2026-10-10, by the maintainer for M5.
 
 - **Tick order:** D4 is amended to the order in [DATA_MODEL_M5_M6.md](DATA_MODEL_M5_M6.md), "Tick order" (arrival before labour; riots after politics; investment before demographics).
 - **1. Inter-market trade:** rules in [D17](DECISIONS.md#d17-inter-market-trade-routes-merchants-and-tariffs); mechanism, the owner's answers and acceptance tests in [TRADE.md](TRADE.md). In brief: merchants arbitrage price gaps with one day of transit, three ownership kinds, per-route tuning, tariffs on the origin price, dynamic entry and exit with seeded merchants, a sparse trade horizon.
 - **2. Capital investment and construction:** rules in [D27](DECISIONS.md#d27-capital-investment-and-capacity-expansion); mechanism in [INVESTMENT.md](INVESTMENT.md). In brief: producers expand from retained earnings, buying real construction goods; new producers are founded by capitalists or the state; idle capacity shrinks.
-- **3. Economic unrest:** rules in [D28](DECISIONS.md#d28-economic-unrest-strikes-and-riots); mechanism in [REBELLIONS.md](REBELLIONS.md). In brief: strikes cut labour supply above a threshold; riots destroy stock and trigger an automatic security transfer. **Open (D28):** how strikers are paid, and whether the riot transfer relieves militancy directly.
+- **3. Economic unrest:** rules in [D28](DECISIONS.md#d28-economic-unrest-strikes-and-riots); mechanism in [REBELLIONS.md](REBELLIONS.md). In brief: strikes cut labour supply above a threshold; riots destroy stock and trigger an automatic security transfer. D28 also settles how strikers are paid and whether the riot transfer relieves militancy directly.
 - **Data model:** [DATA_MODEL_M5_M6.md](DATA_MODEL_M5_M6.md).
 
 ---

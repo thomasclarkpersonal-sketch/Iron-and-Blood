@@ -1,6 +1,6 @@
 # Geography & Logistics
 
-The simulation needs a geographical hierarchy to route goods and people. Transport is not instant: geography is a natural source of economic friction. Binding rules: D14 (inter-market trade) and D7 (derived location data) in [DECISIONS.md](DECISIONS.md). Provinces and markets are implemented; links between markets are planned (D14's principles; proposal in [#18](https://github.com/thomasclarkpersonal-sketch/Iron-and-Blood/pull/18)).
+The simulation needs a geographical hierarchy to route goods and people. Transport is not instant: geography is a natural source of economic friction. Binding rules: D14 (inter-market trade) and D7 (derived location data) in [DECISIONS.md](DECISIONS.md). Provinces and markets are implemented; links between markets are planned (D17; mechanism in [TRADE.md](TRADE.md)).
 
 ## 🗺️ The Geographical Hierarchy
 
