@@ -170,7 +170,8 @@
           "crates/pax_engine/tests/conservation.rs `money_conserved_through_trade` (created): random worlds pay tariffs at arrival, with a counter that ends above 0; `goods_are_accounted_exactly` (created) runs them through the goods check in release",
           "crates/pax_cli/src/report.rs unit `new_columns_follow_todays` (created): today's columns keep their headers and values, and `tariffs` and `iceberg%` follow them",
           "crates/pax_data/src/bench.rs unit `replicas_copy_the_trade_and_investment_tables` gains merchants and cargo",
-          "D13: R-N10's cold 29-day bench before and after, beside M5-1's baseline, in Evidence; `pax_cli verify` with both golden.hashes unchanged (no content has merchants)"
+          "D13, pass/fail by Design 8.4's budget rule: R-N10's cold 29-day mean, the median of five runs on the finished branch, at most 100 ms/day, with the five runs before and after beside M5-1's baseline in Evidence; over it, optimise within this task's rules; still over, report blocked-on-decision (D13's budget) with every run's figures, and the task doesn't merge",
+          "`pax_cli verify` with both golden.hashes unchanged (no content has merchants)"
         ]
       },
       "estimate": { "optimistic": 1.8, "likely": 3.8, "pessimistic": 11.45 },
@@ -294,7 +295,8 @@
           "crates/pax_protocol/tests/roundtrip.rs `set_tariff`",
           "crates/pax_data/src/snapshot.rs unit `a_snapshot_restores_the_exact_state_and_it_runs_on_identically` gains a tariff set off 0 by `World::apply` before encoding, and `crafted_merchants_and_projects_are_refused` refuses a tariff outside [0, 1] (R-D8, R-N17); crates/pax_data/src/bench.rs unit `replicas_copy_the_trade_and_investment_tables` gains a tariff off 0 (R-N12)",
           "crates/pax_engine/tests/conservation.rs `money_conserved_through_trade` counts purchases and sales; `goods_are_accounted_exactly` covers settlement; crates/pax_engine/tests/extremes.rs gains merchant orders at the price ceiling (R-N24)",
-          "crates/pax_cli/src/report.rs `new_columns_follow_todays` gains `trade`; R-N10's bench before and after in Evidence; both golden.hashes unchanged (no content has routes, tariffs are 0)"
+          "crates/pax_cli/src/report.rs `new_columns_follow_todays` gains `trade`; both golden.hashes unchanged (no content has routes, tariffs are 0)",
+          "D13, pass/fail by Design 8.4's budget rule: R-N10's cold 29-day mean, the median of five runs on the finished branch, at most 100 ms/day, with the five runs before and after beside M5-1's baseline in Evidence; over it, optimise within this task's rules (no merchant orders or offers for a good without a gap, PL-2); still over, report blocked-on-decision (D13's budget, or D1's adaptive step as the default where discovery is what grew) with every run's figures, and the task doesn't merge"
         ]
       },
       "estimate": { "optimistic": 2.15, "likely": 5.05, "pessimistic": 12.95 },
@@ -394,7 +396,8 @@
           "crates/pax_engine/tests/conservation.rs `money_conserved_through_trade` counts dividends of each kind and wind-up returns",
           "crates/pax_data/src/snapshot.rs: the round trip with the merchant Chartered and its five other new columns off their defaults, and `crafted_merchants_and_projects_are_refused` refuses a Private merchant with an owner nation, a Chartered one without, and a Chartered one whose owner nation isn't its route origin's nation (R-D3, R-D9, R-N17); crates/pax_data/src/bench.rs: `replicas_copy_the_trade_and_investment_tables` and `a_replica_of_one_region_hashes_like_its_base` gain the six columns off their defaults (R-N12, R-N25)",
           "crates/pax_cli/src/report.rs `new_columns_follow_todays` gains `merch.div` and `wound_up`; crates/pax_data/tests/content_stability.rs's header counts 7 professions",
-          "D13: R-N10's cold bench and R-N26's five runs before and after, medians against M5-1's baseline; both golden.hashes unchanged (the merchant profession has no POPs and no producer hires it; any change is a bug to explain, never re-recorded)"
+          "D13, pass/fail by Design 8.4's budget rule: from five 30-day runs on the finished branch, R-N26's 30-day mean and R-N10's mean before the month end, each median at most 100 ms/day, with the five runs before and after and the month-end day's medians against M5-1's baseline in Evidence; over it, optimise within this task's rules; still over, report blocked-on-decision (D13's budget) with every run's figures, and the task doesn't merge",
+          "Both golden.hashes unchanged (the merchant profession has no POPs and no producer hires it; any change is a bug to explain, never re-recorded)"
         ]
       },
       "estimate": { "optimistic": 1.8, "likely": 3.8, "pessimistic": 11.45 },
@@ -463,7 +466,7 @@
           "crates/pax_cli/src/report.rs unit `report_shows_a_market_on_its_own`",
           "crates/pax_data/tests/determinism.rs (release) `a_world_that_trades_invests_and_riots_is_independent_of_thread_count`: identical state hashes at 1, 2, 3 and 8 threads, with merchant purchases seen",
           "economic_bands.rs and content_stability.rs (release and debug) pass; `pax_cli verify` passes for both scenarios with mini_valley's golden.hashes unchanged",
-          "D13: R-N10's cold bench before and after, with trade in two_states; the Benchmark regression check (Risk R4)"
+          "D13, pass/fail by Design 8.4's budget rule: R-N10's cold 29-day mean with trade in two_states, the median of five runs on the finished branch, at most 100 ms/day, with the five runs before and after beside M5-1's baseline in Evidence; over it, optimise within this task's rules and levers; still over, report blocked-on-decision (D13's budget, or D1's adaptive step as the default where discovery is what grew) with every run's figures, and the task doesn't merge; and the Benchmark regression check (Risk R4)"
         ]
       },
       "estimate": { "optimistic": 1.8, "likely": 3.8, "pessimistic": 13.45 },
@@ -636,7 +639,7 @@
           "crates/pax_data/src/bench.rs unit `a_replica_of_one_region_hashes_like_its_base` (created): with every existing M5 table and column off its default where the warm-up left none (links, routes, merchants, cargo, tariffs, projects), `replicate(&warm, 1, 1)` has the warmed world's state hash",
           "crates/pax_engine/tests/conservation.rs `money_conserved_through_investment` (created): construction purchases, counter above 0; `goods_are_accounted_exactly` covers projects",
           "crates/pax_cli/src/report.rs `new_columns_follow_todays` gains invest, started and capacity",
-          "D13 in Evidence: R-N10's cold 29 days, R-N26's five 30-day runs before and after with the month-end day's medians against M5-1's baseline, and R-N27's warmed run with a warm-up long enough that a project runs; a median rise above 20% explained in the PR"
+          "D13, pass/fail by Design 8.4's budget rule: on the finished branch, R-N10's cold 29-day mean, R-N26's 30-day mean and R-N27's warmed mean (a warm-up long enough that a project runs), each the median of five runs, each at most 100 ms/day, with the runs before and after and the month-end day's medians against M5-1's baseline in Evidence and a median rise above 20% explained in the PR; over it, optimise within this task's rules; still over, report blocked-on-decision (D13's budget) with every run's figures, and the task doesn't merge"
         ]
       },
       "estimate": { "optimistic": 2.15, "likely": 5.05, "pessimistic": 12.95 },
@@ -763,7 +766,8 @@
           "crates/pax_server/tests/session.rs `new_commands_are_checked_in_order` gains FoundProducer (missing province Malformed; another nation's NotPermitted; a foreign province ForeignProvince); session_replay.rs submits a FoundProducer and still replays to the server's final state hash",
           "crates/pax_protocol/tests/roundtrip.rs `found_producer`",
           "crates/pax_engine/tests/conservation.rs `money_conserved_through_investment` counts foundings by owners, foundings by command and state-owned dividends",
-          "crates/pax_cli/src/report.rs gains `founded`; D13: R-N26's five runs before and after against M5-1's baseline"
+          "crates/pax_cli/src/report.rs gains `founded`",
+          "D13, pass/fail by Design 8.4's budget rule: R-N26's 30-day mean, the median of five runs on the finished branch, at most 100 ms/day, with the five runs before and after and the month-end day's medians against M5-1's baseline in Evidence; over it, optimise within this task's rules; still over, report blocked-on-decision (D13's budget) with every run's figures, and the task doesn't merge"
         ]
       },
       "estimate": { "optimistic": 2.15, "likely": 5.05, "pessimistic": 12.95 },
@@ -845,7 +849,8 @@
           "crates/pax_engine/src/world.rs unit `a_new_column_is_hashed_once_it_differs`: one producer's idle_months set to 1 changes the hash, and set back to 0 restores it",
           "crates/pax_data/tests/validation.rs `investment_rules_are_checked` gains slack and idle_months_before_shrink",
           "Snapshot round trip with one producer's idle_months off 0; the replica tests gain the column",
-          "crates/pax_cli/src/report.rs gains `shrunk`; D13: R-N26's five runs before and after against M5-1's baseline; economic_bands.rs and content_stability.rs pass"
+          "crates/pax_cli/src/report.rs gains `shrunk`; economic_bands.rs and content_stability.rs pass",
+          "D13, pass/fail by Design 8.4's budget rule: R-N26's 30-day mean, the median of five runs on the finished branch, at most 100 ms/day, with the five runs before and after and the month-end day's medians against M5-1's baseline in Evidence; over it, optimise within this task's rules; still over, report blocked-on-decision (D13's budget) with every run's figures, and the task doesn't merge"
         ]
       },
       "estimate": { "optimistic": 1.2, "likely": 2.85, "pessimistic": 9.55 },
@@ -988,7 +993,8 @@
           "crates/pax_data/tests/unrest_two_states.rs (release) `a_high_tax_causes_riots_that_end_when_it_falls`, its strikers part",
           "crates/pax_engine/tests/conservation.rs `money_conserved_through_unrest` (created): wages paid among working members while some POP strikes, counter above 0",
           "crates/pax_cli/src/report.rs `new_columns_follow_todays` gains `strike%`",
-          "D13: R-N10's cold bench before and after against M5-1's baseline; `pax_cli verify` mini_valley unchanged"
+          "D13, pass/fail by Design 8.4's budget rule: R-N10's cold 29-day mean, the median of five runs on the finished branch, at most 100 ms/day, with the five runs before and after beside M5-1's baseline in Evidence; over it, optimise within this task's rules (no strike arithmetic for a POP below the threshold, PL-15); still over, report blocked-on-decision (D13's budget) with every run's figures, and the task doesn't merge",
+          "`pax_cli verify` mini_valley unchanged"
         ]
       },
       "estimate": { "optimistic": 1.8, "likely": 3.8, "pessimistic": 11.45 },
@@ -1076,7 +1082,8 @@
           "crates/pax_data/tests/validation.rs `unrest_rules_are_checked` gains the riot keys",
           "crates/pax_engine/tests/conservation.rs `money_conserved_through_unrest` counts riot transfers; `goods_are_accounted_exactly` covers riots",
           "crates/pax_data/tests/unrest_two_states.rs (release) `a_high_tax_causes_riots_that_end_when_it_falls` complete; crates/pax_data/tests/determinism.rs (release) `a_world_that_trades_invests_and_riots_is_independent_of_thread_count`, created here",
-          "crates/pax_cli/src/report.rs gains `riots`; D13: R-N26's five runs before and after against M5-1's baseline"
+          "crates/pax_cli/src/report.rs gains `riots`",
+          "D13, pass/fail by Design 8.4's budget rule: R-N26's 30-day mean, the median of five runs on the finished branch, at most 100 ms/day, with the five runs before and after and the month-end day's medians against M5-1's baseline in Evidence; over it, optimise within this task's rules; still over, report blocked-on-decision (D13's budget) with every run's figures, and the task doesn't merge"
         ]
       },
       "estimate": { "optimistic": 1.8, "likely": 3.8, "pessimistic": 11.45 },
@@ -1140,11 +1147,11 @@
           "crates/pax_engine/src/views.rs: `RouteRow { route: u32, merchants: [u32; 3], cash: [Fixed; 3], flows: Vec<RouteFlow> }` and `pub fn trade_routes(world: &World, report: Option<&DayReport>, market: usize) -> Vec<RouteRow>`, the most traded first; `pub fn tariffs(world: &World, nation: usize) -> &[Fixed]`; `ProjectRow`, `FoundingOption`, `InvestmentLedger` and `pub fn investment_ledger(world: &World, stats: &ProvinceStats, report: Option<&DayReport>, province: u32) -> InvestmentLedger`, its results being the day's foundings there; `ProvinceStats::available: Vec<u64>` counted in `ProvinceStats::of`'s existing pass (S17); `investment::Openings::with_available(world: &World, available: Vec<u64>) -> Openings` (Design 4.1)",
           "Wire, by appending only, PROTOCOL_MINOR 9: `Subscribe.trade_routes: bool`, `tariff_nation: uint = null`, `investment: bool`; `StaticData.routes: [RouteDef]`; `DayUpdate.trade: TradeRouteView` and `DayUpdate.investment: InvestmentLedgerView` with `TradeRoute`, `ConstructionProject`, `FoundingResult`, `enum FoundingOutcome` and every omitted count (Design 3.5)",
           "pax_server: `Request::Subscribe`, `view::Subscription` and `CheckedSubscription` gain the three fields; every full literal sets them (on in game.rs:196 and :248 and view.rs:563; off in view.rs:33's Default, view.rs:99's Default, view.rs:527 and sim.rs:1670; from the request in sim.rs:783 and view.rs:116); `Subscription::checked` refuses an out-of-range tariff_nation, which closes the session with Goodbye (R-N21); `day_update` builds both views capped by `MAX_ROUTES` 20, `MAX_GOODS_PER_ROUTE` 10 and `MAX_LEDGER_ROWS` 16 (`pub(crate) const` in view.rs, each with its budget arithmetic) (S28); `encode::static_data` sends routes",
-          "`#[cfg(test)] pub(crate) fn fill_new_views(world: &mut World, report: &mut DayReport, market: u32, province: u32)` at view.rs's module level, outside its private tests module, so game.rs's tests can call it (Baseline B6), filling the world past every cap as Design 8.4 says",
+          "`#[cfg(test)] pub(crate) fn fill_new_views(world: &mut World, report: &mut DayReport, market: u32, province: u32)` at view.rs's module level, outside its private tests module, so game.rs's tests can call it (Baseline B6), filling the world past every cap as Design 8.4 says: it empties only the trade tables on main when this task lands, `network`, `merchants` and `cargo` (each set to its Default), pushes its forty links and routes and their merchants through `World::push_link`, `push_route` and `push_merchant` in key order, and ends by asserting that `world.check_tables()` is Ok, so a table a later task adds and the helper leaves inconsistent fails in that task's gate (Baseline B14)",
           "The bridge (D12): `encode::{set_tariff, found_producer, Views, subscribe_views}`, `Connection::{submit_tariff, submit_founding, subscribe_views}`, PaxClient's `submit_tariff`, `submit_founding` and `subscribe_views` returning as `submit_policy` does, decode's `WelcomeView` route ends and `DayUpdateView`'s trade and investment with every id checked against the session's tables, and the new keys (Design 4.6); `subscribe` stays (S14); client/pax_keys.gd regenerated",
           "Budget tests with both views: size_budget.rs's LONG_TERM frame carries both at their caps (107,272 of 131,072 bytes measured); view_building_budget and remote_bandwidth_budget build them from a world filled by fill_new_views (at most 5 ms and 128 KiB; at most 100 KB/s at speed 3, about 82 expected); server_day_budget subscribes both on its stepped world unfilled, since a filled world is never stepped (Baseline B7); PERFORMANCE.md's Views and bandwidth rows gain the figures",
           "hostile.rs's generator sends the new Subscribe fields",
-          "Planned deferrals (Baseline B11), listed under the pull request's Why and labelled planned, with their task and the decision each implements (AGENTS.md section 8), wherever this task's documents mention them: the Trade and Construction tabs and the TradeFlow map mode are M5-14's; PERFORMANCE.md's Tick rows are M5-15's",
+          "Planned deferrals (Baseline B11), listed under the pull request's Why and labelled planned, with their task and the decision each implements (AGENTS.md section 8), wherever this task's documents mention them: the Trade and Construction tabs and the TradeFlow map mode are M5-14's; PERFORMANCE.md's Tick rows are M5-15's; `fill_new_views` empties route_gaps once M5-16 adds that table (Baseline B14)",
           "Docs: D22's Views list gains TradeRouteView and InvestmentLedgerView (descriptive, Design 2.3); NETWORK_PROTOCOL.md section 4's DayUpdate table with sizes, section 8's 1.9; BACKEND_SCHEMA.md's views and API boundary; PERFORMANCE.md; MILESTONE_5's M5-13 row ticked"
         ],
         "consumes": [
@@ -1285,7 +1292,7 @@
         "acceptance_tests": [
           "crates/pax_server/tests/session_replay.rs passes with PAX_CLI_REQUIRED=1, and in CI's Windows and macOS determinism jobs",
           "crates/pax_data/tests/determinism.rs (release) `a_world_that_trades_invests_and_riots_is_independent_of_thread_count` passes with all four mechanisms asserted",
-          "R-N10, R-N26 and R-N27 each at most 100 ms/day, and mini_valley's two rows too, a rise of more than 20% against M4-11's figure explained in the PR; an overrun is reported, and a fix that needs D1's adaptive step as the default is blocked on that decision (Design 2.2, 8.4)",
+          "D13 on the finished tick, pass/fail by Design 8.4's budget rule: R-N10's cold 29-day mean, R-N26's 30-day mean and R-N27's warmed mean, each the median of five runs, each at most 100 ms/day; this task adds no tick work of its own to optimise, so a median over it means it reports blocked-on-decision at once (D13's budget, or D1's adaptive step as the default; Design 2.2) with every run's figures, and doesn't merge; mini_valley's two rows within their D13 budgets too, and a rise of more than 20% against M4-11's figure explained in the PR",
           "`python3 scripts/check_docs.py`; `pax_cli verify` for both scenarios"
         ]
       },
@@ -1339,6 +1346,7 @@
         "crates/pax_data/tests/economic_bands.rs",
         "crates/pax_cli/src/report.rs",
         "crates/pax_engine/src/tick.rs",
+        "crates/pax_server/src/view.rs",
         "data/rules.toml",
         "scenarios/mini_valley/defs/rules.toml",
         "scenarios/two_states/golden.hashes",
@@ -1357,6 +1365,7 @@
           "Entry in `trade::run_month_end` after wind-ups (PL-7): gap months updated at today's executed prices; candidates by largest relative gap, then route row; at most one merchant per route a month; funded through `investment::owner_funds` and `take_funds` from the origin market's private-owner pool, else its commercial-owner pool; never Chartered; each recorded as `MerchantFounding { merchant: u32, route: u32, kind: MerchantKind, capital: Fixed }` in `MerchantMonth::founded`",
           "`TradeRules::entry_months: u32` (R-D4): data/rules.toml 3; mini_valley 0, no dynamic entry (R-F59); `random_world` gains entry_months 1",
           "Report column `m.founded`; the R-N25 replica test gains a route's gap_months of 1",
+          "crates/pax_server/src/view.rs: M5-13's test helper `fill_new_views` also empties `route_gaps` (to its Default) with `network`, `merchants` and `cargo`, before it pushes its forty routes, so `World::push_route` leaves one gap row per route and the helper's `World::check_tables` assertion holds (Design 8.4, Baseline B14)",
           "two_states' golden.hashes re-recorded (its route gaps are hashed from day 0, Design 8.5), with the reason; bands, content_stability.rs and the scenario tests on main kept green. Levers (Baseline B9): `entry_months` within R-D4 and, for R-F40's window, the unrest keys within R-D6; a bound is never relaxed: when no setting of its levers keeps every scenario test green, it reports blocked-on-decision, naming the bound, the values tried and what each gave, for the maintainer",
           "Planned deferrals (Baseline B11), listed under the pull request's Why and labelled planned, with their task and the decision each implements (AGENTS.md section 8), wherever this task's documents mention them: the growth test on the economy with entry is M5-10's; the session replay and the performance record are M5-15's",
           "Docs: D4 row 6c's 'found new merchants (D17)' (Design 2.3); DATA_FORMAT.md's entry_months; tick.rs's module table (crates/pax_engine/src/tick.rs:7-16), which restates D4's order, in the same rows; TRADE.md entry built; BACKEND_SCHEMA.md; ONBOARDING.md's report columns; MILESTONE_5's M5-16 row ticked, its '(Chartered by command)' reworded to say entry never charters (R-F16)"
@@ -1364,14 +1373,17 @@
         "consumes": [
           "M5-4: `trade::run_month_end` with winding up, `MerchantKind`, `MerchantMonth`, the owner rules",
           "M5-8: `investment::owner_funds` and `take_funds`",
-          "M5-3: `trade::gap` and the capacity split across goods (PL-2 steps 1-4); M5-1: the bench baseline (R-N26)"
+          "M5-3: `trade::gap` and the capacity split across goods (PL-2 steps 1-4); M5-1: the bench baseline (R-N26)",
+          "M5-13: `fill_new_views` in crates/pax_server/src/view.rs, which empties the other trade tables and asserts `World::check_tables` on the filled world"
         ],
         "acceptance_tests": [
           "crates/pax_engine/tests/trade.rs `a_persistent_gap_founds_a_merchant`, `entry_never_charters`, and `equal_prices_mean_no_trade_and_no_entry` extended to no entry",
           "crates/pax_engine/tests/conservation.rs `money_conserved_through_trade` counts merchant foundings",
           "crates/pax_data/tests/validation.rs `trade_rules_are_checked` gains entry_months",
           "crates/pax_data/src/snapshot.rs: the round trip with a route's gap_months off 0, and `crafted_merchants_and_projects_are_refused` refuses route gaps of the wrong length (not one per route) or with a value above trade.entry_months (R-N17); crates/pax_data/src/bench.rs: `replicas_copy_the_trade_and_investment_tables` and `a_replica_of_one_region_hashes_like_its_base` gain route gaps (R-N12, R-N25)",
-          "crates/pax_cli/src/report.rs gains `m.founded`; D13: R-N26's five runs before and after against M5-1's baseline; economic_bands.rs and content_stability.rs pass; inspection: no command charters merchants in command.rs or schemas/common.fbs (R-F60 stays won't)"
+          "crates/pax_cli/src/report.rs gains `m.founded`; economic_bands.rs and content_stability.rs pass; inspection: no command charters merchants in command.rs or schemas/common.fbs (R-F60 stays won't)",
+          "D13, pass/fail by Design 8.4's budget rule: R-N26's 30-day mean, the median of five runs on the finished branch, at most 100 ms/day, with the five runs before and after and the month-end day's medians against M5-1's baseline in Evidence; over it, optimise within this task's rules; still over, report blocked-on-decision (D13's budget) with every run's figures, and the task doesn't merge",
+          "crates/pax_server/src/view.rs unit `the_new_views_keep_their_caps_and_count_the_rest` stays green with `fill_new_views` emptying route_gaps, the filled world passing its `World::check_tables` assertion with one gap row per route (Design 8.4, Baseline B14)"
         ]
       },
       "estimate": { "optimistic": 1.8, "likely": 3.8, "pessimistic": 11.45 },

@@ -121,7 +121,7 @@ D17, D27 and D28 themselves were recorded in `bd08ee6` (run decision 5) and chan
 | Rows | Task |
 |---|---|
 | "Views and bandwidth": the update with both views at their caps, a remote client at speed 3, view building | M5-13 |
-| "Tick (D13)": `two_states` with M5's content, the cold 29 days, the 30 days with the first month-end day's median and range, a warmed world with its warm-up, beside M5-1's baseline and the history; the horizon at scale (R-N13); and the table's other rows, `mini_valley`'s two and the server's day, re-measured beside M4-11's figures, since M5-3 and M5-7 change `clear_markets` for every world | M5-15 |
+| "Tick (D13)": `two_states` with M5's content, the cold 29 days, the 30 days with the first month-end day's median and range, a warmed world with its warm-up, beside M5-1's baseline and the history; the horizon at scale (R-N13); and the table's other rows, `mini_valley`'s two and the server's day, re-measured beside M4-11's figures, since M5-3 and M5-7 change `clear_markets` for every world. Each `two_states` row is the median of five runs, within D13's budget by the design's budget rule ([Design 8.4](04-system-specification.md#84-performance-d13), B13), and states the run's machine and its rise over M5-1's baseline, since M4-11's ≈91 ms/day was taken on another machine (*added in the whole-plan revision, round 4*) | M5-15 |
 
 ### Milestone and workbook
 
@@ -149,6 +149,7 @@ Every new or changed public item gets rustdoc giving its why, its mathematics an
 | `bench::replicate_with_nations`, `--warmup` | What is copied, the warm state included (R-N12, R-N25) | M5-1, M5-7, and each table's task |
 | `views::trade_routes`, `tariffs`, `investment_ledger`, `trade_flow` | Their order (the most traded first), units, and that they are built from state and reports, never stored (D22, S17) | M5-13, M5-14 |
 | `view.rs`'s `MAX_ROUTES`, `MAX_GOODS_PER_ROUTE`, `MAX_LEDGER_ROWS` | The budget arithmetic behind each cap (Design 3.5, S28) | M5-13 |
+| `view.rs`'s `fill_new_views` (a test helper) | Which tables it empties and fills, past which caps, and why it ends by asserting `World::check_tables` (Design 8.4, B14); M5-16 adds `route_gaps` to the tables it empties. *Added in the whole-plan revision, round 4* | M5-13, M5-16 |
 | `pax_godot`'s new encoders, decoders and `PaxClient` functions | What each sends or returns, as `submit_policy` does today; D12, D22 | M5-13 |
 | `client/ui/trade_panel.gd`, `construction_panel.gd` | Their signals and functions (GDScript doc comments), and S29's Found rule | M5-14 |
 
