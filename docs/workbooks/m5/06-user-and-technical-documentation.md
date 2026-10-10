@@ -5,7 +5,7 @@
 
 The outline of the documentation Milestone 5 writes: who reads each part, what it covers, the one document it lives in, and the task that writes it. **Everything here is planned**: each task writes its part in the same pull request as its code, documents first ([SDLC_WORKFLOW.md](https://github.com/thomasclarkpersonal-sketch/Iron-and-Blood/blob/f911fa707da7f981525683259f56b9846ef49024/docs/SDLC_WORKFLOW.md), "Documentation duty"), and the close-out makes this page final, linking every finished document. Homes follow [docs/README.md](../../README.md#where-each-kind-of-fact-lives): rules in DECISIONS.md; mechanism in the system documents; Rust structure in BACKEND_SCHEMA.md; file formats in DATA_FORMAT.md; the wire protocol in NETWORK_PROTOCOL.md; measurements in PERFORMANCE.md; users in ONBOARDING.md and HOSTING.md. A fact gets one home, and every other mention links to it.
 
-The tasks are those of the [baseline plan](05-baseline-project-plan.md#the-task-queue); their contracts in [`tasks.json`](tasks.json) name the documents each one updates. *Corrected in the whole-plan revision, round 2:* D6's founding bullet and INVESTMENT.md name D27's founders, the market's capitalists (C14); REBELLIONS.md's transfer is one budget split by `allocate` (C17); `DATA_MODEL_M5_M6.md`'s moved-notes and `tick.rs`'s module table are carried by every task that changes them, and PERFORMANCE.md's every Tick row by M5-15 (the baseline review's minor findings 3 and 4, [README](README.md#baseline-plan-round-1-minor-findings)).
+The tasks are those of the [baseline plan](05-baseline-project-plan.md#the-task-queue); their contracts in [`tasks.json`](tasks.json) name the documents each one updates. *Corrected in the whole-plan revision, round 2:* D6's founding bullet and INVESTMENT.md name D27's founders, the market's capitalists (C14); REBELLIONS.md's transfer is one budget split by `allocate` (C17); `DATA_MODEL_M5_M6.md`'s moved-notes and `tick.rs`'s module table are carried by every task that changes them, and PERFORMANCE.md's every Tick row by M5-15 (the baseline review's minor findings 3 and 4, [README](README.md#baseline-plan-round-1-minor-findings)). *Corrected in round 3:* an interim close-out, after an early halt, leaves this page planned ([below](#what-the-close-out-finalises)), and every task labels its planned deferrals, with their task and decision, in the documents it changes (B11).
 
 ## User documentation
 
@@ -156,5 +156,7 @@ Every new or changed public item gets rustdoc giving its why, its mathematics an
 
 When the queue is done, the close-out pull request (the [Gantt chart](05-baseline-project-plan.md#gantt-chart)'s last bar):
 - marks this page final, with a link to every document as it stands on `main`;
-- writes the release notes for players and hosts: the new controls, protocol 1.10's compatibility, and the save break;
+- writes the release notes for players and hosts in MILESTONE_5, under its status: the new controls, protocol 1.10's compatibility, and the save break;
 - checks that every row above was written by its task, and lists any that wasn't as a follow-up.
+
+An **interim** close-out, the one the workflow runs when a resumed run's chain halts before its stop time while MILESTONE_5 still has rows to tick, finalises nothing here: this page stays planned, the rows whose tasks have merged are marked written, and no release notes are written ([baseline plan, The close-out](05-baseline-project-plan.md#the-close-out), B12). *Added in the whole-plan revision, round 3.*

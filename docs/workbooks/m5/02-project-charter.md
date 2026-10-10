@@ -165,7 +165,7 @@ Times are on 2026-10-10, +08:00. The planning targets assume two review rounds f
 | Plan PR merged | 05:35 |
 | Tasks M5-1 to M5-16 | From the plan PR's merge, in the task DAG's order |
 | **Stop time**: nothing new starts | **07:00** (2026-10-10T07:00:00+08:00) |
-| Close-out PR | After the queue empties, if a task merged and time remains |
+| Close-out PR | After the queue empties, if a task merged and time remains. *Noted in the whole-plan revision, round 3:* in a resumed run, where the tasks ticked on `main` count as merged, it also runs after every early halt, as an interim close-out that keeps the plan loadable ([baseline plan](05-baseline-project-plan.md#the-close-out)) |
 | Final run report | At the stop time, or when the queue empties |
 
 That leaves about an hour and a half for building. In the M4 run each PR took two to six critic rounds (its report, `out/m4-run/REPORT.md`, "Notes"), and M5's tasks are larger, so this run should expect to merge the first one to three tasks of the DAG. The rest stay in the approved plan, which a later run continues from (`fromPlan`, in SDLC_WORKFLOW.md's "Running it").
