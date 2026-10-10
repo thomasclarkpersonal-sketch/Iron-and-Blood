@@ -213,7 +213,7 @@ Each figure is reported by the task that adds its flow, so the tests of that tas
 | R-N21 | The server shall never panic on new commands or subscriptions with hostile values, and the hostile-input tests shall send them; an out-of-range id in a new `Subscribe` field (the nation of R-F45) shall close the session with `Goodbye`, as an out-of-range market or province does today. | D22: any protocol error closes the session with `Goodbye`; today `Subscription::checked` refuses an out-of-range market or province (`crates/pax_server/src/view.rs:106-121`) and the server says goodbye (`crates/pax_server/src/sim.rs:340-344`) | D22; `NETWORK_PROTOCOL.md` §9 | must | T: `crates/pax_server/src/hostile.rs` and `crates/pax_server/tests/hostile.rs`, extended; `sim.rs` tests (planned `a_subscribe_naming_no_nation_says_goodbye`) |
 | R-N22 | Every pull request that changes `two_states`' results shall keep each `economic_bands.rs` assertion or move it in the same pull request with its reason. | The test's own rule (`crates/pax_data/tests/economic_bands.rs:6-8`) | Charter [bands clause](02-project-charter.md#the-bands-clause) | must | T: `economic_bands.rs` (release, CI) |
 | R-N23 | Each pull request shall update in the same change the documents it makes stale: DECISIONS.md where it implements an Amends line (D4, D5, D6, D14 rule 5, D21, D24), the system and design documents, BACKEND_SCHEMA.md, DATA_FORMAT.md, NETWORK_PROTOCOL.md, ARCHITECTURE.md's game loop and its milestone task row; `scripts/check_docs.py` shall pass. | One home per fact, kept true at every merge | [AGENTS.md §8](../../../AGENTS.md#8-documentation-maintenance); [docs/README.md](../../README.md#milestone-lifecycle); SR-13 | must | I: the critic and the local gate; `python3 scripts/check_docs.py` |
-| R-N24 | Overflow shall still panic: no new code shall switch to wrapping or saturating arithmetic to avoid a panic, and a product that can exceed `Fixed`'s range shall use `mul_div` or a 128-bit intermediate. | D3: overflow panics, in release too | D3 (Overflow); AGENTS.md §4 | must | I: review; T: `crates/pax_engine/tests/extremes.rs` (planned cases at the price ceiling with large capacities) |
+| R-N24 | Overflow shall still panic: no new code shall switch to wrapping or saturating arithmetic to avoid a panic, and a product that can exceed `Fixed`'s range shall use `mul_div` or a 128-bit intermediate. | D3: overflow panics, in release too | D3 (Overflow); AGENTS.md §4 | must | I: review in every task, and by inspection alone in M5-1, M5-2, M5-11 and M5-12, whose products are bounded by their inputs (retentions, shares and rates in [0, 1]); T: `crates/pax_engine/tests/extremes.rs`, one planned case at the price ceiling in each task whose products can exceed `Fixed`'s range: M5-3 `merchants_trade_at_the_price_ceiling`, M5-4 `merchant_dividends_at_the_price_ceiling`, M5-7 `construction_at_the_price_ceiling`, M5-8 `founding_at_the_price_ceiling`, M5-16 `entry_at_the_price_ceiling` (Design 8.1; *restated in the whole-plan revision, round 5*) |
 
 ### Data rules
 
@@ -254,6 +254,8 @@ The rules above, as structured English and decision tables, with every operation
 | `ONE` | `Fixed::ONE` |
 
 Quantities are goods units, prices money per unit, capacities units a day, rates and shares unitless `Fixed`, sizes, slots and worker counts `u32` people summed in `u64`.
+
+Where a value below can leave `Fixed`'s range at the price ceiling (a day of capacity at a price, PL-2 and PL-7; a reserve or founding cost, PL-5 and PL-9 to PL-12; owner funds, PL-8), it is compared with cash, or subtracted from it, in `i128`, and weights for `allocate` are scaled with `mul_div`, so no out-of-range value is ever formed (R-N24; Design 8.1 names each task's case). *Added in the whole-plan revision, round 5.*
 
 ### PL-1. The trade horizon and routes
 
@@ -396,7 +398,7 @@ At month end, for each producer `i` in row order, with `S` and `per_slot_g` its 
 
 ### PL-11. Producer dividends
 
-In the firms step, after wages (`firms.rs:91-104`), unchanged except for the reserve: `surplus = cash − bill.mul_int(firms.reserve_days) − project_reserve`, with `project_reserve` from PL-10, or 0 without a project. If `surplus > 0` and the owner can receive (PL-17), the dividend is `surplus.mul(firms.dividend_payout_rate)`, with D15's tax withheld as today. A producer without a project pays exactly today's dividend.
+In the firms step, after wages (`firms.rs:91-104`), unchanged except for the reserve: `surplus = cash − bill.mul_int(firms.reserve_days) − project_reserve`, with `project_reserve` from PL-10, or 0 without a project, computed in `i128`, so that a reserve beyond `Fixed`'s range simply leaves no surplus (R-N24). If `surplus > 0` and the owner can receive (PL-17), the dividend is `surplus.mul(firms.dividend_payout_rate)`, with D15's tax withheld as today. A producer without a project pays exactly today's dividend.
 
 ### PL-12. Founding by owners
 
