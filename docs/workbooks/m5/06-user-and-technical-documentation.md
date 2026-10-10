@@ -5,7 +5,7 @@
 
 The outline of the documentation Milestone 5 writes: who reads each part, what it covers, the one document it lives in, and the task that writes it. **Everything here is planned**: each task writes its part in the same pull request as its code, documents first ([SDLC_WORKFLOW.md](https://github.com/thomasclarkpersonal-sketch/Iron-and-Blood/blob/f911fa707da7f981525683259f56b9846ef49024/docs/SDLC_WORKFLOW.md), "Documentation duty"), and the close-out makes this page final, linking every finished document. Homes follow [docs/README.md](../../README.md#where-each-kind-of-fact-lives): rules in DECISIONS.md; mechanism in the system documents; Rust structure in BACKEND_SCHEMA.md; file formats in DATA_FORMAT.md; the wire protocol in NETWORK_PROTOCOL.md; measurements in PERFORMANCE.md; users in ONBOARDING.md and HOSTING.md. A fact gets one home, and every other mention links to it.
 
-The tasks are those of the [baseline plan](05-baseline-project-plan.md#the-task-queue); their contracts in [`tasks.json`](tasks.json) name the documents each one updates.
+The tasks are those of the [baseline plan](05-baseline-project-plan.md#the-task-queue); their contracts in [`tasks.json`](tasks.json) name the documents each one updates. *Corrected in the whole-plan revision, round 2:* D6's founding bullet and INVESTMENT.md name D27's founders, the market's capitalists (C14); REBELLIONS.md's transfer is one budget split by `allocate` (C17); `DATA_MODEL_M5_M6.md`'s moved-notes and `tick.rs`'s module table are carried by every task that changes them, and PERFORMANCE.md's every Tick row by M5-15 (the baseline review's minor findings 3 and 4, [README](README.md#baseline-plan-round-1-minor-findings)).
 
 ## User documentation
 
@@ -48,7 +48,7 @@ The tasks are those of the [baseline plan](05-baseline-project-plan.md#the-task-
 | `[[merchant]]` | DATA_FORMAT.md, scenario directory | M5-4 |
 | `expansion = { inputs, step }` in production.toml | DATA_FORMAT.md, `production.toml` | M5-6 |
 | The `merchant` profession | DATA_FORMAT.md, `professions.toml` | M5-4 |
-| `[trade]`, `[investment]` and the new `[politics]` keys: each key, its range, and that it is required | DATA_FORMAT.md, `rules.toml` | M5-1, M5-4, M5-16 (trade); M5-7, M5-8, M5-9 (investment); M5-11, M5-12 (politics) |
+| `[trade]`, `[investment]` and the new `[politics]` keys: each key, its range, and that it is required; `investment.founder`, the profession of D27's "market's capitalists", who found only the types they own (C14) | DATA_FORMAT.md, `rules.toml` | M5-1, M5-4, M5-16 (trade); M5-7, M5-8, M5-9 (investment); M5-11, M5-12 (politics) |
 | `set_tariff` and `found_producer` in command logs, with their fields | DATA_FORMAT.md, command log | M5-3, M5-8 |
 | Save format 2, then 3, read first and refused by name | DATA_FORMAT.md, save files | M5-3, M5-8 |
 | The snapshot's new blocks | `pax_data::snapshot`'s documentation (its format comment, `crates/pax_data/src/snapshot.rs:4-21`), to which DATA_FORMAT.md's save files section points | M5-2, M5-3, M5-4, M5-6, M5-8, M5-9, M5-16 |
@@ -74,7 +74,7 @@ Each text is [Design 2.3](04-system-specification.md#23-amended-decision-texts-p
 | [D6](../../DECISIONS.md#d6-firms-production-wages-ownership) | The wage split among working members, "Striking workers forgo wages." (run decision 3) | M5-11 |
 | D6 | Dividends above the project's reserve | M5-7 |
 | D6 | Merchants' dividends; the ownership bullet's chartered merchants | M5-4 |
-| D6 | The state's producers' dividends, the founding bullet, the ownership bullet's founded producers | M5-8 |
+| D6 | The state's producers' dividends; the founding bullet, which names D27's funders in D27's words: the market's capitalists or, by `FoundProducer`, the treasury (C14); the ownership bullet's founded producers | M5-8 |
 | [D14](../../DECISIONS.md#d14-market-hierarchy-and-inter-market-trade) | Rule 5's sparse horizon | M5-1 |
 | [D19](../../DECISIONS.md#d19-militancy) | Its status sentence only: "Its effects are strikes and riots (D28)." The rule stays (run decision 4) | M5-11 |
 | [D21](../../DECISIONS.md#d21-commands-and-command-logs) | `SetTariff` and the unknown good, the fifth Validation sub-bullet's first sentence, the command-log fields | M5-3 |
@@ -96,9 +96,9 @@ D17, D27 and D28 themselves were recorded in `bd08ee6` (run decision 5) and chan
 | [POP_SYSTEM.md](../../POP_SYSTEM.md) | Strikers in the labour pool: neither employed nor unemployed; wages by working members | M5-11 |
 | [MACROECONOMICS.md](../../MACROECONOMICS.md) | Checked by M5-7 and M5-10 for statements that investment makes stale; no change is expected | M5-7, M5-10 |
 | [TRADE.md](../../TRADE.md) | Its status line and each part as it is built: links, routes and horizon (M5-1); arrival (M5-2); orders, offers, tariffs (M5-3); kinds, dividends, exit with `month_profit` (C28), the seed's `from`/`to` (S23), the income-tax line marked *planned: needs D15 amended, none drafted* (C7) (M5-4); test 9 on the measured goods (M5-5); entry (M5-16) | M5-1 to M5-5, M5-16 |
-| [INVESTMENT.md](../../INVESTMENT.md) | Recipes and project state, with `project_budget` and `producer_types.toml` corrected (M5-6); expansion and construction (M5-7); founding, with `state_owned` corrected to `owner_nation` (M5-8); depreciation (M5-9); the acceptance tests' measured figures (M5-10) | M5-6 to M5-10 |
-| [REBELLIONS.md](../../REBELLIONS.md) | Stage 1 built (M5-11); stage 2 built, its unnamed transfer rule named `riot_security_rate` (M5-12) | M5-11, M5-12 |
-| [DATA_MODEL_M5_M6.md](../../DATA_MODEL_M5_M6.md) | Each M5 table noted as moved to BACKEND_SCHEMA.md as it is built; the document stays for M6's tables | M5-1, M5-2, M5-6 |
+| [INVESTMENT.md](../../INVESTMENT.md) | Recipes and project state, with `project_budget` and `producer_types.toml` corrected (M5-6); expansion and construction (M5-7); founding by the market's capitalists of the types they own (C14), with `state_owned` corrected to `owner_nation` (M5-8); depreciation (M5-9); the acceptance tests' measured figures (M5-10) | M5-6 to M5-10 |
+| [REBELLIONS.md](../../REBELLIONS.md) | Stage 1 built (M5-11); stage 2 built, its unnamed transfer rule named `riot_security_rate`: one budget per nation, split by `allocate` over its provinces by people, each rioting province receiving its part (C17) (M5-12) | M5-11, M5-12 |
+| [DATA_MODEL_M5_M6.md](../../DATA_MODEL_M5_M6.md) | Each M5 entity noted as moved to BACKEND_SCHEMA.md as it is built: `LINK` and `ROUTE` (M5-1), `MERCHANT` and `CARGO` (M5-2), `TARIFF_RATE` (M5-3), `PROJECT`, `PROJECT_NEED` and `CONSTRUCTION_INPUT` (M5-6), `PRODUCER.owner_nation` (M5-8), `PRODUCER.idle_months` (M5-9); the document stays for M6's tables | M5-1, M5-2, M5-3, M5-6, M5-8, M5-9 |
 
 ### Rust structure: BACKEND_SCHEMA.md and ARCHITECTURE.md
 
@@ -121,11 +121,11 @@ D17, D27 and D28 themselves were recorded in `bd08ee6` (run decision 5) and chan
 | Rows | Task |
 |---|---|
 | "Views and bandwidth": the update with both views at their caps, a remote client at speed 3, view building | M5-13 |
-| "Tick (D13)": `two_states` with M5's content, the cold 29 days, the 30 days with the first month-end day's median and range, a warmed world with its warm-up, beside M5-1's baseline and the history; the horizon at scale (R-N13) | M5-15 |
+| "Tick (D13)": `two_states` with M5's content, the cold 29 days, the 30 days with the first month-end day's median and range, a warmed world with its warm-up, beside M5-1's baseline and the history; the horizon at scale (R-N13); and the table's other rows, `mini_valley`'s two and the server's day, re-measured beside M4-11's figures, since M5-3 and M5-7 change `clear_markets` for every world | M5-15 |
 
 ### Milestone and workbook
 
-- **[MILESTONE_5.md](../../MILESTONE_5.md):** each task ticks its own row with a sentence or two ([docs/README.md](../../README.md#milestone-lifecycle)); M5-6's names `production.toml`, M5-5's the measured goods, and M5-16's says entry never charters (R-F16). The close-out brings the status and the definition of done up to date.
+- **[MILESTONE_5.md](../../MILESTONE_5.md):** each task ticks its own row with a sentence or two ([docs/README.md](../../README.md#milestone-lifecycle)); M5-6's names `production.toml`, M5-5's the measured goods, M5-16's says entry never charters (R-F16), and M5-9's and M5-11's name the test of each check their rows ask for (`a_shrink_leaves_stocks_stable`; `wages_keep_their_floor_while_workers_strike`, B10). The close-out brings the status and the definition of done up to date.
 - **This workbook:** each task adds a correspondence-log entry, any change request and its actual Gantt bar; the review log gains its rounds.
 
 ### Doc-comment obligations
@@ -139,10 +139,10 @@ Every new or changed public item gets rustdoc giving its why, its mathematics an
 | `systems/trade.rs` (module docs) | Arrival (PL-4), orders and offers (PL-2, PL-3), settlement's hand-offs by key (S5, S6), dividends (PL-5), exit (PL-6, C28), entry (PL-7); D17, D5, D6 | M5-2, M5-3, M5-4, M5-16 |
 | `Merchants`, `Cargo`, `RouteGaps` and their columns | Units, invariants (R-D9, R-D10, R-D15), and for `owner_nation` that its pin to the origin's nation is M5's check while market ownership is topology (S26) | M5-2, M5-4, M5-16 |
 | `Nations::tariff`, `Command::SetTariff` | Per importing nation and good, assessed at purchase (C2, C3); validity on definitions only (R-D13); D17, D21, D24 | M5-3 |
-| `systems/investment.rs` (module docs) | PL-8 to PL-14, C19's order, the reserve derived and never stored (D7, C11, C12, C24); D27, D6 | M5-7, M5-8, M5-9 |
+| `systems/investment.rs` (module docs) | PL-8 to PL-14, C19's order, the reserve derived and never stored (D7, C11, C12, C24), the founders the market's capitalists for the types they own (C14), the fresh month-end layout it is given (B8); D27, D6 | M5-7, M5-8, M5-9 |
 | `Projects`, `ProjectNeeds`, `FoundingRequests`, `Producers::owner_nation`, `Producers::idle_months` | Keys and invariants (R-D11, R-D12, R-D16, S4, S26) | M5-6, M5-8, M5-9 |
 | `Command::FoundProducer` | That it only records a request, answered at the next month end (C15); D21, D24, D27 | M5-8 |
-| `systems/unrest.rs`, `working_members`, `credit_pops_by_working`, `riot` | PL-15 and PL-16, why strikers are neither employed nor unemployed (C16), run decisions 3 and 4; D28, D19, D6 | M5-11, M5-12 |
+| `systems/unrest.rs`, `working_members`, `credit_pops_by_working`, `riot` | PL-15 and PL-16, why strikers are neither employed nor unemployed (C16), why the wage floor is untouched by strikes, the security budget's one split by `allocate` (C17), run decisions 3 and 4; D28, D19, D6, D3 | M5-11, M5-12 |
 | `Pops::militancy` | Its effects, strikes and riots, replacing "no effects yet" (S20) | M5-11 |
 | `StateHasher::u8s`, `option_u32s`; `World::state_hash` | PL-18's rule: new state hashed only where it holds something, and why `mini_valley`'s file stands | M5-2, M5-4 |
 | `snapshot.rs`'s format comment; `SNAPSHOT_FORMAT`; `SAVE_FORMAT`, `read_format` | Each new block; why the format is read first (S15) | M5-2, M5-3, M5-4, M5-6, M5-8, M5-9, M5-16 |

@@ -5,6 +5,8 @@
 
 The Baseline Plan stage of the [Project Workbook](README.md): how the run builds [Milestone 5](../../MILESTONE_5.md) from the approved [requirements](03-requirements-specification.md) and [design](04-system-specification.md). It fixes the scope, argues feasibility, names the risks, and gives the task queue, [`tasks.json`](tasks.json), with its schedule. The user and technical documentation each task writes is outlined in [06-user-and-technical-documentation.md](06-user-and-technical-documentation.md). Everything on this page is *planned*. Code is cited at `aa2133a`, which the plan's commits don't change; the workflow at `f911fa7` on the unmerged `sdlc-workflow` branch, as the [README](README.md#run-rules) links it.
 
+This is the whole-plan revision, round 2. The three-lens panel returned round 1 (`a967dea`) with one blocking and eight major findings; how each is handled is in the [review log](README.md#whole-plan-panel-round-1-findings). In short: the task DAG is now a chain in the queue's order, so the order every contract relies on is the workflow's only choice (B2); the riot transfer is one budget split by `allocate` (C17); D27's founders are the market's capitalists, read literally (C14); the month end's fresh layout lands with M5-7 (B8); every task that changes `two_states`' results has its levers (B9); the crafted-row refusals and the milestone's inventory and wage-floor checks are tested by the tasks that build them (B10); a resumed run's arguments and preconditions are in [Schedule](#schedule); and the estimates are rebuilt step by step from the workflow's agents and measured times ([How the estimates were made](#how-the-estimates-were-made)).
+
 ## Introduction and project scope statement
 
 ### The problem
@@ -26,7 +28,7 @@ The charter's objectives are the run's ([O1 to O10](02-project-charter.md#object
 | The approved plan | this workbook (`docs/workbooks/m5/`), with `bd08ee6`'s records of D17, D27 and D28 | the plan PR |
 | Trade between markets | `pax_engine` (`horizon.rs`, `systems/trade.rs`, the `Merchants`, `Cargo` and `RouteGaps` tables, tariffs), `pax_data` (links, routes, merchants), `two_states`' route | M5-1 to M5-5, M5-16 |
 | Investment and capacity growth | `systems/investment.rs`, the `Projects`, `ProjectNeeds` and `FoundingRequests` tables, two producer columns, recipes in `data/production.toml` | M5-6 to M5-10 |
-| Strikes and riots | `systems/unrest.rs`, the wage split among working members | M5-11, M5-12 |
+| Strikes and riots | `systems/unrest.rs`, the wage split among working members, the riot budget split by `allocate` | M5-11, M5-12 |
 | Commands | `SetTariff` and `FoundProducer`, end to end: engine, command logs and saves, wire, server | M5-3, M5-8 |
 | Views and client | `TradeRouteView`, `InvestmentLedgerView`, `StaticData.routes`, the `TradeFlow` map mode; the bridge's encoders and decoders; the Trade and Construction tabs | M5-13, M5-14 |
 | Measures | `bench`'s month-end print and `--warmup`, `report --market` and its new columns, `DayReport`'s new figures | M5-1, M5-5, M5-7, and each figure's task |
@@ -42,8 +44,8 @@ Sharper than the [charter's scope](02-project-charter.md#scope-summary), from th
 - **Routes are one link each** (C1): a route ships over the link joining its two markets in its direction, which must be a best path of that horizon pair; the horizon is computed at load to check routes and then dropped (R-N20).
 - **Tariffs per importing nation and good** (C2), 0 at load, assessed at purchase and paid on landing (C3), never within one nation or into a stateless market (R-F17).
 - **Merchants of three kinds** (D17), Private and Commercial founded by dynamic entry, Chartered only by scenario seeding ([SSR](01-system-service-request.md#initial-assessment), item 3); dividends untaxed (C7).
-- **Investment for every producer type `data/` gives a recipe** (M5-6 gives all of them one); expansion, founding by owners and by `FoundProducer`, and depreciation, each switched off by `investment.enabled = false` except running projects and the state's requests (C20).
-- **Strikes and riots as D28 and run decisions 3 and 4 say**: strikers forgo wages; the riot transfer relieves militancy only through life needs.
+- **Investment for every producer type `data/` gives a recipe** (M5-6 gives all of them one): expansion from retained earnings; founding by the market's capitalists, `investment.founder`, of the types they own (C14), and by the state's `FoundProducer` of any type with a recipe; and depreciation, each switched off by `investment.enabled = false` except running projects and the state's requests (C20).
+- **Strikes and riots as D28 and run decisions 3 and 4 say**: strikers forgo wages; each rioting province receives its part of one security budget split by `allocate` (C17), which relieves militancy only through life needs.
 - **Views capped** at 20 routes of 10 goods and 16 rows a ledger list, each with the count it leaves out (S28).
 - **Both scenarios:** `two_states` changes on purpose and is re-recorded by the tasks of [Golden hashes impact](#golden-hashes-impact); `mini_valley` never changes (R-N8, R-F59).
 
@@ -51,7 +53,7 @@ Sharper than the [charter's scope](02-project-charter.md#scope-summary), from th
 
 ### Acceptance criteria
 
-The milestone's [definition of done](../../MILESTONE_5.md#-definition-of-done), mapped to requirements, tasks and tests. Every must-have requirement is in some task's list in [`tasks.json`](tasks.json), which the workflow checks; the won't-haves R-F60 to R-F62 are in none (the workflow refuses a task that traces one) and are checked by inspection where the table says.
+The milestone's [definition of done](../../MILESTONE_5.md#-definition-of-done), mapped to requirements, tasks and tests, with the two checks the milestone's task rows add. Every must-have requirement is in some task's list in [`tasks.json`](tasks.json), which the workflow checks; the won't-haves R-F60 to R-F62 are in none (the workflow refuses a task that traces one) and are checked by inspection where the table says.
 
 | Definition of done | Requirements | Tasks | Decisive tests |
 |---|---|---|---|
@@ -59,27 +61,29 @@ The milestone's [definition of done](../../MILESTONE_5.md#-definition-of-done), 
 | 1. Tariffs reduce volume and the importing treasury gets 100% | R-F17 to R-F19, R-F10 | M5-3, M5-2 | `a_higher_tariff_cuts_the_flow_and_the_treasury_gets_it_all`, `tariffs_reach_the_importing_treasury` |
 | 1. Merchants enter on persistent gaps and exit when loss-making, money conserved | R-F15, R-F16, R-N3 | M5-4, M5-16 | `a_loss_maker_winds_up_and_returns_its_cash`, `a_persistent_gap_founds_a_merchant`, `money_conserved_through_trade` |
 | 1. The money invariant holds every tick with random routes and high volumes | R-N1, R-N3, R-N4 | M5-2, M5-3, M5-4, M5-16 | the daily assert; `money_conserved_through_trade`, `goods_are_accounted_exactly` |
-| 2. Capacity and real GDP rise over 20 years, unemployment in its band | R-F33, R-F24 to R-F31, R-N22 | M5-7 to M5-10 | `investment_grows_two_states` |
+| 2. Capacity and real GDP rise over 20 years, unemployment in its band | R-F33, R-F24 to R-F31, R-N22 | M5-7 to M5-10 | `investment_grows_two_states`, `owners_found_only_the_types_they_own` |
 | 2. Sustained demand for tools, timber and steel | R-F25, R-F33 | M5-7, M5-10 | `a_project_orders_every_day_until_delivered`, `investment_grows_two_states` |
 | 3. Militancy above `strike_threshold` reduces output | R-F34 to R-F36 | M5-11 | `strikes_cut_labour_and_output`, `strikers_get_no_wage` |
-| 3. Above `riot_threshold`, stock destruction and treasury payouts | R-F37 to R-F40 | M5-12, M5-11 | `riots_destroy_output_stock_never_money`, `the_security_transfer_is_exactly_what_the_treasury_pays`, `a_high_tax_causes_riots_that_end_when_it_falls` |
+| 3. Above `riot_threshold`, stock destruction and treasury payouts | R-F37 to R-F40 | M5-12, M5-11 | `riots_destroy_output_stock_never_money`, `the_security_transfer_is_exactly_what_the_treasury_pays`, `when_every_province_riots_the_treasury_pays_the_whole_budget`, `a_high_tax_causes_riots_that_end_when_it_falls` |
 | 4. Players view routes, set tariffs, inspect construction and found factories from the client | R-F44 to R-F53 | M5-13, M5-14 | CI's client smoke test (R-F53), `trade_route_view_matches_the_day`, `investment_ledger_view_matches_the_world` |
 | 4. Commands validated by `World::validate`, stamped and replayed identically | R-F18, R-F29, R-F42, R-F43, R-N7, R-D13 | M5-3, M5-8, M5-15 | `set_tariff_is_validated`, `found_producer_is_validated`, `new_commands_are_checked_in_order`, `a_saved_session_replays_to_the_servers_final_state` |
 | 5. Identical results at 1, 2, 3 and 8 threads | R-N5, R-N6 | M5-12, M5-5, M5-15 | `a_world_that_trades_invests_and_riots_is_independent_of_thread_count` |
 | 5. 1M POP rows within 100 ms/day on 8 threads | R-N10, R-N26, R-N27, R-N11 | every task that adds work; M5-15 records | `pax_cli bench` (Design [8.4](04-system-specification.md#84-performance-d13)); CI's Benchmark regression |
+| M5-9's row: "verify inventory stability"; M5-11's row: "wage floor consistency" | R-F31, R-F35 (B10) | M5-9, M5-11 | `a_shrink_leaves_stocks_stable`, `wages_keep_their_floor_while_workers_strike` |
+| A restored snapshot is refused when crafted (R-N17), for every new `check_tables` rule | R-N17, R-D3, R-D8, R-D9, R-D12, R-D16 | M5-2 to M5-4, M5-6, M5-8, M5-16 | `crafted_merchants_and_projects_are_refused`, each task adding its rule's case ([Design 8.1](04-system-specification.md#81-tests-by-task)) |
 | Won't have: a charter command, multi-link routes, taxed merchant dividends | R-F60, R-F61, R-F62 | inspected in M5-16, M5-1 and M5-4 | no such command in `command.rs` or `schemas/common.fbs`; every route is one link (R-D2); `TRADE.md`'s tax line marked planned |
 
 ### Exclusions
 
-The [charter's out-of-scope list](02-project-charter.md#out-of-scope) stands: Milestones 6 and 7; a command that charters merchants; multi-hop merchants, per-route transit days, customs unions, wear of capacity in use and a repression command; changing `mini_valley`; and the work in flight outside the run (PR #69, the `sdlc-workflow` branch, M4's rate-limit question, the miners' famine calibration, the playtest). Also out, each because it needs a decision that isn't accepted ([Design 2.2](04-system-specification.md#22-no-decision-is-missing)): income tax on merchant dividends (C7), a share registry, firm failure, and D1's adaptive step as the default. A task that finds it needs one stops and reports blocked on that decision.
+The [charter's out-of-scope list](02-project-charter.md#out-of-scope) stands: Milestones 6 and 7; a command that charters merchants; multi-hop merchants, per-route transit days, customs unions, wear of capacity in use and a repression command; changing `mini_valley`; and the work in flight outside the run (PR #69, the `sdlc-workflow` branch, M4's rate-limit question, the miners' famine calibration, the playtest). Also out, each because it needs a decision that isn't accepted ([Design 2.2](04-system-specification.md#22-no-decision-is-missing)): income tax on merchant dividends (C7), a share registry, firm failure, and D1's adaptive step as the default. Owners don't found producer types that the market's capitalists don't own: D27 names the capitalists as the funders, so those types grow by expansion or by `FoundProducer` (C14). A task that finds it needs a decision stops and reports blocked on it.
 
 ### Constraints and assumptions
 
 - **The contract:** [AGENTS.md](../../../AGENTS.md) and [DECISIONS.md](../../DECISIONS.md), as the [charter lists them](02-project-charter.md#constraints); the critic judges every PR against `main`'s copies ([AGENTS.md §9](../../../AGENTS.md#9-critic-feedback)).
 - **The run rules** and the maintainer's run decisions, quoted in the [README](README.md#run-rules).
-- **One pull request at a time.** The run's `parallel` is 1, the workflow's default (SDLC_WORKFLOW.md, "Running it"): the task rules this stage was given have no clause for tasks in flight together, which the workflow adds only above 1 (`.claude/workflows/sdlc-overnight.js:865` at `f911fa7`). So the run takes the queue in one fixed order ([Plan choices](#plan-choices), B2).
-- **At most 16 tasks,** the run's `maxTasks`, so the milestone's sixteen ids stay one task each: nothing is split, and nothing merged (charter A10).
-- **Assumptions:** the charter's A1 to A11 ([charter](02-project-charter.md#assumptions)), and two of this stage's: the stop time has passed before the plan is approved (A12, [Schedule](#schedule)), and a later run resumes the approved queue with `fromPlan` (A13), as the charter's target dates expect.
+- **One pull request at a time, in one order.** The run's `parallel` is 1, the workflow's default (`.claude/workflows/sdlc-overnight.js:91` at `f911fa7`), and every task depends on the one before it in the queue (B2), so whatever `parallel` is, only one task is ever ready and the queue's order is the DAG's only topological order.
+- **At most 16 tasks,** the run's `maxTasks`, so the milestone's sixteen ids stay one task each: nothing is split, and nothing merged. This run was started with 16, and a run that resumes the plan must pass 16 again ([charter](02-project-charter.md#assumptions) A10, [Schedule](#schedule)).
+- **Assumptions:** the charter's A1 to A11 ([charter](02-project-charter.md#assumptions)), and two of this stage's: the stop time passed before the plan was approved (A12, [Schedule](#schedule)), and a later run resumes the approved queue with `fromPlan`, with the arguments and preconditions that [Schedule](#schedule) lists (A13).
 
 ## System description
 
@@ -87,8 +91,8 @@ The [charter's out-of-scope list](02-project-charter.md#out-of-scope) stands: Mi
 
 The [system specification](04-system-specification.md) in brief:
 - **Trade (D17):** scenarios declare links and one-link routes; merchants are rows of a `Merchants` table with their goods in a sparse `Cargo` table keyed by merchant, good and stage; they buy in the origin through ordinary D1 orders, ship for one day, lose the iceberg share at arrival (D4's new step 0), pay the tariff assessed at purchase, and sell in the destination at landed cost plus margin. Settlement moves all the step's money and hands goods to `trade.rs` by key, never by row (S5, S6). Merchants pay dividends to their owners by kind, wind up after months of realized loss (C28), and are founded on routes whose gap persists (PL-7).
-- **Investment (D27):** projects buy their recipe's construction goods through D1 orders from cash above the day's needs (C24) and add capacity at the month end that follows delivery; owners and the state found producers where unclaimed unemployed workers wait (PL-8, PL-12, PL-13); idle capacity shrinks (PL-14). All of it in one month-end step, 6c, in C19's order.
-- **Unrest (D28):** working members, computed per POP, set labour supply and the wage split (PL-15); riots at month end destroy output stock and pay the security transfer (PL-16).
+- **Investment (D27):** projects buy their recipe's construction goods through D1 orders from cash above the day's needs (C24) and add capacity at the month end that follows delivery; the market's capitalists found the types they own, and the state any type with a recipe, where unclaimed unemployed workers wait (PL-8, PL-12, PL-13, C14); idle capacity shrinks without touching stocks (PL-14). All of it in one month-end step, 6c, in C19's order, on the fresh layout M5-7 adds (B8).
+- **Unrest (D28):** working members, computed per POP, set labour supply and the wage split, and D6's wage rule runs on the employed who work (PL-15); riots at month end destroy output stock, and each rioting province receives its part of its nation's security budget, split once by `allocate` (PL-16, C17).
 - **Commands, views and client:** `SetTariff` and `FoundProducer` land with their wire, file and server forms (C27); the two views are capped (S28), and the client asks for the trade view only on its tab (S30).
 - **Determinism and money:** no new parallel pass; every split by `alloc::allocate`; merchant cash in `World::total_money`; new state hashed only where it holds something, so `mini_valley`'s golden file stands (PL-18).
 
@@ -100,27 +104,32 @@ The [system specification](04-system-specification.md) in brief:
 | **Routes that carry their own iceberg share and capacity, no links** (`docs/TRADE.md:97-108`) | Run decision 2 gives a route its bottleneck link's capacity, which presupposes links distinct from routes (C1); one-link routes keep that rule exact until multi-link routes, which the charter excludes |
 | **Holding `SetTariff` and `FoundProducer` back to M5-13**, as the milestone's row has it | The server's and `pax_data`'s exhaustive matches over the engine's commands wouldn't compile, and the tariff column and founding requests would be writable only by tests until then (C27) |
 | **Splitting the largest tasks** (M5-3, M5-8, M5-13) into parts, freeing ids by merging smaller rows | The run's bound is 16 tasks, the milestone's 16 ids; merging rows would lose ids the milestone document keeps. Each large task instead splits into commits by layer (documents; engine; data and formats; wire and server), each building and testing alone (Risk R11) |
-| **A parallel schedule** (`parallel` above 1), which the PERT network allows | The tasks that could overlap edit the same files (`world.rs`, `systems/trade.rs`, `tests/common/mod.rs`, `tests/conservation.rs`), which the workflow would have to order anyway, and the run is configured with one pull request in flight |
+| **Keeping only the dependencies the code needs**, with every clause that depends on landing order made conditional (the panel's other option) | A task whose dependencies have merged starts from `main` (`.claude/workflows/sdlc-overnight.js:1632-1645`), so a refused merge or a parked PR earlier in the queue would let the next tasks edit `world.rs`, `snapshot.rs`, `bench.rs` and `tests/common/mod.rs` from a `main` without it, and leave the maintainer conflicting pull requests; and four tasks with unmerged dependencies on separate branches would be blocked outright (`:1642-1644`). The chain costs nothing in a run that builds one pull request at a time (B2) |
+| **A parallel schedule** (`parallel` above 1) | The chain leaves nothing to run in parallel, and before it the tasks that could overlap edited the same files, which the workflow would have had to order anyway (`:695`) |
+| **Founding every producer type from its own owner profession** (C14 before this revision) | It reads D27's "funded by the market's capitalists" more broadly than its words, which the critic judges against `main`; with the literal reading the farms still grow, by expansion (C14's measurements) |
 
 ## Plan choices
 
-Choices this stage makes within the contract, for the maintainer to check, continuing the analysis's C1 to C29 and the design's S1 to S30. None needs a new or amended decision; like those, they go into the plan PR's description and this workbook, never into DECISIONS.md.
+Choices this stage makes within the contract, for the maintainer to check, continuing the analysis's C1 to C29 and the design's S1 to S30. None needs a new or amended decision; like those, they go into the plan PR's description and this workbook, never into DECISIONS.md. This revision also restates two of the analysis's choices: C14 (D27's founders, read literally) and C17 (the riot budget, split by `allocate`).
 
 | # | Choice | Why |
 |---|---|---|
-| B1 | **M5-10 lands after every task that changes `two_states`' results** (M5-5, M5-7, M5-8, M5-9, M5-12, M5-16, and M5-11 through M5-7) | Its growth test, and any recalibration within R-D5 and R-D7, then measure the economy M5 delivers, and no later task can invalidate them; otherwise trade (M5-5) or merchant entry (M5-16) landing later would have to recalibrate investment, which isn't theirs. S27 made it follow M5-9 for the same reason |
-| B2 | **The queue order is the workflow's own:** Kahn's algorithm with ties in `tasks.json`'s order (the milestone's), taken one pull request at a time: M5-1, M5-2, M5-6, M5-11, M5-3, M5-7, M5-12, M5-4, M5-9, M5-5, M5-8, M5-13, M5-16, M5-14, M5-10, M5-15 | `topoOrder` and the one-slot queue (`.claude/workflows/sdlc-overnight.js:585-600`, `:1610-1648` at `f911fa7`) start, at each task's end, the task that has waited longest among those whose dependencies are done, which is Kahn's order. Contracts that depend on landing order state the rule ("raised by one from `main`'s value") with the value expected in this order |
-| B3 | **M5-8 follows M5-4, and so M5-3** | Both commands go through the same path (engine, `CommandText`, saves, wire, server), and M5-4 adds the month end's fresh layout and `option_u32s` that M5-8 uses; with the edge, M5-8 extends what they introduce, and the design's order-dependent clauses (S11's "if M5-8 lands first", "the first of M5-4 and M5-8") name one task each. It only orders the queue: M5-8 was after M5-4 in it already |
+| B1 | **M5-10 lands after every task that changes `two_states`' results** (M5-5, M5-7, M5-8, M5-9, M5-11, M5-12, M5-16) | Its growth test, and any recalibration within R-D5 and R-D7, then measure the economy M5 delivers, and no later task can invalidate them; otherwise trade (M5-5) or merchant entry (M5-16) landing later would have to recalibrate investment, which isn't theirs. S27 made it follow M5-9 for the same reason |
+| B2 | **The DAG is a chain in the queue's order:** besides the dependencies the code needs, every task depends on the task before it, M5-1, M5-2, M5-6, M5-11, M5-3, M5-7, M5-12, M5-4, M5-9, M5-5, M5-8, M5-13, M5-16, M5-14, M5-10, M5-15, so this is the DAG's only topological order and every task is on the critical path. *Restated in this revision* (panel finding 3): round 1 relied on the workflow's own tie-breaks for this order | The workflow starts a task whose dependencies have merged from `main`, stacks it on its one unmerged dependency whose branch holds the others, and blocks it otherwise (`.claude/workflows/sdlc-overnight.js:1632-1645`). With the chain, every task starts from a `main` that holds every earlier task, or, after a refused merge, stacked on the branch of the task before it, which holds them all; so the values that depend on landing order (`SNAPSHOT_FORMAT` 2 to 8, `SAVE_FORMAT` 2 and 3, protocol 1.7 to 1.10, `CommandError` 8 to 12), the replica tests' tables and the "before it in the chain" clauses of `tasks.json` hold whatever happens to a merge. The cost: when a task is parked, every later task waits for it (R11, R18) |
+| B3 | **M5-8 follows M5-4, and so M5-3** | Both commands go through the same path (engine, `CommandText`, saves, wire, server), and M5-4 adds `option_u32s`, which M5-8 uses; the design's order-dependent clauses (S11's error values, the D6 ownership bullet's two parts) name one task each. The chain (B2) orders them anyway; the month end's fresh layout, which round 1 gave M5-4, is M5-7's (B8) |
 | B4 | **S30's guarantee is restated, not extended:** a founding's outcome reaches the client in the month-end day's update only, so an update skipped by D23's window or by D24's cap for a remote session above four days a second (`crates/pax_server/src/throttle.rs:1-10`) loses it; the client still sees the request leave the pending list and, if founded, its project appear, so only a drop's reason is lost | Design round 3's minor finding 4. The fix considered, keeping the last month end's foundings in the server and sending them with later updates, would build a view from an earlier day's report; D22 builds views from `ProvinceStats` and the day's report (`docs/DECISIONS.md:415`), and no Amends line covers widening that, so it would need a decision. The loss is a reason, under heavy throttling, which a later decision can add back |
 | B5 | **Tests that add trade topology to a loaded `two_states`** (M5-1's replica test, M5-2's snapshot round trip) **push a link and route only when `route_between` finds none** | Design round 3's minor finding 2: from M5-5 the scenario has its own link, and `push_link` panics on a duplicate key |
 | B6 | **`fill_new_views` is a `#[cfg(test)] pub(crate)` function at `view.rs`'s module level** | Design round 3's minor finding 1: inside the private `mod tests`, `game.rs`'s `remote_bandwidth_budget` can't call it (E0603) |
 | B7 | **`server_day_budget` subscribes both views on its stepped world, unfilled** | Design round 3's minor finding 3: it times ticks, and the filled world is a fixture no tick runs on; `view_building_budget` and `remote_bandwidth_budget` measure the views at their caps |
+| B8 | **The month end's fresh layout lands with M5-7:** `tick.rs` takes one `World::pop_layout()` after politics and passes it to `investment::run_month_end`; M5-12 inserts `unrest::riot` between the two, and M5-4's `trade::run_month_end` and M5-8's founding reuse that layout | Panel finding 7: M5-7 is the first task in the queue whose step-6c function takes a layout, and at `aa2133a` the only layout in scope after politics is the tick's opening one, stale once mobility, migration or retraining has appended rows (`crates/pax_engine/src/tick.rs:96-104`). Riots move cash between existing rows only, so the layout stays valid through them (Design 1.3) |
+| B9 | **Levers:** a task that changes `two_states`' results may tune, when its own scenario test or one already on `main` fails, only these values, within their data rules: M5-11 the strike keys (R-D6); M5-7 `investment.profit_margin` (R-D5); M5-12 the riot keys (R-D6); M5-9 `slack` and `idle_months_before_shrink` (R-D5); M5-5 its route's `margin` and `k`, its link's `capacity` and its merchants' `cash` (R-D1 to R-D3); M5-8 `investor_reserve_days` (R-D5), never `founder`; M5-16 `entry_months` (R-D4); M5-10 the investment keys but `founder`, and the recipes (R-D5, R-D7). Any of them may also retune the unrest keys within R-D6 if R-F40's window breaks, and move a band of `economic_bands.rs` under the bands clause with its reason (R-N22). Nothing else moves: R-F20's, R-F33's and R-F40's bounds and `content_stability.rs` are never relaxed, and a task whose levers can't keep every scenario test green reports blocked-on-decision, naming the bound, the values tried and what each gave | Panel finding 6: round 1 fixed M5-5's values and gave the later tasks no lever but blocking, while its estimate text allowed recalibrating. Each lever is a value the task's own requirements introduce, so tuning it is the task's own work, M5-10's recalibration excepted (B1); the unrest keys are the exception because R-F40's window is the one scenario bound that every later change to prices and life needs can move (R18) |
+| B10 | **The milestone's "verify inventory stability" (M5-9) and "wage floor consistency" (M5-11) are restated in R-F31 and R-F35, each with its test** (`a_shrink_leaves_stocks_stable`, `wages_keep_their_floor_while_workers_strike`), and the crafted-row refusals of R-N17 are listed by task (Design 8.1) | Panel findings 8 and 9. No requirement is added: the workflow checks each task's requirements against those approved at Analysis and refuses an unknown id (`.claude/workflows/sdlc-overnight.js:668-675`, `:1063`), so each obligation joins the requirement it belongs to. Each task's row tick names the test of each check its row asks for |
 
 ## Feasibility
 
 ### Economic
 
-**One-time cost.** The [PERT estimates](#estimates) give 94.4 expected agent-hours for the sixteen tasks (most likely 88, optimistic 54.5, pessimistic 160), plus 1.25 for the plan PR and 1.17 for the close-out (the workflow's own estimate for it, `sdlc-overnight.js:1662`): **96.8 agent-hours**, with a standard deviation of about 4.6 hours if the tasks' errors are independent. Within each task's estimate, review and CI time is about half: [How the estimates were made](#how-the-estimates-were-made) breaks it down. The planning already spent is about 6 hours of wall time (`out/m5-run/LOG.md`, 01:01 to 07:00).
+**One-time cost.** The [PERT estimates](#estimates) give 79.2 expected agent-hours for the sixteen tasks (most likely 64.25, optimistic 28.15, pessimistic 190.1), plus 1.25 for the plan PR and 1.17 for the close-out (the workflow's own estimate for it, `sdlc-overnight.js:1662`): **81.6 agent-hours**. If the tasks' errors are independent, the standard deviation is 6.8 hours; the step times are modelled the same way for every task, so their errors may share one bias, and then it is up to 27.0 hours, the sum of the tasks' standard deviations ([How the estimates were made](#how-the-estimates-were-made)). Within each task's estimate, review time (the local critic, the review rounds and the last watch) is about half. The planning already spent is about 8 hours of wall time (`out/m5-run/LOG.md`, 01:01 to about 09:00).
 
 **Recurring cost: the tick (D13).** D13's budget is 100 ms a day at 1M POP rows on 8 threads, measured as the mean day (PERFORMANCE.md). On the run's machine `aa2133a` takes 69.0 to 74.2 ms a day over the 29 cold days and a median of 105.7 ms on the first month-end day (R-N10, R-N26). PERFORMANCE.md records about 91 ms on M4-11's machine (`docs/PERFORMANCE.md:15`), so the headroom is machine-relative and small. What M5 adds, estimated for the benchmark's world (1,500 copies of `two_states`: 3,000 markets, 6,000 provinces, 36,000 producers, about 990,000 POP rows, 3,000 routes):
 
@@ -134,11 +143,11 @@ Choices this stage makes within the contract, for the maintainer to check, conti
 
 So the cold days are estimated at about 80 to 90 ms on the run's machine and the 30-day mean at about 85 to 95: within the budget, with little to spare. These are estimates, not measurements; each task measures its own change against M5-1's baseline (R-N10, R-N26, R-N27), M5-15 records the result in PERFORMANCE.md, and an overrun that only D1's adaptive step could fix is blocked on that decision (Risk R3).
 
-**Recurring cost: CI and maintenance.** The new release-only scenario tests run about 40,000 simulated days of `two_states` in all; a 7,200-day run takes 0.38 s in release on the run's machine (measured 07:26), so they add seconds. The maintenance surface grows by four engine modules (`horizon.rs`, `systems/trade.rs`, `systems/investment.rs`, `systems/unrest.rs`), seven new `World` fields holding eight tables (links and routes together in `network`), three columns on existing tables, two commands, two views, two client panels, about fifteen rules keys, a snapshot format raised seven times and a save format twice, and protocol 1.10.
+**Recurring cost: CI and maintenance.** The new release-only scenario tests run about 40,000 simulated days of `two_states` in all; a 7,200-day run takes 0.38 s in release on the run's machine (measured 07:26), so they add seconds. The whole gate runs in about 3 minutes there (measured 08:36). The maintenance surface grows by four engine modules (`horizon.rs`, `systems/trade.rs`, `systems/investment.rs`, `systems/unrest.rs`), seven new `World` fields holding eight tables (links and routes together in `network`), three columns on existing tables, two commands, two views, two client panels, about sixteen rules keys, a snapshot format raised seven times and a save format twice, and protocol 1.10.
 
 **Benefits.** Tangible: the definition of done (trade with tariffs, investment that grows the economy, strikes and riots, the client's controls), and the measures that check it (`bench`'s month-end time and warm-up, `report --market`, the new report columns). M6 builds directly on M5 (`docs/MILESTONE_6.md:8`). Intangible: an economy that can grow and respond to policy, and a second milestone built by the workflow.
 
-**Verdict: feasible.** About 97 agent-hours, no new dependency, a tick cost estimated within D13, and seconds of CI.
+**Verdict: feasible.** About 82 agent-hours, no new dependency, a tick cost estimated within D13, and seconds of CI.
 
 ### Technical
 
@@ -147,7 +156,7 @@ So the cold days are estimated at about 80 to 90 ms on the run's machine and the
 | Engine tables and systems (M5-1, M5-2, M5-4, M5-6, M5-9, M5-11, M5-12, M5-16) | New struct-of-arrays tables and plain system functions, the patterns of `Pops`, `Producers` and `systems/` (D8) | High: the code's own patterns, documented in ONBOARDING.md's recipes | **Low to medium**: the money path is guarded by the daily assert and a conservation case per flow |
 | Settlement's new buyers and sellers (M5-3, M5-7) | Changes inside `market.rs`'s settlement (`market.rs:666-852`), the tick's hottest code | Medium: the sequence is written out (Design 4.1) | **Medium**: a wrong row or a missed debit breaks conservation (caught at once) or the hand-off order (S5's test) |
 | The D13 budget | Every task that adds work | Measured baselines exist (R-N10, R-N26) | **High**: small headroom, see [Economic](#economic) |
-| Calibration (M5-5, M5-7 to M5-11, M5-16) | Data values tuned against scenario tests | Medium: measured at `aa2133a` (Design 3.7) | **Medium to high**: the bands and growth tests may need recalibration, which only M5-10 does (B1) |
+| Calibration (M5-5, M5-7 to M5-12, M5-16) | Data values tuned against scenario tests | Medium: measured at `aa2133a` (Design 3.7, with the 08:36 probe) | **Medium to high**: each result-changing task has only its own levers (B9), and in the chain one that can't keep a test green stops every later task (R18) |
 | Protocol, server and bridge (M5-3, M5-8, M5-13) | Append-only schema, generated code, exhaustive conversions | High: M3 and M4 added six minor versions this way | **Low** |
 | Client (M5-14) | Two GDScript panels and a headless smoke test | Medium: GDScript, slow to iterate | **Medium** |
 
@@ -157,24 +166,46 @@ So the cold days are estimated at about 80 to 90 ms on the run's machine and the
 
 - **Players:** two new tabs and a map mode; nothing is removed. Saves and snapshots written before a format change are refused by name (R-N16), and every scenario-content change already refuses older saves (D23's content hash), so a game saved before M5 can't be loaded after it.
 - **Hosts:** a 1.6 client still plays on a 1.10 server without the new views (R-N15); a newer client on an older server gets `Malformed` for the new commands (Design 3.6). `protocol_major` doesn't change, so HOSTING.md's rule stands. No new server setting.
-- **Scenario authors and modders:** new optional scenario entries; `data/professions.toml` gains `merchant`, appended so every id keeps its index; `rules.toml` gains required sections and keys (C20), so a data directory of one's own must add `[trade]`, `[investment]` and the five `[politics]` keys, and a missing one is a load error naming it. DATA_FORMAT.md documents each with its task.
+- **Scenario authors and modders:** new optional scenario entries; `data/professions.toml` gains `merchant`, appended so every id keeps its index; `rules.toml` gains required sections and keys (C20), so a data directory of one's own must add `[trade]`, `[investment]` (with `founder`, the profession of the market's capitalists, C14) and the five `[politics]` keys, and a missing one is a load error naming it. DATA_FORMAT.md documents each with its task.
 - **Operators of CI:** no new job; the client smoke test gains its steps (R-F53); the Benchmark regression job sees trade once `two_states` has it (R-N12, Risk R4).
+- **Operators of the run:** a resumed run needs the arguments and preconditions of [Schedule](#schedule).
 - **Verdict: feasible,** with the save break stated in the release notes the close-out writes.
 
 ### Schedule
 
-**Does it fit before the stop time, 2026-10-10T07:00:00+08:00? No.** This stage started at 07:08, after the stop time, so no task can start in this run:
+**Does it fit before the stop time, 2026-10-10T07:00:00+08:00? No.** The Baseline plan stage started at 07:08, after the stop time, so no task can start in this run:
 - the workflow checks the clock at the start of every task's cycle and returns "not-started" past the stop time (`.claude/workflows/sdlc-overnight.js:1510` at `f911fa7`);
-- planning doesn't check it, and the plan PR, once the panel approves it, is published and watched: it merges if its first watch finds every check green, and is left in flight if checks are still pending past the stop time (`shepherd`, `:1426-1456`; the plan PR is published after the panel and the seal, `:1592-1596`).
+- planning doesn't check it, and the plan PR, once the panel approves it, is published and watched: it merges if its first watch finds every check green, and is left in flight if checks are still pending past the stop time (`shepherd`, `:1426-1456`; the plan PR is published after the panel and the seal, `:1587-1597`).
 
-**What the queue needs.** One pull request at a time, the queue takes the sum of the tasks' times, not the critical path: **96.8 expected agent-hours** (σ 4.6) with the plan PR and close-out, and 99 hours on the [Gantt chart](#gantt-chart), whose bars are rounded to whole hours. From the Gantt chart's start, 2026-10-10 07:00, that ends on 2026-10-14 at 10:00: about four days of continuous running. The [critical path](#critical-path-duration-and-slack), 53.9 hours (σ 3.5), is the lower bound that unlimited parallelism would reach, which this run doesn't use.
+**What the queue needs.** One pull request at a time, in the chain's order (B2), the queue takes the sum of the tasks' times, which with the chain is also its critical path: **81.6 expected agent-hours** with the plan PR and close-out, and 85 hours on the [Gantt chart](#gantt-chart), whose bars are rounded to whole hours, from 2026-10-10 08:00 to 2026-10-13 21:00: about three and a half days of continuous running. Its spread: 74.8 to 88.4 hours (one standard deviation) if the tasks' errors are independent, 54.6 to 108.6 if they share one bias, and 29.7 to 195.1 from every optimistic to every pessimistic value.
 
-**Verdict: not feasible before the stop time; feasible as a resumed run.** The approved plan is what a later run continues from (`fromPlan`, SDLC_WORKFLOW.md "Running it"), as the [charter's target dates](02-project-charter.md#target-dates) expected (A13). Each task is buildable from this workbook and `main` once its dependencies merge, and the run report lists the queue.
+**Windows.** A run with a `stopAt` starts no task after it, but checks the clock only before each task's cycle and before each watch round (`:1510`, `:1436`, `:1454`), so a task that starts a minute before the stop runs its refresh, build, gate, local critic, audit and publish to the end, about 2 to 3 hours likely and up to 8 pessimistic, and then gets one watch: it merges if green, and is left in flight otherwise. In windows of eight hours the queue needs about eleven at the expected times (81.6 ÷ 8 is 10.2, and each window loses its end to the task in flight), seven to fourteen under a common bias, and four to twenty-five between the extremes; a run left going with a `stopAt` days away needs one. Setting `stopAt` about three hours before a window must end keeps the overrun inside it.
+
+**Resuming.** The approved plan is what a later run continues from (`fromPlan`, SDLC_WORKFLOW.md "Running it"), as the [charter's target dates](02-project-charter.md#target-dates) expected (A13). It is started with these arguments:
+
+| Argument | Value | Why |
+|---|---|---|
+| `fromPlan` | `true` | Loads this workbook's plan instead of planning again (`:1565`, `:1102-1115`) |
+| `milestone` | `"docs/MILESTONE_5.md"` | Gives the slug `m5` (`:79`) and the list of tasks already done, the rows ticked in the milestone on `main` (`:1108`), which the run skips (`:1633`) |
+| `maxTasks` | `16` | Loading re-runs the automatic checks with the run's bound, 12 by default (`:95`, `:660`, `:1113-1114`), and the queue has 16 tasks |
+| `parallel` | `1` | The default (`:91`); with the chain any value runs one task at a time |
+| `merge` | `true` | Auto-merge when every required check is green (`:90`, `:1438-1452`), the maintainer's authorisation given again: run decision 6 was given "for this M5 run" |
+| `decisions` | run decisions 1 to 6, as quoted in the [README](README.md#run-rules), given again | The workers and reviewers read the maintainer's decisions from it; 1 to 5 are recorded in DECISIONS.md once the plan PR merges (`bd08ee6`), and 6 holds the run rules |
+| `stopAt` | a new ISO 8601 time with its offset, about three hours before the window must end | Without it the run has no stop (`:86`, `:1126`) |
+
+Before a resume, the maintainer:
+1. **merges the plan PR**, after its critic verdict on `bd08ee6` (R1). If it were still open, the resumed run would find `tasks.json` only on `m5/plan` and publish that branch again (`:1589-1597`), and a second `gh pr create` for a branch that has a pull request fails;
+2. **merges every green `m5/*` pull request**, so its row is ticked on `main` and the run skips it;
+3. **closes every other open `m5/*` pull request** (in flight, parked `needs-human` or `needs-waiver`) **and deletes its branch on origin and locally**, or finishes and merges it: the resumed run rebuilds that task on `m5/<id>` from `main`, and pushing over a remote branch with other commits needs the force-push the run rules forbid;
+4. **deletes every local stacked branch** (`m5/<id>`, status "stacked", built on an unmerged task), or rebases it onto `main` and publishes it once its base merges, for the same reason; the run report lists each with the commands to finish it (`:1552`);
+5. **detaches or removes any leftover agent worktree that holds an `m5/*` branch** (`git worktree list`), so the run can check the branch out.
+
+**Verdict: not feasible before the stop time; feasible as a resumed run.** Each task is buildable from this workbook and `main` once the task before it merges, and the run report lists the queue.
 
 ### Legal and contractual
 
 - **Licences:** nothing new (Design 7). The workspace's pinned dependencies (rayon, serde, toml, FlatBuffers through flatc 24.3.25, godot-rust 0.5.5) and the pinned mermaid-cli stay as they are.
-- **The contract:** no change to AGENTS.md, DECISIONS.md's rules or critic.md, which the run can't make (no `contract-change` label). Every amendment M5 needs is named by an accepted decision's Amends line and lands with its code ([Design 2.3](04-system-specification.md#23-amended-decision-texts-proposed), S1); D19 changes only its status sentence (run decision 4, S20).
+- **The contract:** no change to AGENTS.md, DECISIONS.md's rules or critic.md, which the run can't make (no `contract-change` label). Every amendment M5 needs is named by an accepted decision's Amends line and lands with its code ([Design 2.3](04-system-specification.md#23-amended-decision-texts-proposed), S1); D6's founding bullet names D27's funders in D27's words (C14); D19 changes only its status sentence (run decision 4, S20).
 - **D28's Amends line** still names a D19 amendment that won't happen; run decision 5 keeps it as written, so it stays the maintainer's ([SSR](01-system-service-request.md#initial-assessment), item 4; charter A11).
 - **Verdict: feasible.**
 
@@ -190,10 +221,10 @@ The workflow's roles are the [charter's](02-project-charter.md#key-stakeholders-
 |---|---|---|
 | The plan PR | Whether its critic verdict on `bd08ee6`'s acceptance of D17, D27 and D28 stands; if CRITICAL, the PR is parked for them (A11, Risk R1) | the PR, labelled `needs-human` if parked |
 | The morning | Every task's outcome, the decisions to check, drafted waivers, what remains | `out/m5-run/REPORT.md` |
-| Choices within the contract | C1 to C29, S1 to S30, B1 to B7, and each task's `Decisions:` lines | this workbook, the plan PR's description, each PR, the report |
-| Parked pull requests | A disputed CRITICAL finding, six rounds without green, or a refused merge | PRs labelled `needs-human` or `needs-waiver` |
-| A task blocked on a decision | The decision it names (none is expected, Design 2.2) | the report |
-| Resuming | Starting the queue again with `fromPlan` | the workflow's arguments |
+| Choices within the contract | C1 to C29 (C14 and C17 restated in this revision), S1 to S30, B1 to B10, and each task's `Decisions:` lines | this workbook, the plan PR's description, each PR, the report |
+| Parked pull requests | A disputed CRITICAL finding, six rounds without green, or a refused merge; in the chain each stops the tasks after it | PRs labelled `needs-human` or `needs-waiver` |
+| A task blocked on a decision | The decision it names: none is expected (Design 2.2), except a scenario bound that a task's levers can't meet (B9, R18) | the report |
+| Resuming | The arguments and the five steps before it, in [Schedule](#schedule) | the workflow's arguments; GitHub; `git worktree list` |
 | The playtest | A look at the Trade and Construction tabs and the map mode (R-F49 to R-F52) | the report's "what remains" |
 | D28's Amends line | Whether to edit it | DECISIONS.md |
 
@@ -210,7 +241,7 @@ The contract ([AGENTS.md](../../../AGENTS.md), [DECISIONS.md](../../DECISIONS.md
 
 ## Resource allocation
 
-Every task owns the files its `owns` list in [`tasks.json`](tasks.json) names, in full in the [work breakdown](#the-task-queue); `docs/DECISIONS.md`, `docs/MILESTONE_5.md`, this workbook and `Cargo.lock` are shared by design. With one pull request in flight, two tasks never edit a file at once; the files most tasks touch are `crates/pax_engine/tests/common/mod.rs` (11 tasks), `crates/pax_data/src/lib.rs`, `schema.rs` and `tests/validation.rs`, `crates/pax_engine/src/tick.rs` and `crates/pax_cli/src/report.rs` (10 each), `crates/pax_engine/src/world.rs`, `defs.rs`, `crates/pax_data/src/bench.rs` and `data/rules.toml` (9 each), and `scenarios/two_states/golden.hashes` (8), each task extending its own part.
+Every task owns the files its `owns` list in [`tasks.json`](tasks.json) names, in full in the [work breakdown](#the-task-queue); `docs/DECISIONS.md`, `docs/MILESTONE_5.md`, this workbook and `Cargo.lock` are shared by design. Every task depends on the one before it (B2), so it starts from a `main` that holds every earlier task, or, after a refused merge, stacked on the branch of the task before it, which holds them all: no two tasks edit a file from different bases. The files most tasks touch are `crates/pax_engine/tests/common/mod.rs` (11 tasks), `crates/pax_data/src/lib.rs`, `schema.rs` and `tests/validation.rs`, `crates/pax_engine/src/tick.rs`, `crates/pax_cli/src/report.rs` and `data/rules.toml` (10 each), `crates/pax_engine/src/world.rs`, `defs.rs` and `crates/pax_data/src/bench.rs` (9 each), and `crates/pax_data/src/snapshot.rs`, `crates/pax_data/tests/economic_bands.rs`, `crates/pax_engine/tests/conservation.rs`, `scenarios/two_states/golden.hashes` and `scenarios/mini_valley/defs/rules.toml` (8 each), each task extending its own part.
 
 Every task meets the same reviewers: the refresh reviewer on its contract against `main` as it then is, the local critic, CI's Critic, the commit auditor, and CI's required checks. The table names where a task meets them hardest.
 
@@ -218,42 +249,45 @@ Every task meets the same reviewers: the refresh reviewer on its contract agains
 |---|---|---|
 | M5-1 | 23 | Benchmark regression reading the new print (`bench_has_one_ms_per_day_line`); the critic on D14 rule 5's text |
 | M5-2 | 19 | The critic on money (D5's holders, the daily assert); `check_docs.py` on `systems/trade.rs` in ARCHITECTURE.md and BACKEND_SCHEMA.md |
-| M5-3 | 40 | The critic on settlement's money path and C27's cross-crate change; CI's generated-code check, fuzzing (hostile `SetTariff`), session replay on three platforms |
-| M5-4 | 27 | The critic on D6's merchants' dividends and the ownership bullet |
-| M5-5 | 16 | Golden re-record explained (D11); Benchmark regression with trade in the head only (Risk R4); the bands clause |
+| M5-3 | 41 | The critic on settlement's money path and C27's cross-crate change; CI's generated-code check, fuzzing (hostile `SetTariff`), session replay on three platforms |
+| M5-4 | 27 | The critic on D6's merchants' dividends and the ownership bullet; the crafted-row cases for `owner_nation` |
+| M5-5 | 17 | Golden re-record explained (D11); Benchmark regression with trade in the head only (Risk R4); the bands clause and its levers (B9) |
 | M5-6 | 18 | The critic on derived data (no `project_budget`, D7) |
-| M5-7 | 29 | The critic on settlement and the dividend reserve (D6, D27); D13 measurements in Evidence (R-N10, R-N26, R-N27); golden re-record |
-| M5-8 | 42 | The critic on D21's validation-only-in-`validate` rule and D24's conflict text; fuzzing; session replay; the protocol check |
-| M5-9 | 23 | Hash rule for a new column (`a_new_column_is_hashed_once_it_differs`) |
+| M5-7 | 29 | The critic on settlement and the dividend reserve (D6, D27); the fresh layout (B8); D13 measurements in Evidence (R-N10, R-N26, R-N27); golden re-record |
+| M5-8 | 44 | The critic on D27's founders (C14) and D21's validation-only-in-`validate` rule and D24's conflict text; fuzzing; session replay; the protocol check |
+| M5-9 | 25 | Hash rule for a new column (`a_new_column_is_hashed_once_it_differs`); the stocks test (B10) |
 | M5-10 | 8 | The bands clause and any recalibration's reasons; release tests in CI |
-| M5-11 | 31 | The critic on run decision 3's D6 text and D19's sentence (run decision 4); golden re-record |
-| M5-12 | 24 | The critic on the riot transfer (D5, D28); determinism test on four thread counts |
+| M5-11 | 31 | The critic on run decision 3's D6 text and D19's sentence (run decision 4); the wage-floor test (B10); golden re-record |
+| M5-12 | 25 | The critic on the riot transfer's split (D3, D5, D28, C17); determinism test on four thread counts |
 | M5-13 | 31 | The bandwidth and size budgets (R-N14); the crate-boundary check (D12); the critic on D22's views |
 | M5-14 | 21 | CI's client smoke test (headless Godot); the maintainer's look in the morning |
 | M5-15 | 5 | Session replay on Windows and macOS; PERFORMANCE.md's numbers |
-| M5-16 | 24 | The critic on entry's funding (D17, D27's funding rule) and "never chartered" |
+| M5-16 | 25 | The critic on entry's funding (D17, D27's funding rule) and "never chartered" |
 
 ## Risk register
 
 | Id | Risk | Likelihood | Impact | Mitigation | Owner | Trigger |
 |---|---|---|---|---|---|---|
 | R1 | The plan PR's critic reads `bd08ee6`'s acceptance of D17, D27 and D28 as an agent's contract change, judged against `main`'s Proposed entries | Medium | High: every task branches from `main` after the plan | The description quotes run decisions 1-5 verbatim and names D28's Amends line (A11); a CRITICAL finding is disputed and the PR parked for the maintainer, never worked around | Plan PR's remediation; the maintainer | Critic check red on DECISIONS.md |
-| R2 | The stop time passed before the plan was approved | Certain | High for this run: nothing is built | The queue is resumable from the approved plan (A13); each task stands on its dependencies and this workbook; the report lists the queue | The maintainer, on resuming | The first task's clock check |
+| R2 | The stop time passed before the plan was approved | Certain | High for this run: nothing is built | The queue resumes from the approved plan with the arguments and preconditions of [Schedule](#schedule) (A13); each task stands on the one before it and this workbook; the report lists the queue | The maintainer, on resuming | The first task's clock check |
 | R3 | M5's daily or month-end work takes the 1M-row tick over 100 ms a day | Medium | High: D13, DoD 5 | Each task measures before and after against M5-1's baseline, and explains a rise over 20% (R-N10, R-N26, R-N27); optimisation within the task's rules (fewer orders for closed goods, no strike arithmetic below the threshold); a fix needing D1's adaptive step as default is blocked on that decision | The worker of each task that adds work; M5-15 | A measured mean over 100 ms, or a median rise over 20% |
 | R4 | CI's Benchmark regression compares each side's own `two_states` (`.github/workflows/ci.yml:154-163`), so tasks that add content to it (M5-5, M5-7, M5-11, M5-16) give the head more work than the base | Medium | High: a required check | Run `scripts/bench-compare.sh` locally with both binaries before pushing; keep added work proportional to what the content trades; if the regression is the content's own work and within D13, the PR says so and is parked for the maintainer, never by weakening the gate (charter A7) | The worker | Benchmark regression red |
-| R5 | A later task changes `two_states` and breaks an earlier task's scenario test (trade, unrest, growth, bands, content stability) | Medium | Medium | Every gate runs `cargo test --all --release`; M5-10 lands last among result-changing tasks (B1); a task that can't keep a test within its own rules reports blocked, never relaxes a bound (Design 8.5) | The later task's worker | A release scenario test fails in the gate |
-| R6 | Design 3.7's investment values don't meet R-F33 (capacity, real GDP +0.1%, construction goods, unemployment), for example because depreciation shrinks the peaks' mines by about 5,000 slots | Medium | Medium | M5-10 recalibrates within R-D5 and R-D7 and re-records with the reason; its pessimistic estimate is 10 hours | M5-10 | `investment_grows_two_states` fails |
-| R7 | A new money flow isn't conserved | Low | High: every tick panics | One function moves settlement's money (S6); every split by `alloc::allocate`; a conservation case per flow through the shared `random_world` (R-N3) | The worker | The daily assert, or a conservation test |
+| R5 | A later task changes `two_states` and breaks an earlier task's scenario test (trade, unrest, growth, bands, content stability) | Medium | Medium | Every gate runs `cargo test --all --release`; M5-10 lands last among result-changing tasks (B1); the breaking task tunes only its own levers, or the unrest keys for R-F40's window, and moves a band only under the bands clause (B9); a bound is never relaxed (Design 8.5); what its levers can't fix is R18 | The later task's worker | A release scenario test fails in the gate |
+| R6 | Design 3.7's investment values don't meet R-F33 (capacity, real GDP +0.1%, construction goods, unemployment), for example because depreciation shrinks the peaks' mines by about 5,000 slots, or because owners found little once they are the capitalists only (C14) | Medium | Medium | Growth doesn't wait on founding: the farms, vineyards and three workshops pass PL-9's expansion test on `aa2133a`'s engine (Design 3.7, 08:36); M5-10 recalibrates within R-D5 and R-D7 and re-records with the reason; its pessimistic estimate allows it (12.55 hours) | M5-10 | `investment_grows_two_states` fails |
+| R7 | A new money flow isn't conserved, or a split doesn't sum to its total | Low | High: every tick panics, or the critic finds a split without `allocate` (CRITICAL) | One function moves settlement's money (S6); every split by `alloc::allocate`, the riot budget's included (C17); a conservation case per flow through the shared `random_world` (R-N3) | The worker | The daily assert, a conservation test, or a critic finding |
 | R8 | Results depend on the thread count or the platform | Low | High: D3, D11 | No new parallel pass (Design 1.4); explicit tie-breaks; the thread-count test on R-F40's world (R-N6); CI's Windows and macOS verify and replay | The worker; M5-12, M5-15 | `determinism.rs` or a cross-platform job fails |
 | R9 | A golden file changes where the plan says it doesn't, `mini_valley`'s especially | Low | Medium | PL-18 hashes new state only where it holds something; [Golden hashes impact](#golden-hashes-impact) names every planned change; an unplanned one is a bug to explain, never re-recorded | The worker | `pax_cli verify` fails |
 | R10 | A format change misreads an older save, snapshot or client | Low | Medium | Each layout change raises its format and the reader checks it first (R-N16, S15); the schema only appends (R-N15); `a_1_6_client_reads_every_later_update` | M5-2 to M5-4, M5-6, M5-8, M5-9, M5-13, M5-16 | `saves.rs`, `snapshot.rs` or `roundtrip.rs` fails |
-| R11 | A large task (M5-3, M5-7, M5-8, M5-13, M5-14) doesn't get green within the workflow's six review rounds | Medium | Medium: parked; its dependants wait | Commits split by layer, each building alone; contracts refreshed and reviewed before the build; pessimistic estimates of 13 to 14 hours | Worker and remediation | Round 6 not green |
+| R11 | A large task (M5-3, M5-7, M5-8, M5-13, M5-14) doesn't get green within the workflow's six review rounds | Medium | High: parked `needs-human`, and every later task in the chain is blocked (`.claude/workflows/sdlc-overnight.js:1636-1638`) until the maintainer finishes it and resumes the run | Commits split by layer, each building alone; contracts refreshed and reviewed before the build; the local critic before the PR; pessimistic estimates of 13 to 15 hours | Worker and remediation; the maintainer | Round 6 not green |
 | R12 | The headless client test fails for Godot-specific reasons, slowly | Medium | Medium: DoD 4 | The smoke test's steps are scripted in Design 8.6 and go through the client's own paths; the Rust side is tested in `pax_godot` first | M5-14 | CI's client-smoke red |
-| R13 | `gh pr merge` is refused by the permission classifier, as has happened (SDLC_WORKFLOW.md, "Merge authorisation") | Medium | Medium: green PRs wait; dependants stack locally | The workflow reports the refusal, leaves the PR ready, and stacks dependants; the maintainer merges | Merge agent; the maintainer | A refused merge |
+| R13 | `gh pr merge` is refused by GitHub or the permission classifier, as has happened (SDLC_WORKFLOW.md, "Merge authorisation") | Medium | High for the run: the pull request stays "ready", and every later task is built, gated and audited locally, stacked on the branch of the task before it, and never pushed (`.claude/workflows/sdlc-overnight.js:1539-1541`, `:1607`, `:1640-1645`), so nothing more reaches review until the maintainer acts | The chain makes every later task stack on the one before it rather than branch from a `main` without it (B2), so the stacked branches hold no conflict; the report lists them with the commands to finish them (`:1552`). The maintainer merges the ready PR, then either publishes the stacked branches in order, each rebased onto `main` once the one before it merges, or deletes them and resumes the run, which rebuilds them for review ([Schedule](#schedule)); or stops the run at the first refused merge, since what follows is unreviewed | The merge agent; the maintainer | The merge agent reports "merged false" |
 | R14 | The new views push a remote client past 100 KB/s or an update past 128 KB | Low | Medium | The caps (S28): 82.4 KB/s and 107,272 bytes measured at them; the budget tests fill past every cap | M5-13 | `remote_bandwidth_budget` or `size_budget.rs` fails |
 | R15 | A task needs a decision that isn't accepted (taxing merchant dividends, a charter command, the adaptive step) | Low | Medium | Design 2.2's check found none; the task stops and reports blocked on it (C7, R-F60) | The worker; the maintainer | The worker reports blocked-on-decision |
 | R16 | PR #69 merges during the run and changes `DATA_MODEL_M5_M6.md`, which tasks update | Low | Low | The refresh step takes its changes in as change requests (A3) | The planner at refresh | #69 merged |
-| R17 | The estimates are low: the queue takes longer than four days | Medium | Low: no deadline beyond the run | The schedule's standard deviation is given; the report keeps the queue current | The maintainer | Actual bars past the planned |
+| R17 | The estimates are wrong, all in one direction: the step times are modelled, since no task cycle of this workflow has run yet | Medium | Medium: the count of windows is wrong | The model is laid out step by step with its evidence ([How the estimates were made](#how-the-estimates-were-made)); the spread is given both for independent errors (6.8 hours) and for one shared bias (27.0); the first tasks' actual times, which the workers report (`started_at`, `finished_at`, `:1526`), recalibrate the rest, and the report keeps the queue current | The maintainer | The first two tasks' actual times outside their o to p range, or more than 30% from te |
+| R18 | A task that changes `two_states`' results can't meet a scenario test with its levers (B9) | Medium | High: it reports blocked-on-decision and every later task waits. Every task is on the critical path (B2), and the earlier the task, the more it holds up: M5-11 (4th in the queue) twelve tasks, M5-7 (6th) ten, M5-12 (7th) nine, M5-5 (10th) six | Levers start from measured values (Design 3.7; the 08:36 probe); R-F40's window has room both ways (province means 0.175 on day 2520 and 0.433 on day 1800 against a threshold of 0.3); the bands clause lets a band move with its reason; the task reports the values it tried and what each gave, so the maintainer's decision is one reading | The task's worker; the maintainer | The worker reports blocked-on-decision naming a scenario bound |
+| R19 | A resumed run meets the last run's leftovers: an open plan PR, an open `m5/*` pull request, a branch `m5/<id>` on origin or locally, or a worktree holding one | Medium: any window can end with a pull request in flight | High: the plan PR is published again and `gh pr create` fails, or a task's push is refused, and in the chain every later task is blocked | The five steps before a resume ([Schedule](#schedule)); the report lists every open pull request and stacked branch | The maintainer | A resume with any of them present |
+| R20 | A task started just before a window's stop runs hours past it | High: every window ends this way while tasks remain | Low: the run ends later; the pull request is left in flight if its first watch isn't green | `stopAt` set about three hours before the window must end ([Schedule](#schedule)) | The maintainer | A clock check passing shortly before the stop |
 
 ## Work breakdown
 
@@ -263,38 +297,51 @@ The tasks of [`tasks.json`](tasks.json), in the milestone's order, each with its
 
 | Task (queue position) | Title | Depends on | Requirements | Owns | Acceptance tests | o / m / p | Blocked on a decision |
 |---|---|---|---|---|---|---|---|
-| M5-1 (1) | Bench's month-end timing, then the route loader and the trade horizon | none | R-F1 to R-F4, R-F56, R-F57, R-F59, R-N5, R-N8, R-N11 to R-N13, R-N17 to R-N20, R-N23, R-N24, R-N26, R-D1, R-D2, R-D4, R-D14 | cli: main.rs; engine: horizon.rs (new), lib.rs, world.rs, defs.rs; engine tests: trade.rs (new), common/mod.rs; data: schema.rs, lib.rs, snapshot.rs, bench.rs; data tests: validation.rs; content: rules.toml; scenarios: mini_valley/defs/rules.toml; docs: DECISIONS, DATA_FORMAT, BACKEND_SCHEMA, MAP_AND_LOGISTICS, TRADE, DATA_MODEL_M5_M6, ONBOARDING, MILESTONE_5, workbooks/m5 | `bench_times_the_first_month_end_day`, `bench_has_one_ms_per_day_line`, `horizon_matches_a_hand_computed_one`, `horizon_is_independent_of_link_order`, `a_route_takes_its_links_retention_and_whole_capacity`, `horizon_build_at_scale`, `links_load_both_ways`, `routes_load_with_their_tuning`, `bad_links_are_refused`, `bad_routes_are_refused`, `trade_rules_are_checked`, `a_restored_world_has_the_scenarios_routes`, `replicas_copy_the_trade_and_investment_tables` | 3 / 4.5 / 8 | none |
-| M5-2 (2) | Merchants and Cargo tables and the arrival phase | M5-1 | R-F5, R-F10, R-F41, R-F54, R-F67, R-N1, R-N3 to R-N5, R-N8, R-N10 to R-N12, R-N16 to R-N19, R-N23, R-N24, R-D9, R-D10, R-D15 | engine: systems/trade.rs (new), systems/mod.rs, world.rs, hash.rs, tick.rs; engine tests: trade.rs, conservation.rs, common/mod.rs; data: snapshot.rs, bench.rs; cli: report.rs; docs: DECISIONS, ARCHITECTURE, BACKEND_SCHEMA, TRADE, DATA_MODEL_M5_M6, ONBOARDING, MILESTONE_5, workbooks/m5 | `cargo_lands_next_day_less_the_iceberg_share`, `tariffs_reach_the_importing_treasury`, `merchant_tables_keep_their_invariants`, `merchant_rows_are_stable`, `market_figures_sum_their_routes`, `a_new_table_is_hashed_once_it_has_rows`, `a_snapshot_restores_the_exact_state_and_it_runs_on_identically`, `crafted_merchants_and_projects_are_refused`, `money_conserved_through_trade`, `goods_are_accounted_exactly`, `new_columns_follow_todays`, `replicas_copy_the_trade_and_investment_tables` | 3 / 5 / 9 | none |
-| M5-3 (5) | Merchant market orders, arbitrage and SetTariff | M5-2 | R-F7 to R-F9, R-F11 to R-F13, R-F17 to R-F19, R-F21, R-F41 to R-F44, R-F54, R-F67, R-N2 to R-N5, R-N7, R-N8, R-N10 to R-N12, R-N15 to R-N18, R-N21, R-N23, R-N24, R-D8, R-D9, R-D13 | engine: systems/market.rs, systems/trade.rs, world.rs, command.rs, tick.rs; engine tests: trade.rs, commands.rs, conservation.rs, extremes.rs, common/mod.rs; data: schema.rs, lib.rs, save.rs, snapshot.rs, bench.rs; data tests: saves.rs, validation.rs; cli: report.rs; schemas: common.fbs; protocol: src/generated, src/lib.rs, tests/roundtrip.rs; server: request.rs, commands.rs, hostile.rs; server tests: common/mod.rs, session.rs, session_replay.rs; client: pax_keys.gd; docs: DECISIONS, ARCHITECTURE, BACKEND_SCHEMA, DATA_FORMAT, NETWORK_PROTOCOL, ECONOMY_SYSTEM, TRADE, ONBOARDING, HOSTING, MILESTONE_5, workbooks/m5 | `export_orders_follow_the_flow_rule`, `imports_are_offered_at_landed_cost_plus_margin`, `exporters_and_locals_get_the_same_fraction`, `settlement_books_purchases_and_sales`, `a_merchant_never_owes_more_than_its_cash`, `capacity_binds_however_many_merchants`, `equal_prices_mean_no_trade_and_no_entry`, `tariffs_apply_only_between_nations`, `a_higher_tariff_cuts_the_flow_and_the_treasury_gets_it_all`, `prices_converge_to_the_friction_band`, `market_figures_sum_their_routes`, `set_tariff_is_validated`, `new_commands_round_trip_through_a_save`, `another_format_is_refused_by_name`, `command_logs_take_the_new_commands`, `new_commands_are_checked_in_order`, `set_tariff`, `money_conserved_through_trade`, `goods_are_accounted_exactly`, `new_columns_follow_todays` | 5 / 8 / 14 | none |
-| M5-4 (8) | Merchant kinds, dividends, seeding and winding up | M5-3 | R-F5, R-F6, R-F14, R-F15, R-F41, R-F57, R-F59, R-F63, R-F67, R-N2, R-N3, R-N5, R-N8, R-N10 to R-N12, R-N16, R-N17, R-N19, R-N23 to R-N26, R-D3, R-D4, R-D9, R-D15 | engine: systems/trade.rs, world.rs, hash.rs, tick.rs, defs.rs; engine tests: trade.rs, conservation.rs, common/mod.rs; data: schema.rs, lib.rs, snapshot.rs, bench.rs; data tests: validation.rs, content_stability.rs; cli: report.rs; content: professions.toml, rules.toml; scenarios: mini_valley/defs/rules.toml; docs: DECISIONS, ARCHITECTURE, BACKEND_SCHEMA, DATA_FORMAT, ECONOMY_SYSTEM, TRADE, ONBOARDING, MILESTONE_5, workbooks/m5 | `each_kind_pays_its_owner`, `a_loss_maker_winds_up_and_returns_its_cash`, `an_idle_merchant_is_never_wound_up`, `settlement_books_purchases_and_sales`, `merchants_seed_by_route_and_kind`, `bad_merchants_are_refused`, `trade_rules_are_checked`, `money_conserved_through_trade`, `new_columns_follow_todays` | 4 / 6 / 10 | none |
-| M5-5 (10) | Trade in two_states and the comparative-advantage test | M5-4 | R-F20, R-F55, R-F58, R-F64, R-N6, R-N9 to R-N11, R-N22, R-N23 | scenarios: two_states/scenario.toml, two_states/golden.hashes; engine: systems/market.rs, tick.rs; engine tests: market_properties.rs; data tests: trade_two_states.rs (new), determinism.rs, economic_bands.rs; cli: main.rs, report.rs; docs: BACKEND_SCHEMA, TRADE, ECONOMY_SYSTEM, ONBOARDING, MILESTONE_5, workbooks/m5 | `trade_narrows_gaps_and_both_markets_gain`, `spending_by_market_sums_to_the_totals`, `report_shows_a_market_on_its_own`, `a_world_that_trades_invests_and_riots_is_independent_of_thread_count` | 3 / 5 / 10 | none |
-| M5-6 (3) | Construction recipes and project state | M5-1 | R-F22, R-F23, R-F32, R-F57, R-F59, R-N5, R-N8, R-N11, R-N12, R-N16, R-N17, R-N19, R-N23, R-D7, R-D11 | engine: defs.rs, world.rs; engine tests: investment.rs (new), common/mod.rs, demographics.rs, mobility.rs; data: schema.rs, lib.rs, snapshot.rs, bench.rs; data tests: validation.rs; content: production.toml; docs: DATA_FORMAT, BACKEND_SCHEMA, INVESTMENT, DATA_MODEL_M5_M6, MILESTONE_5, workbooks/m5 | `expansion_recipes_load`, `bad_recipes_are_refused`, `one_project_per_producer`, `producer_rows_are_stable`, `crafted_merchants_and_projects_are_refused`, `replicas_copy_the_trade_and_investment_tables` | 2 / 3 / 5 | none |
-| M5-7 (6) | Producer expansion and construction clearing | M5-1, M5-6, M5-11 | R-F24 to R-F27, R-F32, R-F41, R-F57, R-F59, R-F65, R-F67, R-N2 to R-N5, R-N9 to R-N11, R-N18, R-N20, R-N22 to R-N27, R-D5 | engine: systems/investment.rs (new), systems/mod.rs, systems/market.rs, systems/firms.rs, tick.rs, defs.rs; engine tests: investment.rs, conservation.rs, extremes.rs, common/mod.rs; data: schema.rs, lib.rs, bench.rs; data tests: validation.rs, economic_bands.rs; cli: main.rs, report.rs; content: rules.toml; scenarios: mini_valley/defs/rules.toml, two_states/golden.hashes; docs: DECISIONS, ARCHITECTURE, BACKEND_SCHEMA, DATA_FORMAT, INVESTMENT, ECONOMY_SYSTEM, ONBOARDING, MILESTONE_5, workbooks/m5 | `no_project_without_profit`, `no_project_without_spare_workers`, `no_project_for_strikers`, `no_project_without_cash`, `a_project_starts_when_all_hold`, `a_project_orders_every_day_until_delivered`, `delivery_then_month_end_adds_capacity`, `dividends_leave_the_project_reserve`, `construction_leaves_inputs_and_wages`, `investment_rules_are_checked`, `a_replica_of_one_region_hashes_like_its_base`, `money_conserved_through_investment`, `goods_are_accounted_exactly`, `new_columns_follow_todays` | 5 / 8 / 14 | none |
-| M5-8 (11) | Founding new producers, and FoundProducer | M5-4, M5-7 | R-F28 to R-F30, R-F32, R-F41 to R-F44, R-F57, R-F59, R-F65, R-F67, R-N2, R-N3, R-N5, R-N7 to R-N9, R-N11, R-N12, R-N15 to R-N19, R-N21 to R-N26, R-D5, R-D12, R-D13, R-D16 | engine: systems/investment.rs, systems/firms.rs, world.rs, command.rs, defs.rs, tick.rs; engine tests: investment.rs, commands.rs, conservation.rs, common/mod.rs; data: schema.rs, lib.rs, save.rs, snapshot.rs, bench.rs; data tests: saves.rs, validation.rs; cli: report.rs; schemas: common.fbs; protocol: src/generated, src/lib.rs, tests/roundtrip.rs; server: request.rs, commands.rs, hostile.rs; server tests: common/mod.rs, session.rs, session_replay.rs; client: pax_keys.gd; content: rules.toml; scenarios: mini_valley/defs/rules.toml, two_states/golden.hashes; docs: DECISIONS, ARCHITECTURE, BACKEND_SCHEMA, DATA_FORMAT, NETWORK_PROTOCOL, INVESTMENT, ECONOMY_SYSTEM, ONBOARDING, MILESTONE_5, workbooks/m5 | `found_producer_is_validated`, `owners_found_a_producer_where_workers_wait`, `founding_moves_exactly_its_cost`, `a_request_founds_at_the_month_end_when_funded`, `an_unfunded_request_is_dropped`, `state_producers_pay_their_treasury`, `requests_are_answered_at_the_month_end`, `a_founding_logged_with_a_full_treasury_loads`, `new_commands_round_trip_through_a_save`, `investment_rules_are_checked`, `new_commands_are_checked_in_order`, `found_producer`, `money_conserved_through_investment` | 5 / 8 / 14 | none |
-| M5-9 (9) | Capacity depreciation | M5-7 | R-F31, R-F32, R-F41, R-F57, R-F59, R-F65, R-F67, R-N8, R-N9, R-N11, R-N12, R-N16, R-N17, R-N22, R-N23, R-N25, R-N26, R-D5, R-D12 | engine: systems/investment.rs, world.rs, defs.rs, tick.rs; engine tests: investment.rs, common/mod.rs; data: schema.rs, lib.rs, snapshot.rs, bench.rs; data tests: validation.rs; cli: report.rs; content: rules.toml; scenarios: mini_valley/defs/rules.toml, two_states/golden.hashes; docs: DECISIONS, ARCHITECTURE, BACKEND_SCHEMA, DATA_FORMAT, INVESTMENT, ONBOARDING, MILESTONE_5, workbooks/m5 | `idle_capacity_shrinks`, `capacity_in_use_never_does`, `a_new_column_is_hashed_once_it_differs`, `investment_rules_are_checked` | 2 / 3.5 / 6 | none |
-| M5-10 (15) | Growth verification on the complete M5 economy | M5-5, M5-7, M5-8, M5-9, M5-12, M5-16 | R-F33, R-N9, R-N22, R-N23 | data tests: growth.rs (new), economic_bands.rs; content: production.toml, rules.toml; scenarios: two_states/golden.hashes; docs: INVESTMENT, MILESTONE_5, workbooks/m5 | `investment_grows_two_states` | 2 / 4 / 10 | none |
-| M5-11 (4) | Deterministic strikes | M5-1 | R-F34 to R-F36, R-F40, R-F41, R-F57, R-F59, R-F67, R-N2, R-N3, R-N5, R-N9 to R-N11, R-N18, R-N20, R-N22 to R-N24, R-D6 | engine: systems/unrest.rs (new), systems/mod.rs, systems/labor.rs, systems/firms.rs, world.rs, defs.rs, tick.rs; engine tests: unrest.rs (new), labour_report.rs, conservation.rs, common/mod.rs; data: schema.rs, lib.rs; data tests: validation.rs, economic_bands.rs, unrest_two_states.rs (new); cli: report.rs; content: rules.toml; scenarios: mini_valley/defs/rules.toml, two_states/golden.hashes; docs: DECISIONS, ARCHITECTURE, BACKEND_SCHEMA, DATA_FORMAT, POLITICS_SYSTEM, POP_SYSTEM, ECONOMY_SYSTEM, REBELLIONS, ONBOARDING, MILESTONE_5, workbooks/m5 | `strikes_cut_labour_and_output`, `strikers_get_no_wage`, `strikers_are_neither_employed_nor_unemployed`, `unrest_rules_are_checked`, `a_high_tax_causes_riots_that_end_when_it_falls`, `money_conserved_through_unrest`, `new_columns_follow_todays` | 3 / 5 / 9 | none |
-| M5-12 (7) | Monthly riots and security transfers | M5-1, M5-11 | R-F37 to R-F41, R-F57, R-F59, R-F66, R-F67, R-N2 to R-N6, R-N9, R-N11, R-N18, R-N22 to R-N24, R-N26, R-D6 | engine: systems/unrest.rs, tick.rs, defs.rs; engine tests: unrest.rs, conservation.rs, common/mod.rs; data: schema.rs, lib.rs; data tests: validation.rs, unrest_two_states.rs, determinism.rs; cli: report.rs; content: rules.toml; scenarios: mini_valley/defs/rules.toml, two_states/golden.hashes; docs: DECISIONS, ARCHITECTURE, BACKEND_SCHEMA, DATA_FORMAT, POLITICS_SYSTEM, REBELLIONS, ONBOARDING, MILESTONE_5, workbooks/m5 | `riots_destroy_output_stock_never_money`, `the_security_transfer_is_exactly_what_the_treasury_pays`, `a_stateless_province_riots_without_a_transfer`, `the_riot_transfer_has_no_direct_relief`, `unrest_rules_are_checked`, `money_conserved_through_unrest`, `goods_are_accounted_exactly`, `a_high_tax_causes_riots_that_end_when_it_falls`, `a_world_that_trades_invests_and_riots_is_independent_of_thread_count` | 3 / 4.5 / 8 | none |
-| M5-13 (12) | Trade and investment views on the wire, and the bridge | M5-5, M5-8 | R-F44 to R-F46, R-F48, R-N14, R-N15, R-N18, R-N20, R-N21, R-N23 | engine: views.rs, systems/investment.rs; engine tests: views.rs; schemas: client.fbs, server.fbs; protocol: src/generated, src/lib.rs, tests/roundtrip.rs, tests/size_budget.rs, tests/common/mod.rs; server: view.rs, game.rs, sim.rs, request.rs, encode.rs, hostile.rs; server tests: views.rs, common/mod.rs; bridge: src/encode.rs, src/connection.rs, src/decode.rs, src/keys.rs, src/lib.rs, tests/client.rs; client: pax_keys.gd; docs: DECISIONS, NETWORK_PROTOCOL, BACKEND_SCHEMA, PERFORMANCE, MILESTONE_5, workbooks/m5 | `trade_route_view_matches_the_day`, `investment_ledger_view_matches_the_world`, `subscriptions_naming_missing_ids_are_refused`, `the_new_views_keep_their_caps_and_count_the_rest`, `a_subscribe_naming_no_nation_says_goodbye`, `a_1_6_client_reads_every_later_update`, `update_with_every_view_fits_its_budget` | 5 / 8 / 14 | none |
-| M5-14 (14) | Godot trade and construction panels and the trade flow map mode | M5-13 | R-F44, R-F47, R-F49 to R-F53, R-N15, R-N18, R-N23 | engine: views.rs; server: view.rs; schemas: common.fbs; protocol: src/generated, src/lib.rs, tests/roundtrip.rs; bridge: src/keys.rs, tests/client.rs; client: pax_keys.gd, main.gd, smoke.gd, ui/trade_panel.gd (new), ui/construction_panel.gd (new), ui/map_modes.gd, ui/map_colors.gd, README.md; docs: NETWORK_PROTOCOL, BACKEND_SCHEMA, ONBOARDING, MILESTONE_5, workbooks/m5 | `every_map_mode_has_one_value_per_province`, `trade_flow_is_sales_less_purchases_by_value` | 4 / 7 / 13 | none |
-| M5-15 (16) | Replay gate, benchmarks and performance record | every other task | R-N6, R-N7, R-N9 to R-N11, R-N13, R-N23, R-N26, R-N27 | server tests: session_replay.rs; data tests: determinism.rs; docs: PERFORMANCE, MILESTONE_5, workbooks/m5 | `a_world_that_trades_invests_and_riots_is_independent_of_thread_count` | 2.5 / 4 / 8 | none |
-| M5-16 (13) | Dynamic merchant entry | M5-4, M5-8 | R-F13, R-F16, R-F41, R-F57, R-F59, R-F63, R-F67, R-N2, R-N3, R-N8, R-N9, R-N11, R-N12, R-N16, R-N17, R-N19, R-N22, R-N23, R-N25, R-N26, R-D4 | engine: systems/trade.rs, world.rs, defs.rs, tick.rs; engine tests: trade.rs, conservation.rs, common/mod.rs; data: schema.rs, lib.rs, snapshot.rs, bench.rs; data tests: validation.rs; cli: report.rs; content: rules.toml; scenarios: mini_valley/defs/rules.toml, two_states/golden.hashes; docs: DECISIONS, ARCHITECTURE, BACKEND_SCHEMA, DATA_FORMAT, TRADE, ONBOARDING, MILESTONE_5, workbooks/m5 | `a_persistent_gap_founds_a_merchant`, `entry_never_charters`, `equal_prices_mean_no_trade_and_no_entry`, `money_conserved_through_trade`, `trade_rules_are_checked` | 3 / 4.5 / 8 | none |
+| M5-1 (1) | Bench's month-end timing, then the route loader and the trade horizon | none | R-F1 to R-F4, R-F56, R-F57, R-F59, R-N5, R-N8, R-N11 to R-N13, R-N17 to R-N20, R-N23, R-N24, R-N26, R-D1, R-D2, R-D4, R-D14 | cli: main.rs; engine: horizon.rs (new), lib.rs, world.rs, defs.rs; engine tests: trade.rs (new), common/mod.rs; data: schema.rs, lib.rs, snapshot.rs, bench.rs; data tests: validation.rs; content: rules.toml; scenarios: mini_valley/defs/rules.toml; docs: DECISIONS, DATA_FORMAT, BACKEND_SCHEMA, MAP_AND_LOGISTICS, TRADE, DATA_MODEL_M5_M6, ONBOARDING, MILESTONE_5, workbooks/m5 | `bench_times_the_first_month_end_day`, `bench_has_one_ms_per_day_line`, `horizon_matches_a_hand_computed_one`, `horizon_is_independent_of_link_order`, `a_route_takes_its_links_retention_and_whole_capacity`, `horizon_build_at_scale`, `links_load_both_ways`, `routes_load_with_their_tuning`, `bad_links_are_refused`, `bad_routes_are_refused`, `trade_rules_are_checked`, `a_restored_world_has_the_scenarios_routes`, `replicas_copy_the_trade_and_investment_tables` | 1.8 / 3.8 / 11.45 | none |
+| M5-2 (2) | Merchants and Cargo tables and the arrival phase | M5-1 | R-F5, R-F10, R-F41, R-F54, R-F67, R-N1, R-N3 to R-N5, R-N8, R-N10 to R-N12, R-N16 to R-N19, R-N23, R-N24, R-D9, R-D10, R-D15 | engine: systems/trade.rs (new), systems/mod.rs, world.rs, hash.rs, tick.rs; engine tests: trade.rs, conservation.rs, common/mod.rs; data: snapshot.rs, bench.rs; cli: report.rs; docs: DECISIONS, ARCHITECTURE, BACKEND_SCHEMA, TRADE, DATA_MODEL_M5_M6, ONBOARDING, MILESTONE_5, workbooks/m5 | `cargo_lands_next_day_less_the_iceberg_share`, `tariffs_reach_the_importing_treasury`, `merchant_tables_keep_their_invariants`, `merchant_rows_are_stable`, `market_figures_sum_their_routes`, `a_new_table_is_hashed_once_it_has_rows`, `a_snapshot_restores_the_exact_state_and_it_runs_on_identically`, `crafted_merchants_and_projects_are_refused`, `money_conserved_through_trade`, `goods_are_accounted_exactly`, `new_columns_follow_todays`, `replicas_copy_the_trade_and_investment_tables` | 1.8 / 3.8 / 11.45 | none |
+| M5-3 (5) | Merchant market orders, arbitrage and SetTariff | M5-2, M5-11 | R-F7 to R-F9, R-F11 to R-F13, R-F17 to R-F19, R-F21, R-F41 to R-F44, R-F54, R-F67, R-N2 to R-N5, R-N7, R-N8, R-N10 to R-N12, R-N15 to R-N18, R-N21, R-N23, R-N24, R-D8, R-D9, R-D13 | engine: systems/market.rs, systems/trade.rs, world.rs, command.rs, tick.rs; engine tests: trade.rs, commands.rs, conservation.rs, extremes.rs, common/mod.rs; data: schema.rs, lib.rs, save.rs, snapshot.rs, bench.rs; data tests: saves.rs, validation.rs; cli: report.rs; schemas: common.fbs; protocol: src/generated, src/lib.rs, tests/roundtrip.rs; server: request.rs, commands.rs, hostile.rs; server tests: common/mod.rs, session.rs, session_replay.rs; client: pax_keys.gd; docs: DECISIONS, ARCHITECTURE, BACKEND_SCHEMA, DATA_FORMAT, NETWORK_PROTOCOL, ECONOMY_SYSTEM, TRADE, DATA_MODEL_M5_M6, ONBOARDING, HOSTING, MILESTONE_5, workbooks/m5 | `export_orders_follow_the_flow_rule`, `imports_are_offered_at_landed_cost_plus_margin`, `exporters_and_locals_get_the_same_fraction`, `settlement_books_purchases_and_sales`, `a_merchant_never_owes_more_than_its_cash`, `capacity_binds_however_many_merchants`, `equal_prices_mean_no_trade_and_no_entry`, `tariffs_apply_only_between_nations`, `a_higher_tariff_cuts_the_flow_and_the_treasury_gets_it_all`, `prices_converge_to_the_friction_band`, `market_figures_sum_their_routes`, `set_tariff_is_validated`, `new_commands_round_trip_through_a_save`, `another_format_is_refused_by_name`, `command_logs_take_the_new_commands`, `new_commands_are_checked_in_order`, `set_tariff`, `a_snapshot_restores_the_exact_state_and_it_runs_on_identically`, `crafted_merchants_and_projects_are_refused`, `replicas_copy_the_trade_and_investment_tables`, `money_conserved_through_trade`, `goods_are_accounted_exactly`, `new_columns_follow_todays` | 2.15 / 5.05 / 12.95 | none |
+| M5-4 (8) | Merchant kinds, dividends, seeding and winding up | M5-3, M5-12 | R-F5, R-F6, R-F14, R-F15, R-F41, R-F57, R-F59, R-F63, R-F67, R-N2, R-N3, R-N5, R-N8, R-N10 to R-N12, R-N16, R-N17, R-N19, R-N23 to R-N26, R-D3, R-D4, R-D9, R-D15 | engine: systems/trade.rs, world.rs, hash.rs, tick.rs, defs.rs; engine tests: trade.rs, conservation.rs, common/mod.rs; data: schema.rs, lib.rs, snapshot.rs, bench.rs; data tests: validation.rs, content_stability.rs; cli: report.rs; content: professions.toml, rules.toml; scenarios: mini_valley/defs/rules.toml; docs: DECISIONS, ARCHITECTURE, BACKEND_SCHEMA, DATA_FORMAT, ECONOMY_SYSTEM, TRADE, ONBOARDING, MILESTONE_5, workbooks/m5 | `each_kind_pays_its_owner`, `a_loss_maker_winds_up_and_returns_its_cash`, `an_idle_merchant_is_never_wound_up`, `settlement_books_purchases_and_sales`, `merchants_seed_by_route_and_kind`, `bad_merchants_are_refused`, `trade_rules_are_checked`, `money_conserved_through_trade`, `crafted_merchants_and_projects_are_refused`, `replicas_copy_the_trade_and_investment_tables`, `a_replica_of_one_region_hashes_like_its_base`, `new_columns_follow_todays` | 1.8 / 3.8 / 11.45 | none |
+| M5-5 (10) | Trade in two_states and the comparative-advantage test | M5-4, M5-9 | R-F20, R-F55, R-F58, R-F64, R-N6, R-N9 to R-N11, R-N22, R-N23 | scenarios: two_states/scenario.toml, two_states/golden.hashes; content: rules.toml; engine: systems/market.rs, tick.rs; engine tests: market_properties.rs; data tests: trade_two_states.rs (new), determinism.rs, economic_bands.rs; cli: main.rs, report.rs; docs: BACKEND_SCHEMA, TRADE, ECONOMY_SYSTEM, ONBOARDING, MILESTONE_5, workbooks/m5 | `trade_narrows_gaps_and_both_markets_gain`, `spending_by_market_sums_to_the_totals`, `report_shows_a_market_on_its_own`, `a_world_that_trades_invests_and_riots_is_independent_of_thread_count` | 1.8 / 3.8 / 13.45 | none |
+| M5-6 (3) | Construction recipes and project state | M5-1, M5-2 | R-F22, R-F23, R-F32, R-F57, R-F59, R-N5, R-N8, R-N11, R-N12, R-N16, R-N17, R-N19, R-N23, R-D7, R-D11 | engine: defs.rs, world.rs; engine tests: investment.rs (new), common/mod.rs, demographics.rs, mobility.rs; data: schema.rs, lib.rs, snapshot.rs, bench.rs; data tests: validation.rs; content: production.toml; docs: DATA_FORMAT, BACKEND_SCHEMA, INVESTMENT, DATA_MODEL_M5_M6, MILESTONE_5, workbooks/m5 | `expansion_recipes_load`, `bad_recipes_are_refused`, `one_project_per_producer`, `producer_rows_are_stable`, `crafted_merchants_and_projects_are_refused`, `replicas_copy_the_trade_and_investment_tables` | 1.2 / 2.85 / 9.55 | none |
+| M5-7 (6) | Producer expansion and construction clearing | M5-1, M5-6, M5-11, M5-3 | R-F24 to R-F27, R-F32, R-F41, R-F57, R-F59, R-F65, R-F67, R-N2 to R-N5, R-N9 to R-N11, R-N18, R-N20, R-N22 to R-N27, R-D5 | engine: systems/investment.rs (new), systems/mod.rs, systems/market.rs, systems/firms.rs, tick.rs, defs.rs; engine tests: investment.rs, conservation.rs, extremes.rs, common/mod.rs; data: schema.rs, lib.rs, bench.rs; data tests: validation.rs, economic_bands.rs; cli: main.rs, report.rs; content: rules.toml; scenarios: mini_valley/defs/rules.toml, two_states/golden.hashes; docs: DECISIONS, ARCHITECTURE, BACKEND_SCHEMA, DATA_FORMAT, INVESTMENT, ECONOMY_SYSTEM, ONBOARDING, MILESTONE_5, workbooks/m5 | `no_project_without_profit`, `no_project_without_spare_workers`, `no_project_for_strikers`, `no_project_without_cash`, `a_project_starts_when_all_hold`, `a_project_orders_every_day_until_delivered`, `delivery_then_month_end_adds_capacity`, `dividends_leave_the_project_reserve`, `construction_leaves_inputs_and_wages`, `investment_rules_are_checked`, `a_replica_of_one_region_hashes_like_its_base`, `money_conserved_through_investment`, `goods_are_accounted_exactly`, `new_columns_follow_todays` | 2.15 / 5.05 / 12.95 | none |
+| M5-8 (11) | Founding new producers, and FoundProducer | M5-4, M5-7, M5-5 | R-F28 to R-F30, R-F32, R-F41 to R-F44, R-F57, R-F59, R-F65, R-F67, R-N2, R-N3, R-N5, R-N7 to R-N9, R-N11, R-N12, R-N15 to R-N19, R-N21 to R-N26, R-D5, R-D12, R-D13, R-D16 | engine: systems/investment.rs, systems/firms.rs, world.rs, command.rs, defs.rs, tick.rs; engine tests: investment.rs, commands.rs, conservation.rs, common/mod.rs; data: schema.rs, lib.rs, save.rs, snapshot.rs, bench.rs; data tests: saves.rs, validation.rs, economic_bands.rs; cli: report.rs; schemas: common.fbs; protocol: src/generated, src/lib.rs, tests/roundtrip.rs; server: request.rs, commands.rs, hostile.rs; server tests: common/mod.rs, session.rs, session_replay.rs; client: pax_keys.gd; content: rules.toml; scenarios: mini_valley/defs/rules.toml, two_states/golden.hashes; docs: DECISIONS, ARCHITECTURE, BACKEND_SCHEMA, DATA_FORMAT, NETWORK_PROTOCOL, INVESTMENT, DATA_MODEL_M5_M6, ECONOMY_SYSTEM, ONBOARDING, MILESTONE_5, workbooks/m5 | `found_producer_is_validated`, `owners_found_a_producer_where_workers_wait`, `owners_found_only_the_types_they_own`, `founding_moves_exactly_its_cost`, `a_request_founds_at_the_month_end_when_funded`, `an_unfunded_request_is_dropped`, `state_producers_pay_their_treasury`, `requests_are_answered_at_the_month_end`, `a_founding_logged_with_a_full_treasury_loads`, `new_commands_round_trip_through_a_save`, `investment_rules_are_checked`, `crafted_merchants_and_projects_are_refused`, `replicas_copy_the_trade_and_investment_tables`, `a_replica_of_one_region_hashes_like_its_base`, `new_commands_are_checked_in_order`, `found_producer`, `money_conserved_through_investment` | 2.15 / 5.05 / 12.95 | none |
+| M5-9 (9) | Capacity depreciation | M5-7, M5-4 | R-F31, R-F32, R-F41, R-F57, R-F59, R-F65, R-F67, R-N8, R-N9, R-N11, R-N12, R-N16, R-N17, R-N22, R-N23, R-N25, R-N26, R-D5, R-D12 | engine: systems/investment.rs, world.rs, defs.rs, tick.rs; engine tests: investment.rs, common/mod.rs; data: schema.rs, lib.rs, snapshot.rs, bench.rs; data tests: validation.rs, economic_bands.rs; cli: report.rs; content: rules.toml; scenarios: mini_valley/defs/rules.toml, two_states/golden.hashes; docs: DECISIONS, ARCHITECTURE, BACKEND_SCHEMA, DATA_FORMAT, INVESTMENT, DATA_MODEL_M5_M6, ONBOARDING, MILESTONE_5, workbooks/m5 | `idle_capacity_shrinks`, `capacity_in_use_never_does`, `a_shrink_leaves_stocks_stable`, `a_new_column_is_hashed_once_it_differs`, `investment_rules_are_checked` | 1.2 / 2.85 / 9.55 | none |
+| M5-10 (15) | Growth verification on the complete M5 economy | M5-5, M5-7, M5-8, M5-9, M5-12, M5-16, M5-14 | R-F33, R-N9, R-N22, R-N23 | data tests: growth.rs (new), economic_bands.rs; content: production.toml, rules.toml; scenarios: two_states/golden.hashes; docs: INVESTMENT, MILESTONE_5, workbooks/m5 | `investment_grows_two_states` | 1.2 / 3.35 / 12.55 | none |
+| M5-11 (4) | Deterministic strikes | M5-1, M5-6 | R-F34 to R-F36, R-F40, R-F41, R-F57, R-F59, R-F67, R-N2, R-N3, R-N5, R-N9 to R-N11, R-N18, R-N20, R-N22 to R-N24, R-D6 | engine: systems/unrest.rs (new), systems/mod.rs, systems/labor.rs, systems/firms.rs, world.rs, defs.rs, tick.rs; engine tests: unrest.rs (new), labour_report.rs, conservation.rs, common/mod.rs; data: schema.rs, lib.rs; data tests: validation.rs, economic_bands.rs, unrest_two_states.rs (new); cli: report.rs; content: rules.toml; scenarios: mini_valley/defs/rules.toml, two_states/golden.hashes; docs: DECISIONS, ARCHITECTURE, BACKEND_SCHEMA, DATA_FORMAT, POLITICS_SYSTEM, POP_SYSTEM, ECONOMY_SYSTEM, REBELLIONS, ONBOARDING, MILESTONE_5, workbooks/m5 | `strikes_cut_labour_and_output`, `strikers_get_no_wage`, `wages_keep_their_floor_while_workers_strike`, `strikers_are_neither_employed_nor_unemployed`, `unrest_rules_are_checked`, `a_high_tax_causes_riots_that_end_when_it_falls`, `money_conserved_through_unrest`, `new_columns_follow_todays` | 1.8 / 3.8 / 11.45 | none |
+| M5-12 (7) | Monthly riots and security transfers | M5-1, M5-11, M5-7 | R-F37 to R-F41, R-F57, R-F59, R-F66, R-F67, R-N2 to R-N6, R-N9, R-N11, R-N18, R-N22 to R-N24, R-N26, R-D6 | engine: systems/unrest.rs, tick.rs, defs.rs; engine tests: unrest.rs, conservation.rs, common/mod.rs; data: schema.rs, lib.rs; data tests: validation.rs, unrest_two_states.rs, determinism.rs, economic_bands.rs; cli: report.rs; content: rules.toml; scenarios: mini_valley/defs/rules.toml, two_states/golden.hashes; docs: DECISIONS, ARCHITECTURE, BACKEND_SCHEMA, DATA_FORMAT, POLITICS_SYSTEM, REBELLIONS, ONBOARDING, MILESTONE_5, workbooks/m5 | `riots_destroy_output_stock_never_money`, `the_security_transfer_is_exactly_what_the_treasury_pays`, `a_stateless_province_riots_without_a_transfer`, `the_riot_transfer_has_no_direct_relief`, `when_every_province_riots_the_treasury_pays_the_whole_budget`, `unrest_rules_are_checked`, `money_conserved_through_unrest`, `goods_are_accounted_exactly`, `a_high_tax_causes_riots_that_end_when_it_falls`, `a_world_that_trades_invests_and_riots_is_independent_of_thread_count` | 1.8 / 3.8 / 11.45 | none |
+| M5-13 (12) | Trade and investment views on the wire, and the bridge | M5-5, M5-8 | R-F44 to R-F46, R-F48, R-N14, R-N15, R-N18, R-N20, R-N21, R-N23 | engine: views.rs, systems/investment.rs; engine tests: views.rs; schemas: client.fbs, server.fbs; protocol: src/generated, src/lib.rs, tests/roundtrip.rs, tests/size_budget.rs, tests/common/mod.rs; server: view.rs, game.rs, sim.rs, request.rs, encode.rs, hostile.rs; server tests: views.rs, common/mod.rs; bridge: src/encode.rs, src/connection.rs, src/decode.rs, src/keys.rs, src/lib.rs, tests/client.rs; client: pax_keys.gd; docs: DECISIONS, NETWORK_PROTOCOL, BACKEND_SCHEMA, PERFORMANCE, MILESTONE_5, workbooks/m5 | `trade_route_view_matches_the_day`, `investment_ledger_view_matches_the_world`, `subscriptions_naming_missing_ids_are_refused`, `the_new_views_keep_their_caps_and_count_the_rest`, `a_subscribe_naming_no_nation_says_goodbye`, `a_1_6_client_reads_every_later_update`, `update_with_every_view_fits_its_budget` | 2.15 / 5.05 / 12.95 | none |
+| M5-14 (14) | Godot trade and construction panels and the trade flow map mode | M5-13, M5-16 | R-F44, R-F47, R-F49 to R-F53, R-N15, R-N18, R-N23 | engine: views.rs; server: view.rs; schemas: common.fbs; protocol: src/generated, src/lib.rs, tests/roundtrip.rs; bridge: src/keys.rs, tests/client.rs; client: pax_keys.gd, main.gd, smoke.gd, ui/trade_panel.gd (new), ui/construction_panel.gd (new), ui/map_modes.gd, ui/map_colors.gd, README.md; docs: NETWORK_PROTOCOL, BACKEND_SCHEMA, ONBOARDING, MILESTONE_5, workbooks/m5 | `every_map_mode_has_one_value_per_province`, `trade_flow_is_sales_less_purchases_by_value` | 2.15 / 5.55 / 14.95 | none |
+| M5-15 (16) | Replay gate, benchmarks and performance record | M5-1, M5-2, M5-3, M5-4, M5-5, M5-6, M5-7, M5-8, M5-9, M5-10, M5-11, M5-12, M5-13, M5-14, M5-16 | R-N6, R-N7, R-N9 to R-N11, R-N13, R-N23, R-N26, R-N27 | server tests: session_replay.rs; data tests: determinism.rs; docs: PERFORMANCE, MILESTONE_5, workbooks/m5 | `a_world_that_trades_invests_and_riots_is_independent_of_thread_count` | 1.2 / 2.85 / 9.55 | none |
+| M5-16 (13) | Dynamic merchant entry | M5-4, M5-8, M5-13 | R-F13, R-F16, R-F41, R-F57, R-F59, R-F63, R-F67, R-N2, R-N3, R-N8, R-N9, R-N11, R-N12, R-N16, R-N17, R-N19, R-N22, R-N23, R-N25, R-N26, R-D4 | engine: systems/trade.rs, world.rs, defs.rs, tick.rs; engine tests: trade.rs, conservation.rs, common/mod.rs; data: schema.rs, lib.rs, snapshot.rs, bench.rs; data tests: validation.rs, economic_bands.rs; cli: report.rs; content: rules.toml; scenarios: mini_valley/defs/rules.toml, two_states/golden.hashes; docs: DECISIONS, ARCHITECTURE, BACKEND_SCHEMA, DATA_FORMAT, TRADE, ONBOARDING, MILESTONE_5, workbooks/m5 | `a_persistent_gap_founds_a_merchant`, `entry_never_charters`, `equal_prices_mean_no_trade_and_no_entry`, `money_conserved_through_trade`, `trade_rules_are_checked`, `crafted_merchants_and_projects_are_refused`, `replicas_copy_the_trade_and_investment_tables`, `a_replica_of_one_region_hashes_like_its_base` | 1.8 / 3.8 / 11.45 | none |
 
 ### How the estimates were made
 
-In agent-hours: the time one agent works on the task, from its refresh to its merge. Each task's cycle has fixed steps and a variable build; the step times are this run's and the last run's:
+In agent-hours: the time from a task's clock check to its merge and report, while the workflow runs one agent at a time. No task cycle of this workflow has run yet, so each task's time is modelled from the agents the workflow runs for it (`.claude/workflows/sdlc-overnight.js` at `f911fa7`), with each step's time taken from what was measured: this run's own agents (`out/m5-run/LOG.md`), the gate on this machine, CI and the critic on M3's and M4's pull requests, and M3's and M4's review rounds.
 
-| Step (the workflow's task cycle) | Typical time | Evidence |
+| Step | The workflow's agents | Evidence | o / m / p hours |
+|---|---|---|---|
+| Start and refresh | the clock (`:1510`); a planner (effort high) then a reviewer (medium), up to two rounds (`:1128-1177`) | This run's planner revisions took 17 to 23 minutes and its reviews 4 to 19, median 8 (LOG.md, 01:41 to 08:08); a refresh revises one task's contract, not a stage | 0.25 / 0.45 / 1.2 |
+| Build | the worker, which runs the gate itself, retried once if it fails (`:1179-1212`, `:1517-1522`) | M4's single agent built twelve pull requests of 13 to 1,730 added lines in 4 hours 22 minutes, keeping its context and building the next while the last was in review (`out/m4-run/LOG.md`; `gh pr list`); a cold worker first reads its brief, the design and the code, as this run's first drafts did (32 to 50 minutes a stage), and runs the gate two to four times | small 0.45 / 0.75 / 2; medium 0.65 / 1.1 / 3; large 1 / 1.75 / 4.5 |
+| Gate | the gate agent, then up to three gate-fix agents (`:1214-1249`) | The full gate (`gate.full`) took 3 minutes 6 seconds on this machine with the run's shared build cache; unchanged, the tests take 30 s in debug and 19 s in release (08:36) | 0.07 / 0.12 / 0.75 |
+| Local critic | the critic (effort high), a remediation agent and the gate, up to two rounds, then the gate again (`:1287-1311`, `:1530-1535`) | The CI critic found DEBT in the first review of nearly every M3 and M4 code pull request (their logs); a review like this run's and a fix like a revision | 0.2 / 0.55 / 1.1 |
+| Audit and publish | the commit auditor, up to two rewords, and the publisher (`:1251-1279`, `:1353-1374`) | Copying and formatting agents | 0.1 / 0.15 / 0.4 |
+| A review round with findings | the watcher, the clock, a remediation agent (which runs the gate), the gate agent, the auditor and the pusher (`:1376-1411`, `:1426-1503`) | CI took 0.8 to 6.4 minutes and the Critic 1.3 to 5.4 on M3's and M4's pull requests (`gh run list`), CI once 13.8 and once 22.7; the fix and the two gate runs as above | 0.4 / 0.6 / 0.9 each |
+| How many such rounds | — | M4's twelve pull requests needed 0 to 5 rounds with findings, median 2, and M3's 0 to 4 (their logs); M5's larger tasks touch more of the contract | small 0 / 1 / 4; medium 1 / 2 / 5; large 1 / 3 / 5 |
+| The last round and the merge | the watcher and the merge agent (`:1438-1452`), and an update agent if the branch is behind (`:1459-1471`) | CI and critic times as above | 0.08 / 0.15 / 0.35 |
+| Report | the reporter (`:1545-1563`) | — | 0.05 / 0.08 / 0.15 |
+
+Summed, a **small** task (M5-6, M5-9, M5-15: one table, column or record, a few tests, no wire) takes 1.2 / 2.85 / 9.55 hours; a **medium** one (M5-1, M5-2, M5-4, M5-11, M5-12, M5-16) 1.8 / 3.8 / 11.45; a **large** one crossing engine, formats, wire and server or client (M5-3, M5-7, M5-8, M5-13) 2.15 / 5.05 / 12.95. Three tasks carry more: M5-5's pessimistic value 2 hours more, for tuning its route within its levers (13.45, B9); M5-10's likely value half an hour more and its pessimistic 3, for recalibrating investment (3.35 / 12.55); M5-14's half an hour and 2 hours more, for the headless Godot test (5.55 / 14.95). The plan PR is estimated at 0.5 / 1 / 3 hours, the close-out at the workflow's 1 / 1 / 2.
+
+**Why a task takes hours when an M4 pull request took minutes.** An M4 pull request took 4 to 54 minutes from opening to merge, median about 23 (`gh pr list`), with review rounds 5 to 10 minutes apart. That run was one agent: it kept its context from task to task, built the next task while CI ran on the last (M4-3 was committed locally while #52 was in review, `out/m4-run/LOG.md`, 22:55), and fixed a finding itself. This workflow runs separate agents one after another, and nothing overlaps: one task is ever ready (B2).
+
+| | An M4 pull request | A task cycle here (medium, likely) |
 |---|---|---|
-| Refresh: planner, then reviewer | 0.3 to 0.6 h | This run's planning rounds took 17 to 51 minutes, and its reviews 4 to 17 (`out/m5-run/LOG.md`, 01:01 to 06:56) |
-| Build: documents, tests, code | 1 to 6 h by size | The files and tests each task names |
-| Gate and gate-fix | 0.2 to 0.5 h | Ten commands, both test suites among them; a 20-year `two_states` run takes 0.38 s in release |
-| Local critic, up to two rounds | 0.2 to 0.5 h | |
-| Commit audit and publish | 0.1 to 0.2 h | |
-| Each review round: watch, remediate, push | 0.4 to 0.7 h | CI took 2 to 6 minutes and the Critic 1 to 4 on recent pull requests, once 23 (`gh run list`); M4's pull requests took two to six critic rounds (`out/m4-run/REPORT.md`, Notes) |
-| Merge and report | about 0.1 h | |
+| Before the pull request | the build, overlapped with the last task's review | refresh 0.45 h, build 1.1 h, gate 0.12 h, local critic 0.55 h, audit and publish 0.15 h |
+| A review round | 5 to 10 minutes: fix and push | about 36 minutes: the watch, a cold remediation agent that runs the gate, the gate agent, the auditor and the pusher |
+| Rounds | 0 to 5, median 2 | 2, plus the last watch and the merge |
+| In all | 4 to 54 minutes, median about 23 | 3.8 hours |
 
-That puts a small task (M5-6, M5-9: one table or column, a few tests, no wire) at about 3 hours, a medium one (M5-1, M5-2, M5-4, M5-11, M5-12, M5-15, M5-16) at 4 to 6, and a large one crossing engine, formats, wire and server or client (M5-3, M5-7, M5-8, M5-13, M5-14) at 7 to 8. The pessimistic values allow six review rounds and a second build; M5-5's and M5-10's (10 hours) allow recalibrating `two_states` too. The plan PR is estimated at 0.5 / 1 / 3 hours, the close-out at the workflow's 1 / 1 / 2.
+So a task cycle is modelled at about ten times an M4 pull request, from the agents the workflow runs and the time each was seen to take. **If those times are off, they are off for every task at once:** the standard deviation of 6.8 hours assumes the tasks' errors are independent, which a bias in a shared step time breaks; with one bias for all, the queue's standard deviation is up to 27.0 hours, and its range from 29.7 to 195.1 (R17). The first tasks' actual times, which each worker reports and each pull request adds to the Gantt chart, are the correction.
 
 ## Gantt chart
 
@@ -304,76 +351,90 @@ gantt
     dateFormat YYYY-MM-DD HH:mm
     axisFormat %a %H:%M
     section Plan
-    Plan PR :plan, 2026-10-10 07:00, 1h
+    Plan PR :plan, 2026-10-10 08:00, 1h
     section Task queue
     M5-1 Bench print and trade horizon :crit, m5_1, after plan, 5h
     M5-2 Merchants and arrival :crit, m5_2, after m5_1, 5h
-    M5-6 Recipes and project state :m5_6, after m5_1 m5_2, 3h
-    M5-11 Strikes :m5_11, after m5_1 m5_6, 5h
-    M5-3 Merchant orders and SetTariff :crit, m5_3, after m5_2 m5_11, 9h
-    M5-7 Expansion and construction :m5_7, after m5_1 m5_6 m5_11 m5_3, 9h
-    M5-12 Riots and security transfers :m5_12, after m5_1 m5_11 m5_7, 5h
-    M5-4 Merchant kinds and exit :crit, m5_4, after m5_3 m5_12, 6h
-    M5-9 Depreciation :m5_9, after m5_7 m5_4, 4h
-    M5-5 Trade in two_states :m5_5, after m5_4 m5_9, 6h
-    M5-8 Founding and FoundProducer :crit, m5_8, after m5_4 m5_7 m5_5, 9h
-    M5-13 Views and the bridge :crit, m5_13, after m5_5 m5_8, 9h
-    M5-16 Merchant entry :m5_16, after m5_4 m5_8 m5_13, 5h
-    M5-14 Client panels and map mode :crit, m5_14, after m5_13 m5_16, 8h
-    M5-10 Growth verification :m5_10, after m5_5 m5_7 m5_8 m5_9 m5_12 m5_16 m5_14, 5h
+    M5-6 Recipes and project state :crit, m5_6, after m5_1 m5_2, 4h
+    M5-11 Strikes :crit, m5_11, after m5_1 m5_6, 5h
+    M5-3 Merchant orders and SetTariff :crit, m5_3, after m5_2 m5_11, 6h
+    M5-7 Expansion and construction :crit, m5_7, after m5_1 m5_6 m5_11 m5_3, 6h
+    M5-12 Riots and security transfers :crit, m5_12, after m5_1 m5_11 m5_7, 5h
+    M5-4 Merchant kinds and exit :crit, m5_4, after m5_3 m5_12, 5h
+    M5-9 Depreciation :crit, m5_9, after m5_7 m5_4, 4h
+    M5-5 Trade in two_states :crit, m5_5, after m5_4 m5_9, 5h
+    M5-8 Founding and FoundProducer :crit, m5_8, after m5_4 m5_7 m5_5, 6h
+    M5-13 Views and the bridge :crit, m5_13, after m5_5 m5_8, 6h
+    M5-16 Merchant entry :crit, m5_16, after m5_4 m5_8 m5_13, 5h
+    M5-14 Client panels and map mode :crit, m5_14, after m5_13 m5_16, 7h
+    M5-10 Growth verification :crit, m5_10, after m5_5 m5_7 m5_8 m5_9 m5_12 m5_16 m5_14, 5h
     M5-15 Replay gate and benchmarks :crit, m5_15, after m5_1 m5_2 m5_3 m5_4 m5_5 m5_6 m5_7 m5_8 m5_9 m5_10 m5_11 m5_12 m5_13 m5_14 m5_16, 4h
     section Close-out
     Close-out :close, after m5_15, 1h
 ```
 
-The bars are the planned schedule as the run will execute it, **one pull request at a time** (B2): each starts after its dependencies in `tasks.json` and after the task before it in the queue, which is the last item of its `after` list wherever that isn't already a dependency. Durations are each task's PERT expected time rounded to whole hours, halves up (8.5 to 9, 7.5 to 8, 5.5 to 6; the plan PR's 1.25 and the close-out's 1.17 to 1 each); `crit` marks the critical path of the [PERT/CPM network](#pertcpm-network). The schedule starts at the hour the stage began, 2026-10-10 07:00, already the stop time ([Schedule](#schedule)), and ends on 2026-10-14 at 10:00, 99 hours later. Each task's pull request adds its actual bar to an actual section here at the end of the task.
+The bars are the planned schedule, **one pull request at a time** in the chain's order (B2): each starts after its dependencies in `tasks.json`, the last of which is always the task before it in the queue. Durations are each task's PERT expected time rounded to whole hours, halves up (6.55 to 7, 5.88 to 6, 5.08 and 4.74 and 4.52 to 5, 3.69 to 4; the plan PR's 1.25 and the close-out's 1.17 to 1 each); `crit` marks the critical path of the [PERT/CPM network](#pertcpm-network), which the chain makes every task. The schedule starts at the hour this stage began, 2026-10-10 08:00, after the stop time ([Schedule](#schedule)), and ends on 2026-10-13 at 21:00, 85 hours later; a resumed run moves every bar by its own start. Each task's pull request adds its actual bar to an actual section here at the end of the task.
 
 ## PERT/CPM network
 
 ```mermaid
 flowchart LR
     Start((Start))
-    m5_1["M5-1<br/>te 4.83 · ES 0.00 · EF 4.83<br/>LS 0.00 · LF 4.83 · slack 0.00"]:::crit
-    m5_2["M5-2<br/>te 5.33 · ES 4.83 · EF 10.17<br/>LS 4.83 · LF 10.17 · slack 0.00"]:::crit
-    m5_3["M5-3<br/>te 8.50 · ES 10.17 · EF 18.67<br/>LS 10.17 · LF 18.67 · slack 0.00"]:::crit
-    m5_4["M5-4<br/>te 6.33 · ES 18.67 · EF 25.00<br/>LS 18.67 · LF 25.00 · slack 0.00"]:::crit
-    m5_5["M5-5<br/>te 5.50 · ES 25.00 · EF 30.50<br/>LS 28.00 · LF 33.50 · slack 3.00"]
-    m5_6["M5-6<br/>te 3.17 · ES 4.83 · EF 8.00<br/>LS 13.33 · LF 16.50 · slack 8.50"]
-    m5_7["M5-7<br/>te 8.50 · ES 10.17 · EF 18.67<br/>LS 16.50 · LF 25.00 · slack 6.33"]
-    m5_8["M5-8<br/>te 8.50 · ES 25.00 · EF 33.50<br/>LS 25.00 · LF 33.50 · slack 0.00"]:::crit
-    m5_9["M5-9<br/>te 3.67 · ES 18.67 · EF 22.33<br/>LS 41.17 · LF 44.83 · slack 22.50"]
-    m5_10["M5-10<br/>te 4.67 · ES 38.33 · EF 43.00<br/>LS 44.83 · LF 49.50 · slack 6.50"]
-    m5_11["M5-11<br/>te 5.33 · ES 4.83 · EF 10.17<br/>LS 11.17 · LF 16.50 · slack 6.33"]
-    m5_12["M5-12<br/>te 4.83 · ES 10.17 · EF 15.00<br/>LS 40.00 · LF 44.83 · slack 29.83"]
-    m5_13["M5-13<br/>te 8.50 · ES 33.50 · EF 42.00<br/>LS 33.50 · LF 42.00 · slack 0.00"]:::crit
-    m5_14["M5-14<br/>te 7.50 · ES 42.00 · EF 49.50<br/>LS 42.00 · LF 49.50 · slack 0.00"]:::crit
-    m5_15["M5-15<br/>te 4.42 · ES 49.50 · EF 53.92<br/>LS 49.50 · LF 53.92 · slack 0.00"]:::crit
-    m5_16["M5-16<br/>te 4.83 · ES 33.50 · EF 38.33<br/>LS 40.00 · LF 44.83 · slack 6.50"]
+    m5_1["M5-1<br/>te 4.74 · ES 0.00 · EF 4.74<br/>LS 0.00 · LF 4.74 · slack 0.00"]:::crit
+    m5_2["M5-2<br/>te 4.74 · ES 4.74 · EF 9.48<br/>LS 4.74 · LF 9.48 · slack 0.00"]:::crit
+    m5_6["M5-6<br/>te 3.69 · ES 9.48 · EF 13.17<br/>LS 9.48 · LF 13.17 · slack 0.00"]:::crit
+    m5_11["M5-11<br/>te 4.74 · ES 13.17 · EF 17.92<br/>LS 13.17 · LF 17.92 · slack 0.00"]:::crit
+    m5_3["M5-3<br/>te 5.88 · ES 17.92 · EF 23.80<br/>LS 17.92 · LF 23.80 · slack 0.00"]:::crit
+    m5_7["M5-7<br/>te 5.88 · ES 23.80 · EF 29.68<br/>LS 23.80 · LF 29.68 · slack 0.00"]:::crit
+    m5_12["M5-12<br/>te 4.74 · ES 29.68 · EF 34.42<br/>LS 29.68 · LF 34.42 · slack 0.00"]:::crit
+    m5_4["M5-4<br/>te 4.74 · ES 34.42 · EF 39.17<br/>LS 34.42 · LF 39.17 · slack 0.00"]:::crit
+    m5_9["M5-9<br/>te 3.69 · ES 39.17 · EF 42.86<br/>LS 39.17 · LF 42.86 · slack 0.00"]:::crit
+    m5_5["M5-5<br/>te 5.08 · ES 42.86 · EF 47.93<br/>LS 42.86 · LF 47.93 · slack 0.00"]:::crit
+    m5_8["M5-8<br/>te 5.88 · ES 47.93 · EF 53.82<br/>LS 47.93 · LF 53.82 · slack 0.00"]:::crit
+    m5_13["M5-13<br/>te 5.88 · ES 53.82 · EF 59.70<br/>LS 53.82 · LF 59.70 · slack 0.00"]:::crit
+    m5_16["M5-16<br/>te 4.74 · ES 59.70 · EF 64.44<br/>LS 59.70 · LF 64.44 · slack 0.00"]:::crit
+    m5_14["M5-14<br/>te 6.55 · ES 64.44 · EF 70.99<br/>LS 64.44 · LF 70.99 · slack 0.00"]:::crit
+    m5_10["M5-10<br/>te 4.52 · ES 70.99 · EF 75.52<br/>LS 70.99 · LF 75.52 · slack 0.00"]:::crit
+    m5_15["M5-15<br/>te 3.69 · ES 75.52 · EF 79.21<br/>LS 75.52 · LF 79.21 · slack 0.00"]:::crit
     End((End))
     Start ==> m5_1
     m5_1 ==> m5_2
-    m5_2 ==> m5_3
-    m5_3 ==> m5_4
-    m5_4 --> m5_5
     m5_1 --> m5_6
+    m5_2 ==> m5_6
+    m5_1 --> m5_11
+    m5_6 ==> m5_11
+    m5_2 --> m5_3
+    m5_11 ==> m5_3
     m5_1 --> m5_7
     m5_6 --> m5_7
     m5_11 --> m5_7
-    m5_4 ==> m5_8
-    m5_7 --> m5_8
+    m5_3 ==> m5_7
+    m5_1 --> m5_12
+    m5_11 --> m5_12
+    m5_7 ==> m5_12
+    m5_3 --> m5_4
+    m5_12 ==> m5_4
     m5_7 --> m5_9
+    m5_4 ==> m5_9
+    m5_4 --> m5_5
+    m5_9 ==> m5_5
+    m5_4 --> m5_8
+    m5_7 --> m5_8
+    m5_5 ==> m5_8
+    m5_5 --> m5_13
+    m5_8 ==> m5_13
+    m5_4 --> m5_16
+    m5_8 --> m5_16
+    m5_13 ==> m5_16
+    m5_13 --> m5_14
+    m5_16 ==> m5_14
     m5_5 --> m5_10
     m5_7 --> m5_10
     m5_8 --> m5_10
     m5_9 --> m5_10
     m5_12 --> m5_10
     m5_16 --> m5_10
-    m5_1 --> m5_11
-    m5_1 --> m5_12
-    m5_11 --> m5_12
-    m5_5 --> m5_13
-    m5_8 ==> m5_13
-    m5_13 ==> m5_14
+    m5_14 ==> m5_10
     m5_1 --> m5_15
     m5_2 --> m5_15
     m5_3 --> m5_15
@@ -383,54 +444,52 @@ flowchart LR
     m5_7 --> m5_15
     m5_8 --> m5_15
     m5_9 --> m5_15
-    m5_10 --> m5_15
+    m5_10 ==> m5_15
     m5_11 --> m5_15
     m5_12 --> m5_15
     m5_13 --> m5_15
-    m5_14 ==> m5_15
+    m5_14 --> m5_15
     m5_16 --> m5_15
-    m5_4 --> m5_16
-    m5_8 --> m5_16
     m5_15 ==> End
     classDef crit stroke:#c0392b,stroke-width:3px
 ```
 
-One node per task with its expected time (te), earliest start and finish (ES, EF), latest start and finish (LS, LF) and slack, all in hours from the start; the critical path is drawn with thick edges and outlined nodes. It shows what could run in parallel: the run runs none of it in parallel (B2), so the network gives the critical path and each task's slack, and the [Gantt chart](#gantt-chart) the schedule.
+One node per task with its expected time (te), earliest start and finish (ES, EF), latest start and finish (LS, LF) and slack, all in hours from the start; the critical path is drawn with thick edges and outlined nodes. The chain (B2) makes it the whole queue: every task's slack is 0, and the thin edges are the dependencies the code needs, each of which the chain already implies.
 
 ### Estimates
 
-te = (o + 4m + p) ÷ 6 and variance = ((p − o) ÷ 6)², computed as the workflow computes them (`sdlc-overnight.js:582-583`); bold rows are on the critical path.
+te = (o + 4m + p) ÷ 6 and variance = ((p − o) ÷ 6)², computed as the workflow computes them (`sdlc-overnight.js:582-583`); bold rows are on the critical path, which is every row.
 
 | Task | o | m | p | te | Variance | ES | EF | LS | LF | Slack |
 |---|---|---|---|---|---|---|---|---|---|---|
-| **M5-1** | 3 | 4.5 | 8 | 4.83 | 0.69 | 0.00 | 4.83 | 0.00 | 4.83 | 0.00 |
-| **M5-2** | 3 | 5 | 9 | 5.33 | 1.00 | 4.83 | 10.17 | 4.83 | 10.17 | 0.00 |
-| **M5-3** | 5 | 8 | 14 | 8.50 | 2.25 | 10.17 | 18.67 | 10.17 | 18.67 | 0.00 |
-| **M5-4** | 4 | 6 | 10 | 6.33 | 1.00 | 18.67 | 25.00 | 18.67 | 25.00 | 0.00 |
-| M5-5 | 3 | 5 | 10 | 5.50 | 1.36 | 25.00 | 30.50 | 28.00 | 33.50 | 3.00 |
-| M5-6 | 2 | 3 | 5 | 3.17 | 0.25 | 4.83 | 8.00 | 13.33 | 16.50 | 8.50 |
-| M5-7 | 5 | 8 | 14 | 8.50 | 2.25 | 10.17 | 18.67 | 16.50 | 25.00 | 6.33 |
-| **M5-8** | 5 | 8 | 14 | 8.50 | 2.25 | 25.00 | 33.50 | 25.00 | 33.50 | 0.00 |
-| M5-9 | 2 | 3.5 | 6 | 3.67 | 0.44 | 18.67 | 22.33 | 41.17 | 44.83 | 22.50 |
-| M5-10 | 2 | 4 | 10 | 4.67 | 1.78 | 38.33 | 43.00 | 44.83 | 49.50 | 6.50 |
-| M5-11 | 3 | 5 | 9 | 5.33 | 1.00 | 4.83 | 10.17 | 11.17 | 16.50 | 6.33 |
-| M5-12 | 3 | 4.5 | 8 | 4.83 | 0.69 | 10.17 | 15.00 | 40.00 | 44.83 | 29.83 |
-| **M5-13** | 5 | 8 | 14 | 8.50 | 2.25 | 33.50 | 42.00 | 33.50 | 42.00 | 0.00 |
-| **M5-14** | 4 | 7 | 13 | 7.50 | 2.25 | 42.00 | 49.50 | 42.00 | 49.50 | 0.00 |
-| **M5-15** | 2.5 | 4 | 8 | 4.42 | 0.84 | 49.50 | 53.92 | 49.50 | 53.92 | 0.00 |
-| M5-16 | 3 | 4.5 | 8 | 4.83 | 0.69 | 33.50 | 38.33 | 40.00 | 44.83 | 6.50 |
-| **Total** | 54.5 | 88 | 160 | 94.42 | 21.01 | | | | | |
+| **M5-1** | 1.8 | 3.8 | 11.45 | 4.74 | 2.59 | 0.00 | 4.74 | 0.00 | 4.74 | 0.00 |
+| **M5-2** | 1.8 | 3.8 | 11.45 | 4.74 | 2.59 | 4.74 | 9.48 | 4.74 | 9.48 | 0.00 |
+| **M5-6** | 1.2 | 2.85 | 9.55 | 3.69 | 1.94 | 9.48 | 13.17 | 9.48 | 13.17 | 0.00 |
+| **M5-11** | 1.8 | 3.8 | 11.45 | 4.74 | 2.59 | 13.17 | 17.92 | 13.17 | 17.92 | 0.00 |
+| **M5-3** | 2.15 | 5.05 | 12.95 | 5.88 | 3.24 | 17.92 | 23.80 | 17.92 | 23.80 | 0.00 |
+| **M5-7** | 2.15 | 5.05 | 12.95 | 5.88 | 3.24 | 23.80 | 29.68 | 23.80 | 29.68 | 0.00 |
+| **M5-12** | 1.8 | 3.8 | 11.45 | 4.74 | 2.59 | 29.68 | 34.42 | 29.68 | 34.42 | 0.00 |
+| **M5-4** | 1.8 | 3.8 | 11.45 | 4.74 | 2.59 | 34.42 | 39.17 | 34.42 | 39.17 | 0.00 |
+| **M5-9** | 1.2 | 2.85 | 9.55 | 3.69 | 1.94 | 39.17 | 42.86 | 39.17 | 42.86 | 0.00 |
+| **M5-5** | 1.8 | 3.8 | 13.45 | 5.08 | 3.77 | 42.86 | 47.93 | 42.86 | 47.93 | 0.00 |
+| **M5-8** | 2.15 | 5.05 | 12.95 | 5.88 | 3.24 | 47.93 | 53.82 | 47.93 | 53.82 | 0.00 |
+| **M5-13** | 2.15 | 5.05 | 12.95 | 5.88 | 3.24 | 53.82 | 59.70 | 53.82 | 59.70 | 0.00 |
+| **M5-16** | 1.8 | 3.8 | 11.45 | 4.74 | 2.59 | 59.70 | 64.44 | 59.70 | 64.44 | 0.00 |
+| **M5-14** | 2.15 | 5.55 | 14.95 | 6.55 | 4.55 | 64.44 | 70.99 | 64.44 | 70.99 | 0.00 |
+| **M5-10** | 1.2 | 3.35 | 12.55 | 4.52 | 3.58 | 70.99 | 75.52 | 70.99 | 75.52 | 0.00 |
+| **M5-15** | 1.2 | 2.85 | 9.55 | 3.69 | 1.94 | 75.52 | 79.21 | 75.52 | 79.21 | 0.00 |
+| **Total** | 28.15 | 64.25 | 190.10 | 79.21 | 46.19 | | | | | |
 
 ### Critical path, duration and slack
 
-- **Critical path:** M5-1 → M5-2 → M5-3 → M5-4 → M5-8 → M5-13 → M5-14 → M5-15, every task with zero slack, in topological order.
-- **Expected duration:** 53.92 hours, the sum of the critical tasks' te. **Variance** 12.53 (the sum of theirs), **standard deviation** 3.54 hours: about 68% likely within 50.4 to 57.5 hours, if the estimates' errors are independent.
-- **Slack:** M5-5 3.00 hours; M5-6 8.50; M5-7 6.33; M5-9 22.50; M5-10 6.50; M5-11 6.33; M5-12 29.83; M5-16 6.50; every other task 0.
-- **With one pull request at a time** the duration is the sum of every task's te instead: 94.42 hours for the sixteen (variance 21.01, standard deviation 4.58), 96.83 with the plan PR and close-out ([Schedule](#schedule)).
+- **Critical path:** M5-1 → M5-2 → M5-6 → M5-11 → M5-3 → M5-7 → M5-12 → M5-4 → M5-9 → M5-5 → M5-8 → M5-13 → M5-16 → M5-14 → M5-10 → M5-15: every task, in topological order, since each depends on the one before it (B2).
+- **Expected duration:** 79.21 hours, the sum of the critical tasks' te, which here is every task's. **Variance** 46.19 (the sum of theirs), **standard deviation** 6.80 hours: about 68% likely within 72.4 to 86.0 hours if the estimates' errors are independent; with one bias shared by every task, the standard deviation is up to 26.99 hours, the sum of the tasks' (R17).
+- **Slack:** 0 for every task.
+- **With the plan PR and close-out** the queue takes 81.63 hours ([Schedule](#schedule)).
 
 ## Golden hashes impact
 
-**`results_change` is true:** `two_states`' golden hashes change on purpose; `mini_valley`'s never do. The rule is Design [8.5](04-system-specification.md#85-golden-hashes), here in queue order:
+**`results_change` is true:** `two_states`' golden hashes change on purpose; `mini_valley`'s never do. The rule is Design [8.5](04-system-specification.md#85-golden-hashes), here in queue order. A task that tunes one of its levers (B9) re-records with the values it settled on, and says which in its `Evidence:`.
 
 | Queue | Task | `two_states` | `mini_valley` | Why |
 |---|---|---|---|---|
@@ -444,7 +503,7 @@ te = (o + 4m + p) ÷ 6 and variance = ((p − o) ÷ 6)², computed as the workfl
 | 8 | M5-4 | unchanged | unchanged | The `merchant` profession has no POPs and no producer hires it |
 | 9 | M5-9 | **re-recorded** if anything shrinks, as expected | unchanged | The half-empty peaks mines shrink (Design 3.7) |
 | 10 | M5-5 | **re-recorded** | unchanged | The route and its two merchants trade from day 1 |
-| 11 | M5-8 | **re-recorded** if owners found a producer, as expected | unchanged | Unclaimed farmers and craftsmen wait (Design 3.7) |
+| 11 | M5-8 | unchanged, unless anything is founded, which the measurements don't expect | unchanged | The market's capitalists found only the types they own (C14), expansion claims the waiting workers first (C19), the lowland capitalists can't fund their types, and the log has no `FoundProducer` (Design 3.7, 8.5) |
 | 12 | M5-13 | unchanged | unchanged | Protocol and server views only |
 | 13 | M5-16 | **re-recorded** | unchanged | Route gaps are hashed from day 0 |
 | 14 | M5-14 | unchanged | unchanged | Client and map mode only |

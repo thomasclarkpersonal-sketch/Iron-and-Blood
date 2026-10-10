@@ -86,7 +86,7 @@
           "Gate: `pax_cli verify` passes for mini_valley and two_states at 1 and 4 threads with both golden.hashes unchanged (no content declares links); `python3 scripts/check_docs.py`"
         ]
       },
-      "estimate": { "optimistic": 3, "likely": 4.5, "pessimistic": 8 },
+      "estimate": { "optimistic": 1.8, "likely": 3.8, "pessimistic": 11.45 },
       "blocked_on_decision": ""
     },
     {
@@ -148,12 +148,12 @@
           "`World::total_money` adds the merchants' cash to its three terms (crates/pax_engine/src/world.rs:597-602; R-N1), so tick::step's assert covers it",
           "`pax_engine::systems::trade` (new): `pub fn land_cargo(world: &mut World) -> TradeReport` (PL-4), called first in `step_systems` after commands (D4 step 0); `pub struct TradeReport { pub flows: Vec<RouteFlow>, pub markets: Vec<MarketTrade> }`, `RouteFlow { route: u32, good: u16, bought, cost, landed, lost, tariff, sold, receipts: Fixed }`, `MarketTrade { purchases, sales, tariffs: Fixed }`, `pub fn finish(&mut self)` sorting flows by (route, good) and merging equal keys (Design 3.3, 4.1); `DayReport::trade`",
           "`StateHasher::u8s(&mut self, vs: &[u8])` (crates/pax_engine/src/hash.rs); `World::state_hash` appends the merchant block (route, cash) and the cargo block, each tag first and only when it has rows (PL-18, S16), so a world without merchants hashes as today",
-          "Snapshot: merchants and cargo blocks after today's last block, SNAPSHOT_FORMAT raised by one from main's value (2 in the planned queue), the format comment (crates/pax_data/src/snapshot.rs:4-21) listing them; a restored world passes the extended check_tables (R-N16, R-N17)",
+          "Snapshot: merchants and cargo blocks after today's last block, SNAPSHOT_FORMAT raised by one from its base's value (2: no earlier task in the chain changes it, Baseline B2), the format comment (crates/pax_data/src/snapshot.rs:4-21) listing them; a restored world passes the extended check_tables (R-N16, R-N17)",
           "`bench::replicate_with_nations` copies merchants (route offset) and cargo (merchant offset) into every region (R-N12)",
           "A debug-build goods check in `step_systems` beside check_tables: the merchants' total cargo changes by exactly the day's bought less sold less lost (R-N4, the arrival part)",
           "`random_world` gains merchants with random cash and cargo rows, some owing tariffs, on its routes (Design 8.2)",
           "`pax_cli report` columns `tariffs` and `iceberg%` (lost over landed plus lost) after today's columns (R-F67, Design 4.3)",
-          "Docs: D4's lead sentence, row 0 and the goods-persist sentence, and D5's outside-money bullet (Design 2.3); ARCHITECTURE.md's game loop gains step 0 with systems/trade.rs; BACKEND_SCHEMA.md gains Merchants, Cargo, DayReport::trade and trade on the tree's systems/ line; TRADE.md marks arrival built; DATA_MODEL_M5_M6.md notes MERCHANT and CARGO moved; ONBOARDING.md's code map and report columns; MILESTONE_5's M5-2 row ticked"
+          "Docs: D4's lead sentence, row 0 and the goods-persist sentence, and D5's outside-money bullet (Design 2.3); ARCHITECTURE.md's game loop gains step 0 with systems/trade.rs; tick.rs's module table (crates/pax_engine/src/tick.rs:7-16), which restates D4's order, in the same rows; BACKEND_SCHEMA.md gains Merchants, Cargo, DayReport::trade and trade on the tree's systems/ line; TRADE.md marks arrival built; DATA_MODEL_M5_M6.md notes MERCHANT and CARGO moved; ONBOARDING.md's code map and report columns; MILESTONE_5's M5-2 row ticked"
         ],
         "consumes": [
           "M5-1: `World::network` (`Links::retention`, `Routes::{origin, destination, link}`), `push_link`, `push_route`, `TradeNetwork::route_between`, `replicas_copy_the_trade_and_investment_tables`, and `random_world`'s links and routes"
@@ -170,7 +170,7 @@
           "D13: R-N10's cold 29-day bench before and after, beside M5-1's baseline, in Evidence; `pax_cli verify` with both golden.hashes unchanged (no content has merchants)"
         ]
       },
-      "estimate": { "optimistic": 3, "likely": 5, "pessimistic": 9 },
+      "estimate": { "optimistic": 1.8, "likely": 3.8, "pessimistic": 11.45 },
       "blocked_on_decision": ""
     },
     {
@@ -178,7 +178,8 @@
       "title": "M5-3: Merchant market orders, arbitrage and SetTariff",
       "summary": "Merchants become ordinary D1 buyers in their route's origin and sellers in its destination: buy orders follow the flow rule on the netback gap (PL-2, C5), sell offers carry landed cost plus margin (PL-3), and settlement debits and credits their cash and hands purchases and sales to trade.rs by (merchant, good) key, never by Cargo row (S5, S6). Each nation gets a tariff per good, assessed at purchase and paid on landing (C2, C3), set by Command::SetTariff end to end: engine, command logs and saves (SAVE_FORMAT 2), the wire (protocol 1.7) and the server (C27).",
       "depends_on": [
-        "m5-2"
+        "m5-2",
+        "m5-11"
       ],
       "requirements": [
         "R-F7",
@@ -254,6 +255,7 @@
         "docs/NETWORK_PROTOCOL.md",
         "docs/ECONOMY_SYSTEM.md",
         "docs/TRADE.md",
+        "docs/DATA_MODEL_M5_M6.md",
         "docs/ONBOARDING.md",
         "docs/HOSTING.md",
         "docs/MILESTONE_5.md",
@@ -264,14 +266,14 @@
           "crates/pax_engine/src/systems/market.rs: `Buyer::Merchant(usize)`; `pub(crate) enum Seller { Producer(usize), Merchant(usize) }` and `SellOffer::seller: Seller` replacing `producer` (market.rs:202-208); orders listed producers' inputs, governments, then merchants before the stable sort by market (Design 4.1)",
           "`pub fn clear_markets(world: &mut World, layout: &PopLayout, trade: &mut TradeReport) -> MarketOutcome`; `MarketOutcome::merchant_purchases: Vec<Fixed>` (per merchant row, cost plus assessed tariff); settlement keeps today's sequence (market.rs:666-852) and adds, in this order: the buy loop's `Buyer::Merchant` arm recording `CargoPurchase`, then `trade::book_purchases`, the seller loop's `Seller::Merchant` arm recording `CargoSale`, then `trade::book_sales` (Design 4.1 steps 2-5)",
           "crates/pax_engine/src/systems/trade.rs: `pub fn tariff_rate(world: &World, route: usize, good: usize) -> Fixed`, `pub fn gap(world: &World, route: usize, good: usize) -> Fixed` (signed), `pub(crate) fn merchant_orders(world: &World) -> Vec<BuyOrder>` (PL-2), `pub(crate) fn merchant_offers(world: &World) -> Vec<SellOffer>` (PL-3), `CargoPurchase { merchant: u32, good: u16, units, cost, price: Fixed }`, `CargoSale { merchant: u32, good: u16, units, receipts: Fixed }`, `pub(crate) fn book_purchases(world: &mut World, purchases: Vec<CargoPurchase>, report: &mut TradeReport) -> Vec<Fixed>` (one sorted merge pass, R-D9 asserted before any receipt is credited), `pub(crate) fn book_sales(world: &mut World, sales: &[CargoSale], report: &mut TradeReport)` (binary search by key, landed cost split by alloc::allocate); no Cargo row index leaves trade.rs (S5)",
-          "`Nations::tariff: Vec<Fixed>`, row-major nation by good, pushed as zeros by `push_nation`, each in [0, 1] (R-D8); hashed inside the nations block after `basket` under its tag only when some rate is not 0 (PL-18); a snapshot column; SNAPSHOT_FORMAT raised by one (4 in the planned queue); `replicate_with_nations` copies it",
+          "`Nations::tariff: Vec<Fixed>`, row-major nation by good, pushed as zeros by `push_nation`, each in [0, 1] (R-D8); hashed inside the nations block after `basket` under its tag only when some rate is not 0 (PL-18); a snapshot column; SNAPSHOT_FORMAT raised by one (4: after M5-6's 3 in the chain); `replicate_with_nations` copies it",
           "`Command::SetTariff { nation: usize, good: usize, rate: Fixed }` and `CommandError::UnknownGood(usize)`; `World::validate` matches per variant in PL-13's order and reads only definitions (R-D13); `World::apply` sets the rate for purchases from that day",
           "pax_data: `pub(crate) struct CommandText<'a> { kind, nation, rate: Option<Fixed>, good, province, producer_type: Option<&'a str> }` (province and producer_type stay None until M5-8), `command_of(world, &CommandText) -> Result<Command, String>` and `describe_command(world, &Command) -> CommandText`, still exhaustive (Design 4.2); `CommandEntry` and the save's entry gain `good`, each type taking exactly its fields; `set_tariff` in commands.toml; `save::read_format` reads `format` before anything else and refuses another value by name (S15); SAVE_FORMAT 2",
           "Wire, by appending only: `table SetTariff { nation: uint; good: uint = null; rate: Fixed; }` in schemas/common.fbs, appended to `union Command`; `CommandError.UnknownGood = 8`; regenerated by scripts/gen-protocol.sh; PROTOCOL_MINOR 7 (crates/pax_protocol/src/lib.rs:76); `WireCommand::SetTariff { nation: u32, good: Option<u32>, rate_raw: Option<i64> }` and the arms of `to_engine`, `nation_of` and `error_to_wire`, an absent field being `Malformed` (S10, Design 4.4); client/pax_keys.gd regenerated with `UPDATE_PAX_KEYS=1 cargo test -p pax_godot keys`",
           "The server test client (crates/pax_server/tests/common/mod.rs) gains `set_tariff(client_seq, nation, good, rate_raw)`; hostile.rs's generator sends SetTariff with fields absent or out of range (R-N21)",
           "TradeReport's purchase and sale figures per route, good and market (R-F54); the `trade` report column; the goods check covers settlement",
           "`random_world` gains random tariffs and markets with nations (Design 8.2)",
-          "Docs: D4 row 3's 'merchants D17'; D21's command list, the unknown good, the fifth Validation sub-bullet's first sentence and the command-log fields; D24's Order sentence for SetTariff (Design 2.3); DATA_FORMAT.md command log and save format 2; NETWORK_PROTOCOL.md section 4's commands, section 5, and section 8's history (1.7); BACKEND_SCHEMA.md; ECONOMY_SYSTEM.md's trade section; TRADE.md orders, offers and tariffs built (per good, assessed at purchase); ARCHITECTURE.md step 3; ONBOARDING.md's report columns and its Add a command recipe (the wire table, the server's arms and describe_command now come with every command, C27); HOSTING.md's saves bullet (a save written before a save-format change is refused by name, D23); MILESTONE_5's M5-3 row ticked"
+          "Docs: D4 row 3's 'merchants D17'; D21's command list, the unknown good, the fifth Validation sub-bullet's first sentence and the command-log fields; D24's Order sentence for SetTariff (Design 2.3); DATA_FORMAT.md command log and save format 2; NETWORK_PROTOCOL.md section 4's commands, section 5, and section 8's history (1.7); BACKEND_SCHEMA.md; ECONOMY_SYSTEM.md's trade section; DATA_MODEL_M5_M6.md notes TARIFF_RATE moved to BACKEND_SCHEMA.md; TRADE.md orders, offers and tariffs built (per good, assessed at purchase); ARCHITECTURE.md step 3; tick.rs's module table (crates/pax_engine/src/tick.rs:7-16), which restates D4's order, in the same rows; ONBOARDING.md's report columns and its Add a command recipe (the wire table, the server's arms and describe_command now come with every command, C27); HOSTING.md's saves bullet (a save written before a save-format change is refused by name, D23); MILESTONE_5's M5-3 row ticked"
         ],
         "consumes": [
           "M5-2: `Merchants`, `Cargo` and its key order, `CargoStage`, `push_merchant`, `push_cargo`, `land_cargo`, `TradeReport`, `RouteFlow`, `MarketTrade`, `money_conserved_through_trade`, `goods_are_accounted_exactly`, `new_columns_follow_todays`",
@@ -286,19 +288,21 @@
           "crates/pax_data/tests/saves.rs `new_commands_round_trip_through_a_save` (set_tariff) and `another_format_is_refused_by_name` (format 1 refused with its number before anything else is parsed); crates/pax_data/tests/validation.rs `command_logs_take_the_new_commands`",
           "crates/pax_server/tests/session.rs `new_commands_are_checked_in_order`: a SetTariff without good is Malformed, another nation's is NotPermitted, a rate of 1.5 is RateOutOfRange; crates/pax_server/tests/session_replay.rs submits a SetTariff and still replays to the server's final state hash (R-N7)",
           "crates/pax_protocol/tests/roundtrip.rs `set_tariff`",
+          "crates/pax_data/src/snapshot.rs unit `a_snapshot_restores_the_exact_state_and_it_runs_on_identically` gains a tariff set off 0 by `World::apply` before encoding, and `crafted_merchants_and_projects_are_refused` refuses a tariff outside [0, 1] (R-D8, R-N17); crates/pax_data/src/bench.rs unit `replicas_copy_the_trade_and_investment_tables` gains a tariff off 0 (R-N12)",
           "crates/pax_engine/tests/conservation.rs `money_conserved_through_trade` counts purchases and sales; `goods_are_accounted_exactly` covers settlement; crates/pax_engine/tests/extremes.rs gains merchant orders at the price ceiling (R-N24)",
           "crates/pax_cli/src/report.rs `new_columns_follow_todays` gains `trade`; R-N10's bench before and after in Evidence; both golden.hashes unchanged (no content has routes, tariffs are 0)"
         ]
       },
-      "estimate": { "optimistic": 5, "likely": 8, "pessimistic": 14 },
+      "estimate": { "optimistic": 2.15, "likely": 5.05, "pessimistic": 12.95 },
       "blocked_on_decision": ""
     },
     {
       "id": "m5-4",
       "title": "M5-4: Merchant kinds, dividends, seeding and winding up",
-      "summary": "A merchant has a kind (Private, Commercial, Chartered) and an owner: the origin market's capitalists, the new merchant profession, or the state (C8). It pays D6-style dividends above a working reserve to that owner (PL-5, C6, untaxed per C7), winds up after exit_months of realized monthly losses (PL-6, C28), and scenarios seed merchants of any kind with [[merchant]] (the only source of chartered ones, SSR item 3). The month end gains its merchants' step on a fresh layout, after investment.",
+      "summary": "A merchant has a kind (Private, Commercial, Chartered) and an owner: the origin market's capitalists, the new merchant profession, or the state (C8). It pays D6-style dividends above a working reserve to that owner (PL-5, C6, untaxed per C7), winds up after exit_months of realized monthly losses (PL-6, C28), and scenarios seed merchants of any kind with [[merchant]] (the only source of chartered ones, SSR item 3). The month end gains its merchants' step after investment, on the fresh layout M5-7 added (B8).",
       "depends_on": [
-        "m5-3"
+        "m5-3",
+        "m5-12"
       ],
       "requirements": [
         "R-F5",
@@ -362,33 +366,33 @@
         "provides": [
           "`#[repr(u8)] enum MerchantKind { Private = 0, Commercial = 1, Chartered = 2 }`; `Merchants` gains `kind: Vec<MerchantKind>`, `owner_nation: Vec<Option<u32>>`, `month_profit: Vec<Fixed>`, `purchases_avg: Vec<Fixed>`, `loss_months: Vec<u16>`, `winding_up: Vec<bool>` (Design 3.1); `NewMerchant` gains `kind`; `push_merchant` sets owner_nation for Chartered from the route origin's nation and panics if that market is stateless; check_tables ties Some to Chartered and pins it to the origin's nation while market ownership is topology (S26)",
           "The month_profit hooks inside trade.rs (S6): `book_sales` adds receipts less the landed cost sold, `land_cargo` subtracts the cost of a row written off with 0 units (PL-3, PL-4, C28)",
-          "`pub fn pay_merchant_dividends(world: &mut World, layout: &PopLayout, purchases: &[Fixed]) -> MerchantDividends` (PL-5, PL-17), run in D4 step 4 after producers' dividends; `pub fn run_month_end(world: &mut World, layout: &PopLayout) -> MerchantMonth` with winding up (PL-6), run in step 6c after investment (M5-7 writes D4 row 6c, preceding it in the queue; if it hadn't landed, this task writes the row, the design's rule that a row's first task writes it); `merchant_orders` skips merchants winding up and `merchant_offers` gives them reservation 0",
-          "tick.rs takes one fresh `World::pop_layout()` after politics for the month end's steps that pay or draw on owner pools (Design 1.2), which M5-7's step shares; `StateHasher::option_u32s(&mut self, vs: &[Option<u32>])`; the merchant block hashes the six columns after route and cash (PL-18); snapshot columns; SNAPSHOT_FORMAT raised by one (5 in the planned queue)",
-          "`TradeRules::{private_owner: ProfessionId, commercial_owner: ProfessionId, exit_months: u32}`, required (R-D4): data/rules.toml capitalist, merchant and 3; mini_valley capitalist for both (S24); a `merchant` profession appended to data/professions.toml so every existing id keeps its index",
+          "`pub fn pay_merchant_dividends(world: &mut World, layout: &PopLayout, purchases: &[Fixed]) -> MerchantDividends` (PL-5, PL-17), run in D4 step 4 after producers' dividends; `pub fn run_month_end(world: &mut World, layout: &PopLayout) -> MerchantMonth` with winding up (PL-6), run in step 6c after `investment::run_month_end`, with the fresh layout M5-7 takes after politics (Design 1.2, B8); M5-7 wrote D4 row 6c, and this task adds its clause; `merchant_orders` skips merchants winding up and `merchant_offers` gives them reservation 0",
+          "tick.rs passes M5-7's fresh month-end layout to `trade::run_month_end` too, taking no layout of its own (Design 1.2, B8); `StateHasher::option_u32s(&mut self, vs: &[Option<u32>])`; the merchant block hashes the six columns after route and cash (PL-18); snapshot columns; SNAPSHOT_FORMAT raised by one (5: after M5-3's 4 in the chain)",
+          "`TradeRules::{private_owner: ProfessionId, commercial_owner: ProfessionId, exit_months: u32}`, required (R-D4): data/rules.toml capitalist, merchant and 3; mini_valley capitalist for both (S24); a `merchant` profession appended to data/professions.toml so every existing id keeps its index; crates/pax_data/tests/validation.rs's inline PROFESSIONS (validation.rs:19-25), which its tests load with data/rules.toml as RULES (:37-41), gains `capitalist` and `merchant` after `farmer`, so the new owner keys name known professions and every existing test keeps index 0's profession (M5-8's `founder = \"capitalist\"` is then covered too)",
           "scenario.toml `[[merchant]]` (from, to, kind, cash) as `MerchantEntry`, resolved with `route_between` and checked by R-D3 (S23)",
           "`DayReport::merchant_dividends: MerchantDividends { by_kind: [Fixed; 3] }` and `DayReport::merchants: MerchantMonth { wind_ups: Vec<WindUp>, founded: Vec<MerchantFounding> }` (founded empty until M5-16) (Design 3.3); report columns `merch.div` and `wound_up`",
           "`replicate_with_nations` copies the six columns; `random_world` gains merchant kinds, chartered ones only from markets with a nation, and exit_months 1",
-          "Docs: D4 row 4's 'merchants' dividends (D17)' and row 6c's 'then merchants: wind up loss-makers (D17)'; D6's merchants' dividends bullet and the ownership bullet's chartered merchants (Design 2.3); DATA_FORMAT.md [[merchant]], the merchant profession and the [trade] keys; TRADE.md kinds, dividends and exit built, its exit test and profit_avg column replaced by month_profit (C28), the seed's route key by from and to (S23), and its income-tax line marked planned: needs D15 amended, none drafted (C7); BACKEND_SCHEMA.md; ECONOMY_SYSTEM.md's wages and dividends; ONBOARDING.md; MILESTONE_5's M5-4 row ticked"
+          "Docs: D4 row 4's 'merchants' dividends (D17)' and row 6c's 'then merchants: wind up loss-makers (D17)'; D6's merchants' dividends bullet and the ownership bullet's chartered merchants (Design 2.3); tick.rs's module table (crates/pax_engine/src/tick.rs:7-16), which restates D4's order, in the same rows; DATA_FORMAT.md [[merchant]], the merchant profession and the [trade] keys; TRADE.md kinds, dividends and exit built, its exit test and profit_avg column replaced by month_profit (C28), the seed's route key by from and to (S23), and its income-tax line marked planned: needs D15 amended, none drafted (C7); BACKEND_SCHEMA.md; ECONOMY_SYSTEM.md's wages and dividends; ONBOARDING.md; MILESTONE_5's M5-4 row ticked"
         ],
         "consumes": [
           "M5-3: settlement's hand-offs (`book_purchases`, `book_sales`), `MarketOutcome::merchant_purchases`, `merchant_orders`, `merchant_offers`, `money_conserved_through_trade`",
           "M5-2: `land_cargo`, `Merchants`, `Cargo`, the snapshot and replica tests",
           "M5-1: the bench baseline (R-N26)",
-          "If present (M5-7 precedes it in the planned queue): `a_replica_of_one_region_hashes_like_its_base` and the month end's step 6c, which it extends"
+          "M5-7 (before it in the chain, Baseline B2): the fresh month-end layout, D4 row 6c and `investment::run_month_end`, after which its step runs, and `a_replica_of_one_region_hashes_like_its_base`, which it extends"
         ],
         "acceptance_tests": [
           "crates/pax_engine/tests/trade.rs `each_kind_pays_its_owner`: Private to the origin market's capitalists by size, Commercial to its merchant POPs, Chartered to its nation's treasury, and a merchant with no living owner POPs keeps the dividend",
           "crates/pax_engine/tests/trade.rs `a_loss_maker_winds_up_and_returns_its_cash`: exit_months consecutive month ends below 0 start winding up; it places no orders, offers at any price, and returns its cash above the tariffs it owes at each month end",
           "crates/pax_engine/tests/trade.rs `an_idle_merchant_is_never_wound_up`: with exit_months 2 or more, a merchant whose last month lost one ulp and that then trades nothing for exit_months + 1 month ends is still active, its loss_months back to 0 at the first idle month end",
           "crates/pax_engine/src/systems/trade.rs unit `settlement_books_purchases_and_sales` gains each merchant's month_profit",
-          "crates/pax_data/tests/validation.rs `merchants_seed_by_route_and_kind`, `bad_merchants_are_refused` (unknown route or kind, negative cash, chartered from a stateless market), and `trade_rules_are_checked` gains the owners and exit_months",
+          "crates/pax_data/tests/validation.rs `merchants_seed_by_route_and_kind`, `bad_merchants_are_refused` (unknown route or kind, negative cash, chartered from a stateless market), and `trade_rules_are_checked` gains the owners and exit_months; every existing validation.rs test passes with data/rules.toml's new keys",
           "crates/pax_engine/tests/conservation.rs `money_conserved_through_trade` counts dividends of each kind and wind-up returns",
-          "Snapshot round trip with the merchant Chartered and its five other new columns off their defaults; the replica tests gain the columns",
+          "crates/pax_data/src/snapshot.rs: the round trip with the merchant Chartered and its five other new columns off their defaults, and `crafted_merchants_and_projects_are_refused` refuses a Private merchant with an owner nation, a Chartered one without, and a Chartered one whose owner nation isn't its route origin's nation (R-D3, R-D9, R-N17); crates/pax_data/src/bench.rs: `replicas_copy_the_trade_and_investment_tables` and `a_replica_of_one_region_hashes_like_its_base` gain the six columns off their defaults (R-N12, R-N25)",
           "crates/pax_cli/src/report.rs `new_columns_follow_todays` gains `merch.div` and `wound_up`; crates/pax_data/tests/content_stability.rs's header counts 7 professions",
           "D13: R-N10's cold bench and R-N26's five runs before and after, medians against M5-1's baseline; both golden.hashes unchanged (the merchant profession has no POPs and no producer hires it; any change is a bug to explain, never re-recorded)"
         ]
       },
-      "estimate": { "optimistic": 4, "likely": 6, "pessimistic": 10 },
+      "estimate": { "optimistic": 1.8, "likely": 3.8, "pessimistic": 11.45 },
       "blocked_on_decision": ""
     },
     {
@@ -396,7 +400,8 @@
       "title": "M5-5: Trade in two_states and the comparative-advantage test",
       "summary": "two_states gains its link between lowland and highland both ways, routes both ways and one seeded Private merchant each way (Design 3.7). The day's report gains household and government spending by market, and pax_cli report a --market view. A release test compares 20 years with trade against an autarky run of the same build: gaps above the friction band narrow, and each market exports and gains real GDP (R-F20, restated on the measured goods: cloth, steel, tools and six raw goods are cheaper in Highland; clothes, furniture and wine in Lowland). two_states' golden hashes are re-recorded.",
       "depends_on": [
-        "m5-4"
+        "m5-4",
+        "m5-9"
       ],
       "requirements": [
         "R-F20",
@@ -413,6 +418,7 @@
       "owns": [
         "scenarios/two_states/scenario.toml",
         "scenarios/two_states/golden.hashes",
+        "data/rules.toml",
         "crates/pax_engine/src/systems/market.rs",
         "crates/pax_engine/src/tick.rs",
         "crates/pax_engine/tests/market_properties.rs",
@@ -435,14 +441,15 @@
           "`pax_cli report --market KEY` (`Flag::Market` for report; `report::run(world: World, log: &CommandLog, days: u64, every: u64, market: Option<&str>) -> Result<ExitCode, String>`): prints `market: KEY` first, then that market's own C+G, price index and real GDP from its own day-1 basket, an informational measure (R-F55, Design 4.3)",
           "crates/pax_data/tests/trade_two_states.rs (new, release only): O3's comparison against an autarky run of the same build, with O3c's per-market measure computed from the day reports",
           "two_states' golden.hashes re-recorded with `pax_cli record scenarios/two_states`, the reason in the commit's Evidence and the PR (R-N9); every economic_bands.rs assertion kept or moved with its reason (R-N22); content_stability.rs, the unrest test and any other scenario test on main kept green",
-          "crates/pax_data/tests/determinism.rs's thread-count test (M5-12 creates it earlier in the planned queue; this task creates it if absent) also asserts merchant purchases",
+          "Levers (Baseline B9): if `trade_narrows_gaps_and_both_markets_gain` or a scenario test on main fails, this task may tune its route's `margin` and `k`, its link's `capacity` and its merchants' `cash` within R-D1 to R-D3 (Design 3.7's values are the start), and, if R-F40's window in unrest_two_states.rs breaks, the unrest keys within R-D6; it moves a band only under the bands clause with its reason; a bound is never relaxed: when no setting of its levers keeps every scenario test green, it reports blocked-on-decision, naming the bound, the values tried and what each gave, for the maintainer",
+          "crates/pax_data/tests/determinism.rs's thread-count test (M5-12 created it, before this task in the chain) also asserts merchant purchases",
           "Docs: TRADE.md's test 9 restated on the measured pattern and marked built; ECONOMY_SYSTEM.md's trade section; BACKEND_SCHEMA.md's DayReport fields; ONBOARDING.md's report --market; MILESTONE_5's M5-5 row ticked with its measured gaps, restated on the measured goods"
         ],
         "consumes": [
           "M5-4: `[[merchant]]` seeding, merchant kinds, dividends and winding up",
           "M5-3: merchant orders, offers and settlement, tariffs, TradeReport's purchases and sales",
           "M5-2: arrival and Cargo; M5-1: `[[link]]`, `[[route]]` and the horizon check",
-          "If present (M5-12 precedes it in the planned queue): determinism.rs's thread-count test"
+          "M5-12 (before it in the chain, Baseline B2): determinism.rs's thread-count test and unrest_two_states.rs's riot window"
         ],
         "acceptance_tests": [
           "crates/pax_data/tests/trade_two_states.rs (release) `trade_narrows_gaps_and_both_markets_gain`: over days 6841-7200, every good whose autarky gap G exceeds the friction band (1 + margin + t(1 - iceberg)) over (1 - iceberg) of its route from the cheaper market has a smaller G than in the autarky run; each market's real GDP, its own C+G deflated by a Laspeyres index weighted by the autarky run's day-1 traded quantities there, exceeds the autarky run's; each market exports",
@@ -453,7 +460,7 @@
           "D13: R-N10's cold bench before and after, with trade in two_states; the Benchmark regression check (Risk R4)"
         ]
       },
-      "estimate": { "optimistic": 3, "likely": 5, "pessimistic": 10 },
+      "estimate": { "optimistic": 1.8, "likely": 3.8, "pessimistic": 13.45 },
       "blocked_on_decision": ""
     },
     {
@@ -461,7 +468,8 @@
       "title": "M5-6: Construction recipes and project state",
       "summary": "A producer type in data/production.toml may give an expansion recipe (step slots, construction goods per slot); every type in data/ gets one with Design 3.7's values. Projects and their per-good needs are sparse tables keyed by producer row (S4), with no project_budget column (the reserve is derived, C11) and at most one project per producer. Nothing starts a project yet, so no results change.",
       "depends_on": [
-        "m5-1"
+        "m5-1",
+        "m5-2"
       ],
       "requirements": [
         "R-F22",
@@ -506,12 +514,12 @@
           "production.toml `expansion = { inputs = { <good> = <units per slot> }, step = <slots> }` as `ExpansionEntry { inputs: BTreeMap<String, Dec>, step: u32 }`, serde default None (Design 3.4), checked by R-D7",
           "data/production.toml: a recipe for every producer type, with Design 3.7's values (step 400 for farms; 200 for cotton, fisheries, lumber camps and mines; 100 for vineyards and every workshop and mill; tools 0.02 and timber 0.05 per slot, plus steel 0.02 for mines, mills and tool works); scenarios/mini_valley/defs/production.toml gains none (R-F59)",
           "`Projects { producer: Vec<u32>, slots: Vec<u32> }` (`World::projects`) and `ProjectNeeds { producer: Vec<u32>, good: Vec<u16>, remaining: Vec<Fixed> }` (`World::project_needs`), sorted and unique by producer and by (producer, good) (S4, R-D11); `World::start_project(&mut self, producer: usize, slots: u32)` adding one need row per recipe good with need = per_slot.mul_ceil(Fixed::from_int(slots)), panicking if the producer has a project or its type no recipe (Design 4.1)",
-          "state_hash's projects and project-needs blocks, each only when it has rows (PL-18); snapshot blocks; SNAPSHOT_FORMAT raised by one (3 in the planned queue); `replicate_with_nations` copies both with producer offsets; `random_world` gains recipes on random types",
+          "state_hash's projects and project-needs blocks, each only when it has rows (PL-18); snapshot blocks; SNAPSHOT_FORMAT raised by one (3: after M5-2's 2 in the chain); `replicate_with_nations` copies both with producer offsets; `random_world` gains recipes on random types",
           "Docs: DATA_FORMAT.md's production.toml expansion; BACKEND_SCHEMA.md's Projects and ProjectNeeds; INVESTMENT.md's recipes and project state built, with project_budget and producer_types.toml corrected to the derived reserve and production.toml (C11); DATA_MODEL_M5_M6.md notes PROJECT and PROJECT_NEED moved; MILESTONE_5's M5-6 row ticked, naming production.toml"
         ],
         "consumes": [
           "M5-1's place as the DAG's root (S8), so its bench baseline is main's engine",
-          "If present (M5-2 precedes it in the planned queue): the snapshot round trip's merchant rows, `crafted_merchants_and_projects_are_refused`, which this task creates if absent, and `replicas_copy_the_trade_and_investment_tables` from M5-1"
+          "M5-2 (before it in the chain, Baseline B2): the snapshot round trip's merchant rows and `crafted_merchants_and_projects_are_refused`, which it extends; M5-1's `replicas_copy_the_trade_and_investment_tables`"
         ],
         "acceptance_tests": [
           "crates/pax_data/tests/validation.rs `expansion_recipes_load` (data/'s recipes parse, one per type) and `bad_recipes_are_refused` (step 0, no input, an unknown good, units per slot not above 0)",
@@ -521,7 +529,7 @@
           "`pax_cli verify` for both scenarios with both golden.hashes unchanged (nothing starts a project before M5-7; empty tables are not hashed)"
         ]
       },
-      "estimate": { "optimistic": 2, "likely": 3, "pessimistic": 5 },
+      "estimate": { "optimistic": 1.2, "likely": 2.85, "pessimistic": 9.55 },
       "blocked_on_decision": ""
     },
     {
@@ -531,7 +539,8 @@
       "depends_on": [
         "m5-1",
         "m5-6",
-        "m5-11"
+        "m5-11",
+        "m5-3"
       ],
       "requirements": [
         "R-F24",
@@ -594,7 +603,7 @@
       ],
       "contract": {
         "provides": [
-          "`pax_engine::systems::investment` (new): `pub fn project_reserve(world: &World, producer: usize) -> Fixed` (PL-10, 0 without a project); `pub(crate) fn construction_orders(world: &World, input_budgets: &[Fixed]) -> Vec<BuyOrder>`; `pub(crate) fn deliver(world: &mut World, producer: usize, good: usize, units: Fixed)`; `pub struct Openings` with `pub fn count(world: &World) -> Openings` (available workers by unrest::working_members, S7), `pub fn unclaimed(&self, world: &World, province: u32, profession: usize) -> u64` and `pub fn claim(&mut self, world: &World, province: u32, profession: usize, slots: u32)` (PL-8); `pub fn run_month_end(world: &mut World, layout: &PopLayout) -> InvestmentMonth`, here completing projects (PL-10) then starting expansions (PL-9) in step 6c's order (C19) (Design 4.1)",
+          "`pax_engine::systems::investment` (new): `pub fn project_reserve(world: &World, producer: usize) -> Fixed` (PL-10, 0 without a project); `pub(crate) fn construction_orders(world: &World, input_budgets: &[Fixed]) -> Vec<BuyOrder>`; `pub(crate) fn deliver(world: &mut World, producer: usize, good: usize, units: Fixed)`; `pub struct Openings` with `pub fn count(world: &World) -> Openings` (available workers by unrest::working_members, S7), `pub fn unclaimed(&self, world: &World, province: u32, profession: usize) -> u64` and `pub fn claim(&mut self, world: &World, province: u32, profession: usize, slots: u32)` (PL-8); `pub fn run_month_end(world: &mut World, layout: &PopLayout) -> InvestmentMonth`, here completing projects (PL-10) then starting expansions (PL-9) in step 6c's order (C19) (Design 4.1); tick.rs takes one fresh `World::pop_layout()` after politics (crates/pax_engine/src/tick.rs:105; mobility, migration and retraining may have appended rows, :96-104) and passes it to `investment::run_month_end`, the first step-6c function in the queue to take a layout: M5-12 later inserts `unrest::riot` between the two, and M5-4 and M5-8 reuse that layout (Design 1.2, Baseline B8)",
           "`market::Buyer::Project(usize)` (a producer row): construction orders listed after producers' inputs, each budget per PL-10 so input and construction budgets never exceed cash (market.rs:794 holds); settlement debits the producer, asserts its cash isn't negative and calls `investment::deliver` after the buy loop; `MarketOutcome::construction_spending: Vec<Fixed>` per market",
           "`firms::pay_wages_and_dividends` (signature unchanged): the dividend reserve is bill times reserve_days plus `investment::project_reserve` (PL-11, R-F27)",
           "`defs::InvestmentRules { enabled: bool, profit_margin: Fixed }` and `Rules::investment`; required `[investment]` keys (R-D5): data/rules.toml true and 0.1; mini_valley false (R-F59); the two Rules literals gain them",
@@ -602,13 +611,14 @@
           "`pax_cli bench --warmup DAYS` (`Flag::Warmup`, bench only): runs the scenario with its command log that many days before replicating it; `bench(world, log, days, scale, regions, warmup)` (Design 4.3); `replicate_with_nations` copies the warm state: day, prices, POPs' life_needs and militancy, producers' employed, value_added_avg and input_stock (R-N25)",
           "The debug goods check gains projects: each project's needs fall by exactly what settlement delivered (R-N4); `random_world` gains investment on with a low margin",
           "two_states' golden.hashes re-recorded (projects start at its first month end, Design 8.5) with the reason; every economic_bands.rs assertion kept or moved with its reason; content_stability.rs and the release scenario tests on main kept green",
-          "Docs: D4 row 3's 'construction projects D27', row 6c written with 'Investment: complete projects, start expansions (D27)', and the households bullet's last sentence; D6's dividends gain the project reserve (Design 2.3); ARCHITECTURE.md's game loop and systems/investment.rs; BACKEND_SCHEMA.md (investment on the tree's systems/ line, InvestmentReport); DATA_FORMAT.md [investment]; INVESTMENT.md expansion and construction built; ECONOMY_SYSTEM.md dividends; ONBOARDING.md bench --warmup and report columns; MILESTONE_5's M5-7 row ticked"
+          "Levers (Baseline B9): if economic_bands.rs, content_stability.rs or unrest_two_states.rs fails, this task may tune `investment.profit_margin` within R-D5 and, for R-F40's window, the strike keys within R-D6, and move a band only under the bands clause with its reason; the recipes stay M5-6's values until M5-10; a bound is never relaxed: when no setting of its levers keeps every scenario test green, it reports blocked-on-decision, naming the bound, the values tried and what each gave, for the maintainer",
+          "Docs: D4 row 3's 'construction projects D27', row 6c written with 'Investment: complete projects, start expansions (D27)', and the households bullet's last sentence; D6's dividends gain the project reserve (Design 2.3); ARCHITECTURE.md's game loop and systems/investment.rs; tick.rs's module table (crates/pax_engine/src/tick.rs:7-16), which restates D4's order, in the same rows; BACKEND_SCHEMA.md (investment on the tree's systems/ line, InvestmentReport); DATA_FORMAT.md [investment]; INVESTMENT.md expansion and construction built; ECONOMY_SYSTEM.md dividends; ONBOARDING.md bench --warmup and report columns; MILESTONE_5's M5-7 row ticked"
         ],
         "consumes": [
           "M5-6: `ExpansionRecipe`, `ProducerTypeDef::expansion`, `Projects`, `ProjectNeeds`, `World::start_project`",
           "M5-11: `unrest::working_members` and the strike rules, so available workers exclude strikers from the first commit (S7)",
           "M5-1: the bench baseline (R-N26)",
-          "In the planned queue M5-2 and M5-3 precede it: their merchants, cargo and tariffs are among the tables the R-N25 replica test sets off their defaults"
+          "M5-2 and M5-3 (before it in the chain, Baseline B2): their merchants, cargo and tariffs are among the tables the R-N25 replica test sets off their defaults, and M5-3's `Buyer` and settlement arms, beside which `Buyer::Project` goes"
         ],
         "acceptance_tests": [
           "crates/pax_engine/tests/investment.rs `no_project_without_profit`, `no_project_without_spare_workers`, `no_project_for_strikers`, `no_project_without_cash` and `a_project_starts_when_all_hold`: each PL-9 condition alone",
@@ -621,16 +631,17 @@
           "D13 in Evidence: R-N10's cold 29 days, R-N26's five 30-day runs before and after with the month-end day's medians against M5-1's baseline, and R-N27's warmed run with a warm-up long enough that a project runs; a median rise above 20% explained in the PR"
         ]
       },
-      "estimate": { "optimistic": 5, "likely": 8, "pessimistic": 14 },
+      "estimate": { "optimistic": 2.15, "likely": 5.05, "pessimistic": 12.95 },
       "blocked_on_decision": ""
     },
     {
       "id": "m5-8",
       "title": "M5-8: Founding new producers, and FoundProducer",
-      "summary": "At each month end with investment enabled, a province whose pool has step unclaimed unemployed workers and passes the profit test gets a new producer of capacity 0 with a project, funded by one largest-remainder transfer from the market's owner pool for its type (PL-12, C14). The state founds by Command::FoundProducer, which only records a request that the next month end funds from the treasury or drops with a reason (PL-13, C15); state producers pay their treasury (PL-17). The command lands end to end: engine, logs and saves (SAVE_FORMAT 3), wire (protocol 1.8), server (C27).",
+      "summary": "At each month end with investment enabled, a province whose pool has step unclaimed unemployed workers and passes the profit test gets a new producer of capacity 0 with a project, funded by one largest-remainder transfer from the market's capitalists, the profession `investment.founder` names, who found only the producer types they own (PL-12, C14 as restated: D27's words read literally). The state founds by Command::FoundProducer, which only records a request that the next month end funds from the treasury or drops with a reason (PL-13, C15); state producers pay their treasury (PL-17). The command lands end to end: engine, logs and saves (SAVE_FORMAT 3), wire (protocol 1.8), server (C27).",
       "depends_on": [
         "m5-4",
-        "m5-7"
+        "m5-7",
+        "m5-5"
       ],
       "requirements": [
         "R-F28",
@@ -686,6 +697,7 @@
         "crates/pax_data/src/bench.rs",
         "crates/pax_data/tests/saves.rs",
         "crates/pax_data/tests/validation.rs",
+        "crates/pax_data/tests/economic_bands.rs",
         "crates/pax_cli/src/report.rs",
         "schemas/common.fbs",
         "crates/pax_protocol/src/generated",
@@ -708,6 +720,7 @@
         "docs/DATA_FORMAT.md",
         "docs/NETWORK_PROTOCOL.md",
         "docs/INVESTMENT.md",
+        "docs/DATA_MODEL_M5_M6.md",
         "docs/ECONOMY_SYSTEM.md",
         "docs/ONBOARDING.md",
         "docs/MILESTONE_5.md",
@@ -716,43 +729,44 @@
       "contract": {
         "provides": [
           "`Producers::owner_nation: Vec<Option<u32>>`, pushed None by `push_producer` (NewProducer unchanged), set only on rows the investment step founds for a nation; hashed with M5-4's `option_u32s` under its tag only when some row is Some (PL-18); check_tables R-D12 with S26's M5 check; a snapshot column",
-          "`FoundingRequests { nation: Vec<u32>, province: Vec<u32>, producer_type: Vec<u16> }` (`World::founding_requests`), in the order they applied and emptied at every month end (R-D16); hashed when it has rows; a snapshot block; SNAPSHOT_FORMAT raised by one (7 in the planned queue)",
-          "crates/pax_engine/src/systems/investment.rs: `pub fn founding_cost(world: &World, province: u32, producer_type: usize) -> Option<Fixed>` (PL-12's F), `pub fn owner_funds(world: &World, layout: &PopLayout, market: usize, profession: usize) -> Vec<(u32, Fixed)>` and `pub fn take_funds(world: &mut World, funds: &[(u32, Fixed)], amount: Fixed) -> bool` (PL-8, alloc::allocate); `run_month_end` gains the state's requests after completion and depreciation (PL-13) and owner founding after expansions (PL-12), in C19's order, reporting each in `InvestmentMonth::foundings` as `Founding { province: u32, producer_type: u16, funder: Funder, cost: Fixed, outcome: FoundingOutcome }` with `enum Funder { Owners, Nation(u32) }` and `enum FoundingOutcome { Founded { producer: u32 }, AlreadyFounded, Unfunded, NoWorkers }`",
+          "`FoundingRequests { nation: Vec<u32>, province: Vec<u32>, producer_type: Vec<u16> }` (`World::founding_requests`), in the order they applied and emptied at every month end (R-D16); hashed when it has rows; a snapshot block; SNAPSHOT_FORMAT raised by one (7: after M5-9's 6 in the chain)",
+          "crates/pax_engine/src/systems/investment.rs: `pub fn founding_cost(world: &World, province: u32, producer_type: usize) -> Option<Fixed>` (PL-12's F), `pub fn owner_funds(world: &World, layout: &PopLayout, market: usize, profession: usize) -> Vec<(u32, Fixed)>` and `pub fn take_funds(world: &mut World, funds: &[(u32, Fixed)], amount: Fixed) -> bool` (PL-8, alloc::allocate); `run_month_end` gains the state's requests after completion and depreciation (PL-13) and owner founding after expansions (PL-12), whose candidates are only the producer types whose owner profession is `rules.investment.founder`, funded through `owner_funds(world, layout, market, founder)` with the fresh layout M5-7 passes (B8), in C19's order, reporting each in `InvestmentMonth::foundings` as `Founding { province: u32, producer_type: u16, funder: Funder, cost: Fixed, outcome: FoundingOutcome }` with `enum Funder { Owners, Nation(u32) }` and `enum FoundingOutcome { Founded { producer: u32 }, AlreadyFounded, Unfunded, NoWorkers }`",
           "`firms::pay_wages_and_dividends`: a producer with owner_nation Some(n) pays its whole dividend to treasury n, D15's withholding reaching the same treasury, whether or not owner POPs live in its market (PL-17, R-F30)",
-          "`InvestmentRules::investor_reserve_days: u32` (R-D5): data/rules.toml 5; `random_world` gains random FoundProducer commands where commands apply and investor_reserve_days 1",
+          "`InvestmentRules::{investor_reserve_days: u32, founder: ProfessionId}` (R-D5): data/rules.toml 5 and \"capitalist\", scenarios/mini_valley/defs/rules.toml \"capitalist\"; the two Rules literals gain both; `random_world` gains random FoundProducer commands where commands apply, investor_reserve_days 1 and founder its capitalist profession",
           "`Command::FoundProducer { nation: usize, province: u32, producer_type: usize }` and `CommandError::{UnknownProvince(u32), UnknownProducerType(usize), ForeignProvince { nation: usize, province: u32 }, NoExpansionRecipe(usize)}`; `World::validate` in PL-13's order reading only definitions and topology (R-D13); `World::apply` appends a founding request and nothing else",
           "pax_data: CommandText's province and producer_type; `found_producer` (nation, province, producer_type) in commands.toml and saves; SAVE_FORMAT 3 (Design 3.4)",
           "Wire, by appending only: `table FoundProducer { nation: uint; province: uint = null; producer_type: uint = null; }` appended to `union Command`; `CommandError` values UnknownProvince 9, UnknownProducerType 10, ForeignProvince 11, NoExpansionRecipe 12 (S11); PROTOCOL_MINOR 8; `WireCommand::FoundProducer { nation: u32, province: Option<u32>, producer_type: Option<u32> }` with its arms in to_engine, nation_of and error_to_wire; client/pax_keys.gd regenerated; the server test client gains `found_producer`; hostile.rs's generator sends FoundProducer with fields absent or out of range",
           "Report column `founded`; `replicate_with_nations` copies owner_nation and founding requests; the R-N25 replica test gains a producer's owner_nation and a founding request",
-          "two_states' golden.hashes re-recorded only if its owners found a producer (Design 8.5), with the reason; bands, content_stability.rs and the scenario tests on main kept green",
-          "Docs: D4 row 6c's 'found the producers the state asked for' and 'found producers for owners'; D6's dividends clause for the state's producers, the founding bullet and the ownership bullet's producers; D21's FoundProducer parts; D24's FoundProducer sentence (Design 2.3); DATA_FORMAT.md found_producer, save format 3, investor_reserve_days; NETWORK_PROTOCOL.md sections 4, 5 and 8 (1.8); INVESTMENT.md founding built, state_owned corrected to owner_nation (C11); BACKEND_SCHEMA.md; ECONOMY_SYSTEM.md; ONBOARDING.md; MILESTONE_5's M5-8 row ticked"
+          "two_states' golden.hashes re-recorded only if anything is founded, with the reason, which Design 3.7's measurements don't expect: expansion claims the waiting workers first, and the lowland capitalists can't fund the types they own (Design 8.5); bands, content_stability.rs and the scenario tests on main kept green. Levers (Baseline B9): `investor_reserve_days` within R-D5 and, for R-F40's window, the unrest keys within R-D6; never `founder`, which names D27's capitalists; a bound is never relaxed: when no setting of its levers keeps every scenario test green, it reports blocked-on-decision, naming the bound, the values tried and what each gave, for the maintainer",
+          "Docs: D4 row 6c's 'found the producers the state asked for' and 'found producers for owners'; D6's dividends clause for the state's producers, the founding bullet in D27's words (\"from the market's capitalists ... or, by FoundProducer, from the nation's treasury\", Design 2.3) and the ownership bullet's producers; D21's FoundProducer parts; D24's FoundProducer sentence (Design 2.3); DATA_FORMAT.md found_producer, save format 3, investor_reserve_days and founder; tick.rs's module table (crates/pax_engine/src/tick.rs:7-16), which restates D4's order, in the same rows; DATA_MODEL_M5_M6.md notes PRODUCER.owner_nation moved to BACKEND_SCHEMA.md; NETWORK_PROTOCOL.md sections 4, 5 and 8 (1.8); INVESTMENT.md founding built, its funder table saying that the market's capitalists (investment.founder) found only the types they own, and state_owned corrected to owner_nation (C11, C14); BACKEND_SCHEMA.md; ECONOMY_SYSTEM.md; ONBOARDING.md; MILESTONE_5's M5-8 row ticked"
         ],
         "consumes": [
           "M5-7: `Openings` (count, unclaimed, claim), `run_month_end`, `project_reserve`, `Buyer::Project`, `InvestmentRules`, `InvestmentMonth`, `money_conserved_through_investment`, `a_replica_of_one_region_hashes_like_its_base`",
           "M5-6: `World::start_project`",
-          "M5-4 (Baseline B3): the month end's fresh layout, `StateHasher::option_u32s`, the ownership bullet's merchants' part; through M5-3, `CommandText`, `read_format`, SAVE_FORMAT 2, PROTOCOL_MINOR 7 and UnknownGood 8, which this task extends",
+          "M5-7: the fresh month-end layout that tick.rs passes to step 6c (Baseline B8); M5-4 (Baseline B3): `StateHasher::option_u32s`, the ownership bullet's merchants' part; through M5-3, `CommandText`, `read_format`, SAVE_FORMAT 2, PROTOCOL_MINOR 7 and UnknownGood 8, which this task extends; M5-5 (before it in the chain): two_states' trade, which its scenario tests run with",
           "M5-1: the bench baseline (R-N26)"
         ],
         "acceptance_tests": [
           "crates/pax_engine/tests/commands.rs `found_producer_is_validated`: unknown nation, province and producer type, a province outside the nation's markets and a type without a recipe are refused; a refused command changes nothing",
-          "crates/pax_engine/tests/investment.rs `owners_found_a_producer_where_workers_wait`, `founding_moves_exactly_its_cost`, `a_request_founds_at_the_month_end_when_funded`, `an_unfunded_request_is_dropped`, `state_producers_pay_their_treasury`, `requests_are_answered_at_the_month_end`",
-          "crates/pax_data/tests/saves.rs `a_founding_logged_with_a_full_treasury_loads` and `new_commands_round_trip_through_a_save` gains found_producer; validation.rs `investment_rules_are_checked` gains investor_reserve_days",
-          "crates/pax_data/src/snapshot.rs: the round trip applies a FoundProducer and sets one producer's owner_nation to its market's nation before encoding, and the hundred days after it answer the request at a month end on both worlds",
+          "crates/pax_engine/tests/investment.rs `owners_found_a_producer_where_workers_wait` (a type owned by `investment.founder`), `owners_found_only_the_types_they_own` (where workers wait for a type owned by another profession, owners found nothing, and a FoundProducer for it founds it; C14), `founding_moves_exactly_its_cost`, `a_request_founds_at_the_month_end_when_funded`, `an_unfunded_request_is_dropped`, `state_producers_pay_their_treasury`, `requests_are_answered_at_the_month_end`",
+          "crates/pax_data/tests/saves.rs `a_founding_logged_with_a_full_treasury_loads` and `new_commands_round_trip_through_a_save` gains found_producer; validation.rs `investment_rules_are_checked` gains investor_reserve_days and founder (an unknown profession refused)",
+          "crates/pax_data/src/snapshot.rs: the round trip applies a FoundProducer and sets one producer's owner_nation to its market's nation before encoding, and the hundred days after it answer the request at a month end on both worlds; `crafted_merchants_and_projects_are_refused` refuses a producer whose owner_nation is set where its market has another nation or none, or names a nation that doesn't exist, such as Some(999) (R-D12), and a founding request naming an unknown province or a producer type without a recipe (R-D16, R-N17); crates/pax_data/src/bench.rs: `replicas_copy_the_trade_and_investment_tables` and `a_replica_of_one_region_hashes_like_its_base` gain a producer's owner_nation and a founding request (R-N12, R-N25)",
           "crates/pax_server/tests/session.rs `new_commands_are_checked_in_order` gains FoundProducer (missing province Malformed; another nation's NotPermitted; a foreign province ForeignProvince); session_replay.rs submits a FoundProducer and still replays to the server's final state hash",
           "crates/pax_protocol/tests/roundtrip.rs `found_producer`",
           "crates/pax_engine/tests/conservation.rs `money_conserved_through_investment` counts foundings by owners, foundings by command and state-owned dividends",
           "crates/pax_cli/src/report.rs gains `founded`; D13: R-N26's five runs before and after against M5-1's baseline"
         ]
       },
-      "estimate": { "optimistic": 5, "likely": 8, "pessimistic": 14 },
+      "estimate": { "optimistic": 2.15, "likely": 5.05, "pessimistic": 12.95 },
       "blocked_on_decision": ""
     },
     {
       "id": "m5-9",
       "title": "M5-9: Capacity depreciation",
-      "summary": "A producer with a recipe and no project whose employment has stayed below capacity times (1 - slack) for idle_months_before_shrink consecutive month ends loses up to step slots, never below its employment (PL-14, C18). The counter is a new producer column hashed only once a row differs from 0 (PL-18), so mini_valley's hashes hold. two_states is re-recorded if anything shrinks; its recalibration, if needed, is M5-10's (S27).",
+      "summary": "A producer with a recipe and no project whose employment has stayed below capacity times (1 - slack) for idle_months_before_shrink consecutive month ends loses up to step slots, never below its employment (PL-14, C18). The counter is a new producer column hashed only once a row differs from 0 (PL-18), so mini_valley's hashes hold. two_states is re-recorded if anything shrinks; its levers are its two keys (B9), and investment's wider recalibration is M5-10's (S27).",
       "depends_on": [
-        "m5-7"
+        "m5-7",
+        "m5-4"
       ],
       "requirements": [
         "R-F31",
@@ -786,6 +800,7 @@
         "crates/pax_data/src/snapshot.rs",
         "crates/pax_data/src/bench.rs",
         "crates/pax_data/tests/validation.rs",
+        "crates/pax_data/tests/economic_bands.rs",
         "crates/pax_cli/src/report.rs",
         "crates/pax_engine/src/tick.rs",
         "data/rules.toml",
@@ -796,32 +811,34 @@
         "docs/BACKEND_SCHEMA.md",
         "docs/DATA_FORMAT.md",
         "docs/INVESTMENT.md",
+        "docs/DATA_MODEL_M5_M6.md",
         "docs/ONBOARDING.md",
         "docs/MILESTONE_5.md",
         "docs/workbooks/m5"
       ],
       "contract": {
         "provides": [
-          "`Producers::idle_months: Vec<u16>`, pushed 0 by push_producer; hashed under its tag only when some row is not 0 (PL-18); a snapshot column; SNAPSHOT_FORMAT raised by one (6 in the planned queue); copied by `replicate_with_nations`",
-          "Depreciation in `investment::run_month_end`, after completions and before expansions, where C19 also puts the state's requests, which M5-8 adds after this task in the queue (C19, PL-14): idle when employed is below floor(capacity times (1 - slack)) on the month-end day; capacity falls by up to step, never below employment, in i64; a producer with a project is skipped (C18); reported as `Depreciation { producer: u32, removed: u32 }` in `InvestmentMonth::depreciated`",
+          "`Producers::idle_months: Vec<u16>`, pushed 0 by push_producer; hashed under its tag only when some row is not 0 (PL-18); a snapshot column; SNAPSHOT_FORMAT raised by one (6: after M5-4's 5 in the chain); copied by `replicate_with_nations`",
+          "Depreciation in `investment::run_month_end`, after completions and before expansions, where C19 also puts the state's requests, which M5-8 adds after this task in the chain (C19, PL-14); the step changes no stock and no employment (R-F31): idle when employed is below floor(capacity times (1 - slack)) on the month-end day; capacity falls by up to step, never below employment, in i64; a producer with a project is skipped (C18); reported as `Depreciation { producer: u32, removed: u32 }` in `InvestmentMonth::depreciated`",
           "`InvestmentRules::{slack: Fixed, idle_months_before_shrink: u32}` (R-D5): data/rules.toml 0.25 and 12; `random_world` gains slack 0.5 and idle_months_before_shrink 1",
           "Report column `shrunk`; the R-N25 replica test gains an idle_months of 1",
           "two_states' golden.hashes re-recorded if anything shrinks (Design 3.7: the half-empty peaks mines), with the reason; bands, content_stability.rs and the scenario tests on main kept green",
-          "Docs: D4 row 6c's 'shrink idle capacity' (Design 2.3); DATA_FORMAT.md's two keys; INVESTMENT.md depreciation built; BACKEND_SCHEMA.md; ONBOARDING.md's report columns; MILESTONE_5's M5-9 row ticked"
+          "Levers (Baseline B9): if economic_bands.rs, content_stability.rs or unrest_two_states.rs fails, this task may tune `slack` and `idle_months_before_shrink` within R-D5, and, for R-F40's window, the unrest keys within R-D6, and move a band only under the bands clause with its reason; a bound is never relaxed: when no setting of its levers keeps every scenario test green, it reports blocked-on-decision, naming the bound, the values tried and what each gave, for the maintainer",
+          "Docs: D4 row 6c's 'shrink idle capacity' (Design 2.3); DATA_FORMAT.md's two keys; tick.rs's module table (crates/pax_engine/src/tick.rs:7-16), which restates D4's order, in the same rows; INVESTMENT.md depreciation built; DATA_MODEL_M5_M6.md notes PRODUCER.idle_months moved to BACKEND_SCHEMA.md; BACKEND_SCHEMA.md; ONBOARDING.md's report columns; MILESTONE_5's M5-9 row ticked, its \"verify inventory stability\" naming `a_shrink_leaves_stocks_stable`"
         ],
         "consumes": [
           "M5-7: `investment::run_month_end`, `InvestmentRules`, `InvestmentMonth`, `a_replica_of_one_region_hashes_like_its_base`",
           "M5-1: the bench baseline (R-N26)"
         ],
         "acceptance_tests": [
-          "crates/pax_engine/tests/investment.rs `idle_capacity_shrinks` and `capacity_in_use_never_does`",
+          "crates/pax_engine/tests/investment.rs `idle_capacity_shrinks`, `capacity_in_use_never_does`, and `a_shrink_leaves_stocks_stable` (R-F31, the milestone row's \"inventory stability\"): on the shrink's month end every producer's output and input stocks and employment are what they were before step 6c, and over the next 60 days the shrunk producer's output stock stays within max(its stock then, target_stock_days × output_per_worker × capacity) and each input stock within max(its stock then, a.mul_ceil(output_per_worker × capacity))",
           "crates/pax_engine/src/world.rs unit `a_new_column_is_hashed_once_it_differs`: one producer's idle_months set to 1 changes the hash, and set back to 0 restores it",
           "crates/pax_data/tests/validation.rs `investment_rules_are_checked` gains slack and idle_months_before_shrink",
           "Snapshot round trip with one producer's idle_months off 0; the replica tests gain the column",
           "crates/pax_cli/src/report.rs gains `shrunk`; D13: R-N26's five runs before and after against M5-1's baseline; economic_bands.rs and content_stability.rs pass"
         ]
       },
-      "estimate": { "optimistic": 2, "likely": 3.5, "pessimistic": 6 },
+      "estimate": { "optimistic": 1.2, "likely": 2.85, "pessimistic": 9.55 },
       "blocked_on_decision": ""
     },
     {
@@ -834,7 +851,8 @@
         "m5-8",
         "m5-9",
         "m5-12",
-        "m5-16"
+        "m5-16",
+        "m5-14"
       ],
       "requirements": [
         "R-F33",
@@ -855,12 +873,12 @@
       "contract": {
         "provides": [
           "crates/pax_data/tests/growth.rs (new, release only) `investment_grows_two_states`: two 7,200-day runs of two_states with its command log, investment.enabled true and false in the same build; on day 7200 total capacity exceeds 253,500 slots; real GDP over years 16-20, pax_cli report's C+G deflated by the day-1 Laspeyres basket (crates/pax_cli/src/report.rs:7-11) computed from the day reports, is at least 1.001 times the baseline's; the units of tools, timber and steel traded over the 20 years each exceed the baseline's; unemployment among worker professions on day 7200 is at most 2%",
-          "If it fails: a recalibration of Design 3.7's investment and recipe values within R-D5 and R-D7, two_states re-recorded with the reason, every scenario test kept green; a bound is never relaxed, and a recalibration that can't meet it is reported blocked",
-          "Docs: INVESTMENT.md's acceptance tests with the measured figures (capacity, real GDP against the baseline, construction goods traded, unemployment); MILESTONE_5's M5-10 row ticked with them"
+          "If it fails: a recalibration of Design 3.7's investment and recipe values within R-D5 and R-D7 (never `investment.founder`), and, if that breaks R-F40's window, the unrest keys within R-D6 (Baseline B9); two_states re-recorded with the reason, every scenario test kept green; a broken R-F20 that these levers can't restore, or an R-F33 bound they can't meet, is reported blocked-on-decision, never relaxed",
+          "Docs: INVESTMENT.md's acceptance tests with the measured figures (capacity, real GDP against the baseline, construction goods traded, unemployment), and how much of the capacity added came from expansion and how much from founding, since the market's capitalists found only the types they own (C14); MILESTONE_5's M5-10 row ticked with them"
         ],
         "consumes": [
           "M5-7, M5-8, M5-9: expansion, founding and depreciation, and DayReport::investment",
-          "M5-5 and M5-16: trade and merchant entry in two_states; M5-11 and M5-12: strikes and riots; with them every result-changing task has landed (Baseline B1)"
+          "M5-5 and M5-16: trade and merchant entry in two_states; M5-11 and M5-12: strikes and riots; with them every result-changing task has landed (Baseline B1); M5-14 is its predecessor in the chain only (B2), changing no result"
         ],
         "acceptance_tests": [
           "crates/pax_data/tests/growth.rs (release) `investment_grows_two_states` passes",
@@ -868,15 +886,16 @@
           "`pax_cli verify` passes for both scenarios; mini_valley's golden.hashes unchanged"
         ]
       },
-      "estimate": { "optimistic": 2, "likely": 4, "pessimistic": 10 },
+      "estimate": { "optimistic": 1.2, "likely": 3.35, "pessimistic": 12.55 },
       "blocked_on_decision": ""
     },
     {
       "id": "m5-11",
       "title": "M5-11: Deterministic strikes",
-      "summary": "A POP above strike_threshold supplies only its working members, floor(size times (1 - s)) with s = min(1, strike_rate times (militancy - threshold)); the rest strike (PL-15). Labour supply, employment and the labour report follow, strikers being neither employed nor unemployed (C16). Strikers forgo wages: a pool's wages are split by alloc::allocate among its working members only (run decision 3, amending D6). D19's status sentence changes, its rule untouched (run decision 4, S20). two_states is re-recorded: the peaks' starving miners strike in the famine years (S18).",
+      "summary": "A POP above strike_threshold supplies only its working members, floor(size times (1 - s)) with s = min(1, strike_rate times (militancy - threshold)); the rest strike (PL-15). Labour supply, employment and the labour report follow, strikers being neither employed nor unemployed (C16). Strikers forgo wages: a pool's wages are split by alloc::allocate among its working members only (run decision 3, amending D6). D19's status sentence changes, its rule untouched (run decision 4, S20). two_states is re-recorded: the peaks' starving miners strike in the famine years (S18). Its levers, if a scenario test breaks, are the two strike keys (B9).",
       "depends_on": [
-        "m5-1"
+        "m5-1",
+        "m5-6"
       ],
       "requirements": [
         "R-F34",
@@ -942,7 +961,8 @@
           "crates/pax_data/tests/economic_bands.rs's `employed` helper (economic_bands.rs:90-93) sums the worker pools' employed, so strikers aren't counted as employed (Design 8.1)",
           "crates/pax_data/tests/unrest_two_states.rs (new, release only): R-F40's world, two_states' own log plus both nations' income tax at 0.40 on day 1080 and 0.12 on day 1800, with strikers in some province before day 1800 (M5-12 adds the riots)",
           "two_states' golden.hashes re-recorded (S18) with the reason; every economic_bands.rs assertion kept or moved with its reason; content_stability.rs passes; report column `strike%`",
-          "Docs: D4 row 1's 'strikes (D28), then', D6's liquidity sentence split among working members with 'Striking workers forgo wages.' (Design 2.3), D19's 'It has no effects yet' replaced by 'Its effects are strikes and riots (D28).' with Pops::militancy's rustdoc (S20); tick.rs's module table; ARCHITECTURE.md's game loop and systems/unrest.rs; BACKEND_SCHEMA.md (unrest on the tree's systems/ line, LabourReport::striking); DATA_FORMAT.md's strike keys; POLITICS_SYSTEM.md's militancy section; POP_SYSTEM.md and ECONOMY_SYSTEM.md's wage split; REBELLIONS.md stage 1 built; ONBOARDING.md's money rule names credit_pops_by_working; MILESTONE_5's M5-11 row ticked"
+          "Levers (Baseline B9): if economic_bands.rs, content_stability.rs or unrest_two_states.rs's strikers part fails, this task may tune `strike_threshold` and `strike_rate` within R-D6, keeping R-F40's strikers before day 1800, and move a band only under the bands clause with its reason (R-N22); a bound is never relaxed: when no setting of its levers keeps every scenario test green, it reports blocked-on-decision, naming the bound, the values tried and what each gave, for the maintainer",
+          "Docs: D4 row 1's 'strikes (D28), then', D6's liquidity sentence split among working members with 'Striking workers forgo wages.' (Design 2.3), D19's 'It has no effects yet' replaced by 'Its effects are strikes and riots (D28).' with Pops::militancy's rustdoc (S20); tick.rs's module table; ARCHITECTURE.md's game loop and systems/unrest.rs; BACKEND_SCHEMA.md (unrest on the tree's systems/ line, LabourReport::striking); DATA_FORMAT.md's strike keys; POLITICS_SYSTEM.md's militancy section; POP_SYSTEM.md and ECONOMY_SYSTEM.md's wage split; REBELLIONS.md stage 1 built; ONBOARDING.md's money rule names credit_pops_by_working; MILESTONE_5's M5-11 row ticked, naming the test of each of its three checks (output drops: strikes_cut_labour_and_output; wage floor consistency: wages_keep_their_floor_while_workers_strike; money: money_conserved_through_unrest)"
         ],
         "consumes": [
           "M5-1's place as the DAG's root (S8), so its bench baseline is main's engine",
@@ -950,6 +970,7 @@
         ],
         "acceptance_tests": [
           "crates/pax_engine/tests/unrest.rs (created) `strikes_cut_labour_and_output` and `strikers_get_no_wage` (a pool whose one POP strikes wholly gets the whole wage split among the others)",
+          "crates/pax_engine/tests/unrest.rs `wages_keep_their_floor_while_workers_strike` (R-F35, the milestone row's \"wage floor consistency\"): at unchanged prices, `labor::assign_employment` and `firms::pay_wages_and_dividends` called directly for 60 days while part of a pool strikes; each producer's wage moves towards max(labor_share × value_added_avg ÷ employed, the floor) with employed excluding strikers, never falls below a floor it started at or above, and a producer whose whole pool strikes keeps its wage and pays 0",
           "crates/pax_engine/tests/labour_report.rs `strikers_are_neither_employed_nor_unemployed`, and its existing assertion becomes employed == min(workforce - striking, jobs) (labour_report.rs:21-22)",
           "crates/pax_data/tests/validation.rs `unrest_rules_are_checked` (created with the strike keys)",
           "crates/pax_data/tests/unrest_two_states.rs (release) `a_high_tax_causes_riots_that_end_when_it_falls`, its strikers part",
@@ -958,16 +979,17 @@
           "D13: R-N10's cold bench before and after against M5-1's baseline; `pax_cli verify` mini_valley unchanged"
         ]
       },
-      "estimate": { "optimistic": 3, "likely": 5, "pessimistic": 9 },
+      "estimate": { "optimistic": 1.8, "likely": 3.8, "pessimistic": 11.45 },
       "blocked_on_decision": ""
     },
     {
       "id": "m5-12",
       "title": "M5-12: Monthly riots and security transfers",
-      "summary": "At each month end, after militancy is updated, a province whose population-weighted militancy exceeds riot_threshold riots: each producer there loses riot_destruction of its output stock, destroyed, and its nation's treasury pays an automatic security transfer, riot_security_rate of the treasury before any province is paid times the province's share of the nation's people, split among its POPs by size (PL-16, C17). The transfer relieves militancy only through life needs (run decision 4, D19 unchanged). It creates the thread-count determinism test on R-F40's world (R-N6).",
+      "summary": "At each month end, after militancy is updated, a province whose population-weighted militancy exceeds riot_threshold riots: each producer there loses riot_destruction of its output stock, destroyed, and its POPs receive, split by size, the province's part of its nation's security budget: riot_security_rate of the treasury before any province is paid, split once by alloc::allocate over all of the nation's provinces by their people, the parts of provinces that don't riot staying in the treasury (PL-16, C17). The transfer relieves militancy only through life needs (run decision 4, D19 unchanged). It creates the thread-count determinism test on R-F40's world (R-N6).",
       "depends_on": [
         "m5-1",
-        "m5-11"
+        "m5-11",
+        "m5-7"
       ],
       "requirements": [
         "R-F37",
@@ -1005,6 +1027,7 @@
         "crates/pax_data/tests/validation.rs",
         "crates/pax_data/tests/unrest_two_states.rs",
         "crates/pax_data/tests/determinism.rs",
+        "crates/pax_data/tests/economic_bands.rs",
         "crates/pax_cli/src/report.rs",
         "data/rules.toml",
         "scenarios/mini_valley/defs/rules.toml",
@@ -1021,13 +1044,14 @@
       ],
       "contract": {
         "provides": [
-          "`pub fn riot(world: &mut World) -> Vec<RiotReport>` in systems/unrest.rs (PL-16), D4 step 6b after politics and before investment, grouping POP rows by province with `Groups::build` (S22); `RiotReport { province: u32, destroyed: Vec<(u16, Fixed)>, transfer: Fixed }`; `DayReport::riots`",
+          "`pub fn riot(world: &mut World) -> Vec<RiotReport>` in systems/unrest.rs (PL-16), D4 step 6b after politics and before investment, between M5-7's fresh layout and `investment::run_month_end` in tick.rs, grouping POP rows by province with `Groups::build` (S22); `RiotReport { province: u32, destroyed: Vec<(u16, Fixed)>, transfer: Fixed }`; `DayReport::riots`",
           "`PoliticsRules::{riot_threshold, riot_destruction, riot_security_rate}: Fixed`, each in [0, 1] (R-D6): data/rules.toml 0.3, 0.2 and 0.01 (S18); mini_valley's riot_threshold 1; `random_world` gains riot_threshold 0.05",
-          "The transfer is credited by size and debited only if credited; a stateless province riots without one; no POP's militancy changes in the step (R-F38, R-F39)",
+          "The security budget B_n = T0_n.mul(riot_security_rate), T0_n the treasury before any province riots, is split once with `alloc::allocate_raw(B_n.raw(), [people of every province whose market belongs to n, in province order])`, D16's split (crates/pax_engine/src/systems/market.rs:441-447); a rioting province's part is credited to its POPs by size and debited from the treasury only if credited; the parts of provinces that don't riot stay in the treasury, so the treasury pays at most B_n, and exactly B_n when every province riots; a stateless province riots without a transfer; no POP's militancy changes in the step (R-F38, R-F39, C17)",
           "The debug goods check gains riots: output stocks fall by exactly the units reported (R-N4)",
           "crates/pax_data/tests/unrest_two_states.rs asserts riots before day 1800 and none at any month end from day 2520 to day 2880 (R-F40)",
-          "crates/pax_data/tests/determinism.rs (release) `a_world_that_trades_invests_and_riots_is_independent_of_thread_count` (created, since it precedes M5-5 in the planned queue; extended if M5-5 created it): R-F40's world and log through day 1800, identical state hashes every day at 1, 2, 3 and 8 threads, asserting strikers and a riot",
+          "crates/pax_data/tests/determinism.rs (release) `a_world_that_trades_invests_and_riots_is_independent_of_thread_count` (created here; M5-5, after it in the chain, adds merchant purchases): R-F40's world and log through day 1800, identical state hashes every day at 1, 2, 3 and 8 threads, asserting strikers and a riot",
           "Report column `riots`; two_states re-recorded only if one of its provinces riots under its own log (S18 measured none: 0.188 at most against 0.3), with the reason",
+          "Levers (Baseline B9): if unrest_two_states.rs, economic_bands.rs or content_stability.rs fails, this task may tune `riot_threshold`, `riot_destruction` and `riot_security_rate` within R-D6, and move a band only under the bands clause with its reason; a bound is never relaxed: when no setting of its levers keeps every scenario test green, it reports blocked-on-decision, naming the bound, the values tried and what each gave, for the maintainer",
           "Docs: D4 row 6b (Design 2.3) and tick.rs's module table; ARCHITECTURE.md's game loop; BACKEND_SCHEMA.md's RiotReport; DATA_FORMAT.md's riot keys; POLITICS_SYSTEM.md's riots; REBELLIONS.md stage 2 built, its unnamed transfer rule named riot_security_rate (C17); ONBOARDING.md's report columns; MILESTONE_5's M5-12 row ticked"
         ],
         "consumes": [
@@ -1035,14 +1059,14 @@
           "M5-1: the bench baseline (R-N26)"
         ],
         "acceptance_tests": [
-          "crates/pax_engine/tests/unrest.rs `riots_destroy_output_stock_never_money`, `the_security_transfer_is_exactly_what_the_treasury_pays`, `a_stateless_province_riots_without_a_transfer`, `the_riot_transfer_has_no_direct_relief` (militancy identical after the riot step and, for POPs already fully fed, identical a month later to a run with riot_security_rate 0)",
+          "crates/pax_engine/tests/unrest.rs `riots_destroy_output_stock_never_money`, `the_security_transfer_is_exactly_what_the_treasury_pays`, `a_stateless_province_riots_without_a_transfer`, `the_riot_transfer_has_no_direct_relief` (militancy identical after the riot step and, for POPs already fully fed, identical a month later to a run with riot_security_rate 0), and `when_every_province_riots_the_treasury_pays_the_whole_budget` (every province of a nation above the threshold, with populations whose shares don't divide the budget evenly: the transfers sum to exactly B_n and each is its allocate part, PL-16, C17)",
           "crates/pax_data/tests/validation.rs `unrest_rules_are_checked` gains the riot keys",
           "crates/pax_engine/tests/conservation.rs `money_conserved_through_unrest` counts riot transfers; `goods_are_accounted_exactly` covers riots",
           "crates/pax_data/tests/unrest_two_states.rs (release) `a_high_tax_causes_riots_that_end_when_it_falls` complete; crates/pax_data/tests/determinism.rs (release) `a_world_that_trades_invests_and_riots_is_independent_of_thread_count`, created here",
           "crates/pax_cli/src/report.rs gains `riots`; D13: R-N26's five runs before and after against M5-1's baseline"
         ]
       },
-      "estimate": { "optimistic": 3, "likely": 4.5, "pessimistic": 8 },
+      "estimate": { "optimistic": 1.8, "likely": 3.8, "pessimistic": 11.45 },
       "blocked_on_decision": ""
     },
     {
@@ -1123,7 +1147,7 @@
           "crates/pax_godot/tests/client.rs: the new encoders and decoders; CI's crate-boundary step (pax_godot links no engine crate); both golden.hashes unchanged"
         ]
       },
-      "estimate": { "optimistic": 5, "likely": 8, "pessimistic": 14 },
+      "estimate": { "optimistic": 2.15, "likely": 5.05, "pessimistic": 12.95 },
       "blocked_on_decision": ""
     },
     {
@@ -1131,7 +1155,8 @@
       "title": "M5-14: Godot trade and construction panels and the trade flow map mode",
       "summary": "The client gains a Trade tab (the selected market's routes with flows, merchants and tariffs, and per-mille tariff sliders for the player's nation) and a Construction tab (the province's projects, founding options with cost and workers, pending requests and the month end's results, with a Found button), subscribing as S30 says. Protocol 1.10 appends the TradeFlow map mode, each province's market's net imports by value (R-F47). The headless smoke test sets a tariff and founds a farm (R-F53).",
       "depends_on": [
-        "m5-13"
+        "m5-13",
+        "m5-16"
       ],
       "requirements": [
         "R-F44",
@@ -1189,7 +1214,7 @@
           "A manual look in the morning at the Trade and Construction tabs and the map mode (R-F49 to R-F52), listed for the maintainer in the report"
         ]
       },
-      "estimate": { "optimistic": 4, "likely": 7, "pessimistic": 13 },
+      "estimate": { "optimistic": 2.15, "likely": 5.55, "pessimistic": 14.95 },
       "blocked_on_decision": ""
     },
     {
@@ -1235,7 +1260,7 @@
         "provides": [
           "crates/pax_server/tests/session_replay.rs `a_saved_session_replays_to_the_servers_final_state` also sets a nation's income tax to 0.40 and runs long enough past it for a riot (R-F40's episode reached 0.3 within 360 days), saves, and `pax_cli replay` reaches the server's final state hash (R-N7), on Linux, Windows and macOS in CI",
           "crates/pax_data/tests/determinism.rs's thread-count test asserts merchant purchases, a running construction project, strikers and a riot by day 1800, adding a FoundProducer to its own log if the data starts no project by then (R-N6)",
-          "docs/PERFORMANCE.md: tick rows for two_states with M5's content at about 1M POP rows on 8 threads: R-N10's cold 29 days, R-N26's 30 days with the first month-end day's median and range over five runs, R-N27's warmed run with its warm-up, and R-N13's horizon build, each beside M5-1's baseline, keeping the history columns",
+          "docs/PERFORMANCE.md: tick rows for two_states with M5's content at about 1M POP rows on 8 threads: R-N10's cold 29 days, R-N26's 30 days with the first month-end day's median and range over five runs, R-N27's warmed run with its warm-up, and R-N13's horizon build, each beside M5-1's baseline, keeping the history columns; and the Tick table's other rows re-measured, since M5-3 and M5-7 change clear_markets for every world: mini_valley at 1M POP rows on one market and on 3,000 (its two D13 commands, ≈31 ms/day at M4-11) and the server's day (server_day_budget, 84.5 ms at M4-11), each beside its M4-11 figure",
           "MILESTONE_5's M5-15 row ticked; golden.hashes unchanged unless an earlier change is unrecorded, which is then a bug to explain"
         ],
         "consumes": [
@@ -1244,11 +1269,11 @@
         "acceptance_tests": [
           "crates/pax_server/tests/session_replay.rs passes with PAX_CLI_REQUIRED=1, and in CI's Windows and macOS determinism jobs",
           "crates/pax_data/tests/determinism.rs (release) `a_world_that_trades_invests_and_riots_is_independent_of_thread_count` passes with all four mechanisms asserted",
-          "R-N10, R-N26 and R-N27 each at most 100 ms/day; an overrun is reported, and a fix that needs D1's adaptive step as the default is blocked on that decision (Design 2.2, 8.4)",
+          "R-N10, R-N26 and R-N27 each at most 100 ms/day, and mini_valley's two rows too, a rise of more than 20% against M4-11's figure explained in the PR; an overrun is reported, and a fix that needs D1's adaptive step as the default is blocked on that decision (Design 2.2, 8.4)",
           "`python3 scripts/check_docs.py`; `pax_cli verify` for both scenarios"
         ]
       },
-      "estimate": { "optimistic": 2.5, "likely": 4, "pessimistic": 8 },
+      "estimate": { "optimistic": 1.2, "likely": 2.85, "pessimistic": 9.55 },
       "blocked_on_decision": ""
     },
     {
@@ -1257,7 +1282,8 @@
       "summary": "At each month end, after wind-ups, a route whose gap has been open at entry_months consecutive month ends and whose active merchants' cash can't buy a day of its capacity gets one new merchant, funded with the shortfall by one transfer from the origin market's private-owner POPs or else its commercial-owner POPs, never a chartered one (PL-7, C9, SSR item 3). A route-gap counter per route is new state, hashed, so two_states is re-recorded.",
       "depends_on": [
         "m5-4",
-        "m5-8"
+        "m5-8",
+        "m5-13"
       ],
       "requirements": [
         "R-F13",
@@ -1294,6 +1320,7 @@
         "crates/pax_data/src/snapshot.rs",
         "crates/pax_data/src/bench.rs",
         "crates/pax_data/tests/validation.rs",
+        "crates/pax_data/tests/economic_bands.rs",
         "crates/pax_cli/src/report.rs",
         "crates/pax_engine/src/tick.rs",
         "data/rules.toml",
@@ -1310,12 +1337,12 @@
       ],
       "contract": {
         "provides": [
-          "`RouteGaps { gap_months: Vec<u16> }` (`World::route_gaps`), one row per route in route order; `push_route` pushes 0; each value at most entry_months; hashed under its tag when it has rows (PL-18); a snapshot block; SNAPSHOT_FORMAT raised by one (8 in the planned queue); copied by `replicate_with_nations`",
+          "`RouteGaps { gap_months: Vec<u16> }` (`World::route_gaps`), one row per route in route order; `push_route` pushes 0; each value at most entry_months; hashed under its tag when it has rows (PL-18); a snapshot block; SNAPSHOT_FORMAT raised by one (8: after M5-8's 7 in the chain); copied by `replicate_with_nations`",
           "Entry in `trade::run_month_end` after wind-ups (PL-7): gap months updated at today's executed prices; candidates by largest relative gap, then route row; at most one merchant per route a month; funded through `investment::owner_funds` and `take_funds` from the origin market's private-owner pool, else its commercial-owner pool; never Chartered; each recorded as `MerchantFounding { merchant: u32, route: u32, kind: MerchantKind, capital: Fixed }` in `MerchantMonth::founded`",
           "`TradeRules::entry_months: u32` (R-D4): data/rules.toml 3; mini_valley 0, no dynamic entry (R-F59); `random_world` gains entry_months 1",
           "Report column `m.founded`; the R-N25 replica test gains a route's gap_months of 1",
-          "two_states' golden.hashes re-recorded (its route gaps are hashed from day 0, Design 8.5), with the reason; bands, content_stability.rs and the scenario tests on main kept green",
-          "Docs: D4 row 6c's 'found new merchants (D17)' (Design 2.3); DATA_FORMAT.md's entry_months; TRADE.md entry built; BACKEND_SCHEMA.md; ONBOARDING.md's report columns; MILESTONE_5's M5-16 row ticked, its '(Chartered by command)' reworded to say entry never charters (R-F16)"
+          "two_states' golden.hashes re-recorded (its route gaps are hashed from day 0, Design 8.5), with the reason; bands, content_stability.rs and the scenario tests on main kept green. Levers (Baseline B9): `entry_months` within R-D4 and, for R-F40's window, the unrest keys within R-D6; a bound is never relaxed: when no setting of its levers keeps every scenario test green, it reports blocked-on-decision, naming the bound, the values tried and what each gave, for the maintainer",
+          "Docs: D4 row 6c's 'found new merchants (D17)' (Design 2.3); DATA_FORMAT.md's entry_months; tick.rs's module table (crates/pax_engine/src/tick.rs:7-16), which restates D4's order, in the same rows; TRADE.md entry built; BACKEND_SCHEMA.md; ONBOARDING.md's report columns; MILESTONE_5's M5-16 row ticked, its '(Chartered by command)' reworded to say entry never charters (R-F16)"
         ],
         "consumes": [
           "M5-4: `trade::run_month_end` with winding up, `MerchantKind`, `MerchantMonth`, the owner rules",
@@ -1326,11 +1353,11 @@
           "crates/pax_engine/tests/trade.rs `a_persistent_gap_founds_a_merchant`, `entry_never_charters`, and `equal_prices_mean_no_trade_and_no_entry` extended to no entry",
           "crates/pax_engine/tests/conservation.rs `money_conserved_through_trade` counts merchant foundings",
           "crates/pax_data/tests/validation.rs `trade_rules_are_checked` gains entry_months",
-          "Snapshot round trip with a route's gap_months off 0; the replica tests gain route gaps",
+          "crates/pax_data/src/snapshot.rs: the round trip with a route's gap_months off 0, and `crafted_merchants_and_projects_are_refused` refuses route gaps of the wrong length (not one per route) or with a value above trade.entry_months (R-N17); crates/pax_data/src/bench.rs: `replicas_copy_the_trade_and_investment_tables` and `a_replica_of_one_region_hashes_like_its_base` gain route gaps (R-N12, R-N25)",
           "crates/pax_cli/src/report.rs gains `m.founded`; D13: R-N26's five runs before and after against M5-1's baseline; economic_bands.rs and content_stability.rs pass; inspection: no command charters merchants in command.rs or schemas/common.fbs (R-F60 stays won't)"
         ]
       },
-      "estimate": { "optimistic": 3, "likely": 4.5, "pessimistic": 8 },
+      "estimate": { "optimistic": 1.8, "likely": 3.8, "pessimistic": 11.45 },
       "blocked_on_decision": ""
     }
   ]
